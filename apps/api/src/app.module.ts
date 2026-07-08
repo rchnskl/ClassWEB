@@ -8,6 +8,13 @@ import { PrismaModule } from './prisma/prisma.module';
 import { AuthModule } from './auth/auth.module';
 import { UsersModule } from './users/users.module';
 import { DashboardModule } from './dashboard/dashboard.module';
+import { AcademicModule } from './academic/academic.module';
+import { StudentsModule } from './students/students.module';
+import { LecturersModule } from './lecturers/lecturers.module';
+import { SubjectsModule } from './subjects/subjects.module';
+import { SectionsModule } from './sections/sections.module';
+import { RoomsModule } from './rooms/rooms.module';
+import { EnrollmentsModule } from './enrollments/enrollments.module';
 import { HealthModule } from './health/health.module';
 import { JwtAuthGuard } from './common/guards/jwt-auth.guard';
 import { PermissionsGuard } from './common/guards/permissions.guard';
@@ -26,6 +33,13 @@ import { AllExceptionsFilter } from './common/filters/all-exceptions.filter';
     AuthModule,
     UsersModule,
     DashboardModule,
+    AcademicModule,
+    StudentsModule,
+    LecturersModule,
+    SubjectsModule,
+    SectionsModule,
+    RoomsModule,
+    EnrollmentsModule,
     HealthModule,
   ],
   providers: [

@@ -1,0 +1,34 @@
+import { Body, Controller, Get, Param, Post, Query } from '@nestjs/common';
+import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
+import { LecturersService } from './lecturers.service';
+import { CreateLecturerDto, QueryLecturerDto } from './dto/lecturer.dto';
+import { CurrentUser } from '../common/decorators/current-user.decorator';
+import { Permissions } from '../common/decorators/permissions.decorator';
+import { AuthenticatedUser } from '../common/authenticated-user';
+
+@ApiTags('lecturers')
+@ApiBearerAuth()
+@Controller('lecturers')
+export class LecturersController {
+  constructor(private readonly lecturers: LecturersService) {}
+
+  @Get()
+  @Permissions('lecturer:read')
+  @ApiOperation({ summary: 'List lecturers (tenant-scoped, searchable, paginated)' })
+  list(@CurrentUser() user: AuthenticatedUser, @Query() query: QueryLecturerDto) {
+    return this.lecturers.list(user.universityId, query);
+  }
+
+  @Get(':id')
+  @Permissions('lecturer:read')
+  get(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string) {
+    return this.lecturers.get(user.universityId, id);
+  }
+
+  @Post()
+  @Permissions('lecturer:create')
+  @ApiOperation({ summary: 'Create a lecturer' })
+  create(@CurrentUser() user: AuthenticatedUser, @Body() dto: CreateLecturerDto) {
+    return this.lecturers.create(user.universityId, dto);
+  }
+}

@@ -13,8 +13,10 @@ Architecture, Repository Pattern, DI) to serve as the faculty's official platfor
 | --- | --- |
 | 1 · Multi-tenant data foundation | ✅ Done & verified |
 | 2 · Backend core + security (auth, RBAC, tenant scope, audit, Swagger) | ✅ Done & verified |
-| 3 · Core domain APIs | ⬜ Next |
-| 4–8 · Timetable/attendance, frontend, analytics, reporting, ops | ⬜ Planned |
+| 3 · Core domain APIs (students, sections, subjects, lecturers, rooms, enrollment) | ✅ Done & verified |
+| 5 · Frontend shell (login, dashboard, students) — brought forward | 🔷 In progress |
+| 4 · Timetable + attendance engine | ⬜ Next |
+| 6–8 · Analytics, reporting, ops | ⬜ Planned |
 
 Full plan: [`docs/architecture/phase-roadmap.md`](docs/architecture/phase-roadmap.md).
 

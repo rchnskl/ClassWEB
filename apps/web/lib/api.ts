@@ -32,6 +32,13 @@ export async function apiFetch<T>(path: string, init: RequestInit = {}): Promise
   return body as T;
 }
 
+export interface Paginated<T> {
+  total: number;
+  take: number;
+  skip: number;
+  items: T[];
+}
+
 export interface LoginResponse {
   accessToken: string;
   refreshToken: string;

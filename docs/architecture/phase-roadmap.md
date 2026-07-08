@@ -8,7 +8,7 @@ in the requirements brief is accounted for below.
 | --- | --- | --- | --- |
 | **1. Data foundation** | Multi-tenant Prisma schema, migrations, seed, ERD docs | Multi-Tenant Architecture, Academic Structure, Course/Room/Student/Lecturer/Section/Enrollment/Attendance **data**, Audit/Settings/Backup tables | ✅ **Done & verified** |
 | **2. Backend core + security** | NestJS scaffold, JWT + refresh, RBAC guards, tenant scoping, audit interceptor, Swagger, health checks | Security, API, Audit Log, Monitoring | ✅ **Done & verified** |
-| **3. Core domain APIs** | CRUD + services for academic hierarchy, students, lecturers, rooms, sections, enrollment | Course/Room/Student/Lecturer/Section/Enrollment Management | ⬜ Next |
+| **3. Core domain APIs** | CRUD + services for academic hierarchy, students, lecturers, rooms, sections, enrollment | Course/Room/Student/Lecturer/Section/Enrollment Management | ✅ **Done & verified** |
 | **4. Timetable + attendance engine** | Schedule generation, conflict detection, attendance capture (manual + QR), rule engine | Timetable, Attendance Features, Attendance Rule Engine | ⬜ |
 | **5. Frontend (admin dashboard)** | Next.js glass-morphism UI, dashboards, search, filters, dark/light, responsive | Dashboard, Design, Search Engine, Filter System, Admin Dashboard | ⬜ |
 | **6. Analytics + notifications** | Risk analytics, attendance stats, notifications (email/LINE/push/system) | Dashboard stats, Student Risk Analytics, Notification System | ⬜ |
@@ -50,6 +50,26 @@ ADMIN role confirmed to hold all 110 permissions.
 boot+health, 401 without token, 401 on bad password, admin login issues tokens,
 `/users/me`, RBAC allow (admin) vs deny (lecturer → 403), refresh rotation +
 single-use enforcement (reused token → 401), and audit rows written.
+
+## Phase 3 — what was delivered
+
+- Feature modules under `apps/api/src`: **students** (full CRUD, with a dedicated
+  Repository + Service split as the reference pattern), **sections**, **subjects**,
+  **lecturers**, **rooms**, **enrollments**, and **academic** (programs / years /
+  semesters read for selectors).
+- Every endpoint is tenant-scoped, RBAC-gated (`<resource>:<action>`), validated,
+  paginated and searchable. Cross-aggregate integrity enforced (e.g. a student's
+  program, a section's subject/semester/lecturer/room must belong to the tenant).
+- **Enrollment** engine: capacity check + duplicate guard + atomic
+  `currentEnrollment` counter maintenance in a transaction; drop restores capacity.
+- Frontend: **Students** page (live list, debounced search, pagination, inline
+  create form populated from `/programs`) and a navigable sidebar.
+
+**Verification (end-to-end against live Postgres):** listed students/sections/
+subjects/lecturers/rooms/programs with real seeded data; created a student via API
+and via the UI; enrolled a student (counter 2→3); duplicate enroll → 409; RBAC
+lecturer create-student → 403 while read → 200; Students page rendered with real
+data in the browser.
 
 ## Resolved decisions
 

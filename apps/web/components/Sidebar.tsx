@@ -1,5 +1,6 @@
 'use client';
 
+import Link from 'next/link';
 import Logo from './Logo';
 import {
   IconGrid, IconStudents, IconTeacher, IconBook, IconCalendar,
@@ -7,17 +8,17 @@ import {
 } from './icons';
 
 const NAV = [
-  { label: 'Dashboard', icon: IconGrid, active: true },
-  { label: 'Students', icon: IconStudents },
-  { label: 'Lecturers', icon: IconTeacher },
-  { label: 'Subjects & Sections', icon: IconBook },
-  { label: 'Timetable', icon: IconCalendar },
-  { label: 'Attendance', icon: IconCheck },
-  { label: 'Reports', icon: IconReport },
-  { label: 'Settings', icon: IconSettings },
+  { label: 'Dashboard', icon: IconGrid, href: '/dashboard' },
+  { label: 'Students', icon: IconStudents, href: '/students' },
+  { label: 'Lecturers', icon: IconTeacher, href: '/lecturers' },
+  { label: 'Subjects & Sections', icon: IconBook, href: '/sections' },
+  { label: 'Timetable', icon: IconCalendar, href: '/timetable' },
+  { label: 'Attendance', icon: IconCheck, href: '/attendance' },
+  { label: 'Reports', icon: IconReport, href: '/reports' },
+  { label: 'Settings', icon: IconSettings, href: '/settings' },
 ];
 
-export default function Sidebar() {
+export default function Sidebar({ active = 'Dashboard' }: { active?: string }) {
   return (
     <aside
       className="glass"
@@ -46,10 +47,10 @@ export default function Sidebar() {
         {NAV.map((item) => {
           const Icon = item.icon;
           return (
-            <div key={item.label} className={`nav-item${item.active ? ' active' : ''}`}>
+            <Link key={item.label} href={item.href} className={`nav-item${item.label === active ? ' active' : ''}`}>
               <Icon />
               <span>{item.label}</span>
-            </div>
+            </Link>
           );
         })}
       </nav>
