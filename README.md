@@ -12,8 +12,9 @@ Architecture, Repository Pattern, DI) to serve as the faculty's official platfor
 | Phase | Status |
 | --- | --- |
 | 1 · Multi-tenant data foundation | ✅ Done & verified |
-| 2 · Backend core + security | ⬜ Next |
-| 3–8 · Domain, timetable/attendance, frontend, analytics, reporting, ops | ⬜ Planned |
+| 2 · Backend core + security (auth, RBAC, tenant scope, audit, Swagger) | ✅ Done & verified |
+| 3 · Core domain APIs | ⬜ Next |
+| 4–8 · Timetable/attendance, frontend, analytics, reporting, ops | ⬜ Planned |
 
 Full plan: [`docs/architecture/phase-roadmap.md`](docs/architecture/phase-roadmap.md).
 
@@ -35,6 +36,21 @@ Seeded admin login (rotate immediately): `admin@nursing.au.edu` / `ChangeMe!2026
 
 > No Docker? Point `DATABASE_URL` in `packages/database/.env` at any PostgreSQL 16
 > instance and run the same commands.
+
+## Quickstart (backend API)
+
+```bash
+cp apps/api/.env.example apps/api/.env    # set real JWT secrets
+npm run api:build && npm run api:start    # http://localhost:3001/api/v1
+```
+
+- Swagger UI: `http://localhost:3001/api/docs`
+- Health: `GET /api/v1/health`
+- Auth: `POST /api/v1/auth/login | refresh | logout`
+- Example protected: `GET /api/v1/users/me`, `GET /api/v1/users` (needs `user:read`)
+
+Endpoints enforce JWT auth, the RBAC permission matrix, tenant isolation, rate
+limiting, and audit logging by default.
 
 ## Repository layout
 

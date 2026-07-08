@@ -29,12 +29,12 @@ CLASSWEB/
 │       │   └── seed.ts
 │       └── src/index.ts      # shared PrismaClient singleton
 ├── apps/
-│   ├── api/                  # ← Phase 2: NestJS backend (planned)
-│   └── web/                  # ← Phase 4: Next.js frontend (planned)
+│   ├── api/                  # ← Phase 2: NestJS backend (auth, RBAC, tenant, audit) ✅
+│   └── web/                  # ← Phase 5: Next.js frontend (planned)
 ```
 
-The `apps/` directories are placeholders in this document only — no empty stub
-code has been committed. Each is created when its phase starts.
+`apps/web` is named here for orientation only — no empty stub code is committed
+until its phase starts.
 
 ## Clean Architecture layering (applies from Phase 2 onward)
 

@@ -1,0 +1,93 @@
+import { Injectable, UnauthorizedException } from '@nestjs/common';
+import * as bcrypt from 'bcryptjs';
+import { AuditAction } from '@prisma/client';
+import { PrismaService } from '../prisma/prisma.service';
+import { IssuedTokens, TokenService } from './token.service';
+import { LoginDto } from './dto/login.dto';
+
+interface RequestContext {
+  ipAddress?: string | null;
+  userAgent?: string | null;
+}
+
+export interface LoginResult extends IssuedTokens {
+  user: { id: string; email: string; universityId: string; roleCodes: string[] };
+}
+
+@Injectable()
+export class AuthService {
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly tokenService: TokenService,
+  ) {}
+
+  async login(dto: LoginDto, ctx: RequestContext = {}): Promise<LoginResult> {
+    const user = await this.prisma.user.findFirst({
+      where: {
+        email: dto.email,
+        deletedAt: null,
+        ...(dto.universityCode ? { university: { code: dto.universityCode } } : {}),
+      },
+      include: { roles: { include: { role: true } } },
+    });
+
+    // Constant-ish work whether or not the user exists (avoid user enumeration).
+    const hash = user?.passwordHash ?? '$2a$12$0000000000000000000000000000000000000000000000000000';
+    const passwordOk = await bcrypt.compare(dto.password, hash);
+
+    if (!user || !user.passwordHash || !passwordOk) {
+      throw new UnauthorizedException('Invalid email or password');
+    }
+    if (user.status !== 'ACTIVE') {
+      throw new UnauthorizedException('Account is not active');
+    }
+
+    const tokens = await this.tokenService.issueTokens(user, ctx);
+
+    await this.prisma.user.update({
+      where: { id: user.id },
+      data: { lastLoginAt: new Date() },
+    });
+    await this.prisma.auditLog.create({
+      data: {
+        universityId: user.universityId,
+        userId: user.id,
+        action: AuditAction.LOGIN,
+        entityType: 'User',
+        entityId: user.id,
+        ipAddress: ctx.ipAddress ?? null,
+        userAgent: ctx.userAgent ?? null,
+      },
+    });
+
+    return {
+      ...tokens,
+      user: {
+        id: user.id,
+        email: user.email,
+        universityId: user.universityId,
+        roleCodes: user.roles.map((r) => r.role.code),
+      },
+    };
+  }
+
+  async refresh(refreshToken: string, ctx: RequestContext = {}): Promise<IssuedTokens> {
+    return this.tokenService.rotate(refreshToken, ctx);
+  }
+
+  async logout(refreshToken: string, userId?: string, ctx: RequestContext = {}): Promise<void> {
+    await this.tokenService.revoke(refreshToken);
+    if (userId) {
+      await this.prisma.auditLog.create({
+        data: {
+          userId,
+          action: AuditAction.LOGOUT,
+          entityType: 'User',
+          entityId: userId,
+          ipAddress: ctx.ipAddress ?? null,
+          userAgent: ctx.userAgent ?? null,
+        },
+      });
+    }
+  }
+}

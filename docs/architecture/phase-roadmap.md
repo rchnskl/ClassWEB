@@ -7,8 +7,8 @@ in the requirements brief is accounted for below.
 | Phase | Scope | Brief sections covered | Status |
 | --- | --- | --- | --- |
 | **1. Data foundation** | Multi-tenant Prisma schema, migrations, seed, ERD docs | Multi-Tenant Architecture, Academic Structure, Course/Room/Student/Lecturer/Section/Enrollment/Attendance **data**, Audit/Settings/Backup tables | ✅ **Done & verified** |
-| **2. Backend core + security** | NestJS scaffold, JWT + refresh, RBAC guards, tenant scoping, audit interceptor, Swagger, health checks | Security, API, Audit Log, Monitoring | ⬜ Next |
-| **3. Core domain APIs** | CRUD + services for academic hierarchy, students, lecturers, rooms, sections, enrollment | Course/Room/Student/Lecturer/Section/Enrollment Management | ⬜ |
+| **2. Backend core + security** | NestJS scaffold, JWT + refresh, RBAC guards, tenant scoping, audit interceptor, Swagger, health checks | Security, API, Audit Log, Monitoring | ✅ **Done & verified** |
+| **3. Core domain APIs** | CRUD + services for academic hierarchy, students, lecturers, rooms, sections, enrollment | Course/Room/Student/Lecturer/Section/Enrollment Management | ⬜ Next |
 | **4. Timetable + attendance engine** | Schedule generation, conflict detection, attendance capture (manual + QR), rule engine | Timetable, Attendance Features, Attendance Rule Engine | ⬜ |
 | **5. Frontend (admin dashboard)** | Next.js glass-morphism UI, dashboards, search, filters, dark/light, responsive | Dashboard, Design, Search Engine, Filter System, Admin Dashboard | ⬜ |
 | **6. Analytics + notifications** | Risk analytics, attendance stats, notifications (email/LINE/push/system) | Dashboard stats, Student Risk Analytics, Notification System | ⬜ |
@@ -28,6 +28,28 @@ in the requirements brief is accounted for below.
 **Verification performed:** migration applied to a real Postgres server; FK and
 composite-unique constraints proven to enforce; seed run twice to prove idempotency;
 ADMIN role confirmed to hold all 110 permissions.
+
+## Phase 2 — what was delivered
+
+- `apps/api` — NestJS 11 (TypeScript) backend, feature-module structure.
+- **Auth**: `POST /api/v1/auth/login | refresh | logout` — JWT access + refresh
+  with **rotation** (refresh tokens stored as SHA-256 hashes, single-use), bcrypt
+  password verification (cost 12), user-enumeration-resistant login.
+- **RBAC**: global `JwtAuthGuard` + `PermissionsGuard`, `@Public()` /
+  `@Permissions()` / `@CurrentUser()` decorators, permission set resolved from the
+  Phase-1 matrix.
+- **Multi-tenant isolation**: every query scoped by the caller's `universityId`
+  (demonstrated in `GET /api/v1/users`).
+- **Audit**: global interceptor logs every mutating request; auth events logged
+  explicitly — all to the Phase-1 `AuditLog`.
+- **Security**: Helmet, CORS allow-list, rate limiting (Throttler), strict
+  `ValidationPipe`, fail-fast env validation, uniform error filter.
+- **Ops**: `GET /api/v1/health` (Terminus + DB ping), Swagger at `/api/docs`.
+
+**Verification performed (end-to-end against a real Postgres):** 10/10 checks —
+boot+health, 401 without token, 401 on bad password, admin login issues tokens,
+`/users/me`, RBAC allow (admin) vs deny (lecturer → 403), refresh rotation +
+single-use enforcement (reused token → 401), and audit rows written.
 
 ## Resolved decisions
 

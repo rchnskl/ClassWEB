@@ -17,7 +17,10 @@
     "db:seed": "npm run seed -w @classweb/database",
     "db:studio": "npm run studio -w @classweb/database",
     "db:up": "docker compose up -d postgres",
-    "db:down": "docker compose down"
+    "db:down": "docker compose down",
+    "api:dev": "npm run start:dev -w @classweb/api",
+    "api:build": "npm run build -w @classweb/api",
+    "api:start": "npm run start:prod -w @classweb/api"
   },
   "license": "UNLICENSED"
 }
