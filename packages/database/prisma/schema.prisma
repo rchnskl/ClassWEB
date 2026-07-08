@@ -1,0 +1,1073 @@
+// =============================================================================
+//  ClassWeb — Enterprise Classroom & Attendance Platform
+//  Faculty of Nursing, Assumption University
+//
+//  DATA MODEL (source of truth). Phase 1 deliverable.
+//
+//  Design principles
+//  -----------------
+//  * Multi-tenant by design. `University` is the tenant root. Every
+//    tenant-owned, directly-queried table carries a denormalised
+//    `universityId` so Postgres Row-Level-Security / a scoping guard can
+//    filter every query by tenant with a single indexed predicate. New
+//    faculties / campuses / programs are DATA, never migrations.
+//  * Academic hierarchy is modelled exactly as specified:
+//      University → Campus/Faculty → Department/Program →
+//      AcademicYear → Semester → Course → Subject → Section → Enrollment(Student)
+//  * Every table is auditable: createdAt / updatedAt everywhere,
+//    soft-delete (deletedAt) on the major aggregates, and a dedicated
+//    AuditLog for every mutating action.
+//  * Extensible for the ~30 future modules (gradebook, OSCE, clinical
+//    logbook, portfolio, …) via stable FKs, JSON `metadata` escape hatches
+//    on core entities, and a generic Attachment table — WITHOUT reshaping
+//    any existing table.
+//
+//  See docs/architecture/data-model.md for the ERD and rationale.
+// =============================================================================
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// =============================================================================
+//  ENUMS
+// =============================================================================
+
+enum UserStatus {
+  ACTIVE
+  INACTIVE
+  SUSPENDED
+  PENDING
+}
+
+enum Gender {
+  MALE
+  FEMALE
+  OTHER
+  UNSPECIFIED
+}
+
+/// Current enrolment/study status of a student.
+enum StudentStatus {
+  STUDYING
+  ON_LEAVE
+  SUSPENDED
+  GRADUATED
+  WITHDRAWN
+  DISMISSED
+  TRANSFERRED
+}
+
+/// Separate from StudentStatus because the spec tracks graduation explicitly.
+enum GraduationStatus {
+  NOT_GRADUATED
+  IN_PROGRESS
+  GRADUATED
+}
+
+enum EnrollmentStatus {
+  ENROLLED
+  DROPPED
+  WITHDRAWN
+  COMPLETED
+  FAILED
+}
+
+enum AttendanceStatus {
+  PRESENT
+  LATE
+  ABSENT
+  EXCUSED
+  LEAVE
+}
+
+/// How an attendance record was captured. GPS/Bluetooth/Face are wired now
+/// as first-class values so the future capture methods need no migration.
+enum AttendanceMethod {
+  MANUAL
+  QR_CODE
+  GPS
+  BLUETOOTH
+  FACE_RECOGNITION
+}
+
+enum ClassSessionStatus {
+  SCHEDULED
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+  HOLIDAY
+  POSTPONED
+  MAKEUP
+}
+
+enum RoomStatus {
+  AVAILABLE
+  OCCUPIED
+  MAINTENANCE
+  RESERVED
+  INACTIVE
+}
+
+enum DayOfWeek {
+  MONDAY
+  TUESDAY
+  WEDNESDAY
+  THURSDAY
+  FRIDAY
+  SATURDAY
+  SUNDAY
+}
+
+enum SemesterType {
+  FIRST
+  SECOND
+  SUMMER
+  SPECIAL
+}
+
+enum CalendarEventType {
+  HOLIDAY
+  SPECIAL_EVENT
+  EXAM
+  CLASS_CANCELLATION
+  MAKEUP_CLASS
+}
+
+enum NotificationChannel {
+  EMAIL
+  LINE
+  PUSH
+  SYSTEM
+}
+
+enum NotificationStatus {
+  PENDING
+  SENT
+  DELIVERED
+  READ
+  FAILED
+}
+
+enum BackupType {
+  MANUAL
+  AUTOMATIC
+}
+
+enum BackupStatus {
+  PENDING
+  IN_PROGRESS
+  COMPLETED
+  FAILED
+}
+
+/// Scope at which a configurable setting or attendance rule applies.
+/// Resolution is most-specific-wins (SECTION > SEMESTER > PROGRAM > FACULTY > UNIVERSITY > SYSTEM).
+enum ConfigScope {
+  SYSTEM
+  UNIVERSITY
+  FACULTY
+  PROGRAM
+  SEMESTER
+  SECTION
+}
+
+enum AttachmentType {
+  STUDENT_PHOTO
+  LECTURER_PHOTO
+  SIGNATURE
+  UNIVERSITY_LOGO
+  FACULTY_LOGO
+  DOCUMENT
+  QR_CODE
+  REPORT
+  OTHER
+}
+
+enum AuditAction {
+  LOGIN
+  LOGOUT
+  CREATE
+  UPDATE
+  DELETE
+  EXPORT
+  IMPORT
+  ATTENDANCE
+  SETTINGS_CHANGE
+  BACKUP
+  RESTORE
+  VIEW
+}
+
+// =============================================================================
+//  TENANCY & ACADEMIC HIERARCHY
+// =============================================================================
+
+/// Tenant root. Everything below belongs to exactly one University.
+model University {
+  id          String    @id @default(cuid())
+  code        String    @unique // e.g. "AU"
+  nameEn      String
+  nameTh      String?
+  shortName   String?
+  logoId      String?
+  websiteUrl  String?
+  contactInfo Json? // phone / email / address structured payload
+  isActive    Boolean   @default(true)
+  metadata    Json?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  deletedAt   DateTime?
+
+  logo            Attachment?      @relation("UniversityLogo", fields: [logoId], references: [id])
+  campuses        Campus[]
+  faculties       Faculty[]
+  academicYears   AcademicYear[]
+  users           User[]
+  students        Student[]
+  lecturers       Lecturer[]
+  settings        Setting[]
+  auditLogs       AuditLog[]
+  attachments     Attachment[]
+  backups         Backup[]
+  sections        Section[]
+  attendanceRules AttendanceRule[]
+  calendarEvents  CalendarEvent[]
+
+  @@index([isActive])
+  @@map("universities")
+}
+
+model Campus {
+  id           String    @id @default(cuid())
+  universityId String
+  code         String
+  nameEn       String
+  nameTh       String?
+  address      String?
+  city         String?
+  country      String?   @default("Thailand")
+  timezone     String    @default("Asia/Bangkok")
+  isActive     Boolean   @default(true)
+  metadata     Json?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+  deletedAt    DateTime?
+
+  university University @relation(fields: [universityId], references: [id])
+  buildings  Building[]
+
+  @@unique([universityId, code])
+  @@index([universityId])
+  @@map("campuses")
+}
+
+model Faculty {
+  id           String    @id @default(cuid())
+  universityId String
+  code         String // e.g. "NURSING"
+  nameEn       String
+  nameTh       String?
+  logoId       String?
+  deanName     String?
+  contactInfo  Json?
+  isActive     Boolean   @default(true)
+  metadata     Json?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+  deletedAt    DateTime?
+
+  university  University   @relation(fields: [universityId], references: [id])
+  logo        Attachment?  @relation("FacultyLogo", fields: [logoId], references: [id])
+  departments Department[]
+  programs    Program[]
+  lecturers   Lecturer[]
+
+  @@unique([universityId, code])
+  @@index([universityId])
+  @@map("faculties")
+}
+
+model Department {
+  id        String    @id @default(cuid())
+  facultyId String
+  code      String
+  nameEn    String
+  nameTh    String?
+  headId    String? // lecturer who heads the department
+  isActive  Boolean   @default(true)
+  metadata  Json?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  faculty   Faculty    @relation(fields: [facultyId], references: [id])
+  head      Lecturer?  @relation("DepartmentHead", fields: [headId], references: [id])
+  lecturers Lecturer[] @relation("LecturerDepartment")
+
+  @@unique([facultyId, code])
+  @@index([facultyId])
+  @@map("departments")
+}
+
+/// A degree program, e.g. "Bachelor of Nursing Science".
+model Program {
+  id           String    @id @default(cuid())
+  facultyId    String
+  code         String
+  nameEn       String
+  nameTh       String?
+  degreeType   String? // e.g. "Bachelor", "Master"
+  durationYrs  Int?      @default(4)
+  totalCredits Int?
+  isActive     Boolean   @default(true)
+  metadata     Json?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+  deletedAt    DateTime?
+
+  faculty  Faculty   @relation(fields: [facultyId], references: [id])
+  courses  Course[]
+  subjects Subject[]
+  students Student[]
+
+  @@unique([facultyId, code])
+  @@index([facultyId])
+  @@map("programs")
+}
+
+/// A university-wide academic year, e.g. "2026" (Buddhist year 2569).
+model AcademicYear {
+  id           String    @id @default(cuid())
+  universityId String
+  code         String // e.g. "2026"
+  nameEn       String // e.g. "Academic Year 2026"
+  nameTh       String?
+  startDate    DateTime  @db.Date
+  endDate      DateTime  @db.Date
+  isCurrent    Boolean   @default(false)
+  isActive     Boolean   @default(true)
+  metadata     Json?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+  deletedAt    DateTime?
+
+  university University @relation(fields: [universityId], references: [id])
+  semesters  Semester[]
+
+  @@unique([universityId, code])
+  @@index([universityId])
+  @@map("academic_years")
+}
+
+model Semester {
+  id              String       @id @default(cuid())
+  academicYearId  String
+  type            SemesterType
+  nameEn          String // e.g. "First Semester"
+  nameTh          String?
+  startDate       DateTime     @db.Date
+  endDate         DateTime     @db.Date
+  /// Cut-off after which enrolment/attendance edits are locked.
+  addDropDeadline DateTime?    @db.Date
+  isCurrent       Boolean      @default(false)
+  isActive        Boolean      @default(true)
+  metadata        Json?
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+  deletedAt       DateTime?
+
+  academicYear   AcademicYear    @relation(fields: [academicYearId], references: [id])
+  sections       Section[]
+  calendarEvents CalendarEvent[]
+
+  @@unique([academicYearId, type])
+  @@index([academicYearId])
+  @@map("semesters")
+}
+
+// =============================================================================
+//  CURRICULUM: Course → Subject → Section
+//
+//  Course   = an (optional) curriculum grouping owned by a Program.
+//  Subject  = the teachable catalogue unit (Course Code, Description, Credits).
+//             Belongs to a Program; MAY belong to a Course.
+//  Section  = a concrete offering of a Subject within a Semester (teacher,
+//             room, schedule, capacity, enrolment).
+//
+//  Course is nullable on Subject so faculties that do not use the Course
+//  grouping still work. See data-model.md for the rationale.
+// =============================================================================
+
+model Course {
+  id          String    @id @default(cuid())
+  programId   String
+  code        String
+  nameEn      String
+  nameTh      String?
+  description String?
+  isActive    Boolean   @default(true)
+  metadata    Json?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  deletedAt   DateTime?
+
+  program  Program   @relation(fields: [programId], references: [id])
+  subjects Subject[]
+
+  @@unique([programId, code])
+  @@index([programId])
+  @@map("courses")
+}
+
+model Subject {
+  id          String    @id @default(cuid())
+  programId   String
+  courseId    String // every subject belongs to a curriculum Course (confirmed by faculty)
+  code        String // Course Code, e.g. "NUR1101"
+  nameEn      String
+  nameTh      String?
+  description String? // Course Description
+  credits     Int       @default(3)
+  /// Contact-hour breakdown, e.g. { "lecture": 2, "lab": 3, "clinical": 0 }.
+  creditHours Json?
+  isActive    Boolean   @default(true)
+  metadata    Json?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  deletedAt   DateTime?
+
+  program  Program   @relation(fields: [programId], references: [id])
+  course   Course    @relation(fields: [courseId], references: [id])
+  sections Section[]
+
+  @@unique([programId, code])
+  @@index([programId])
+  @@index([courseId])
+  @@map("subjects")
+}
+
+model Section {
+  id                String    @id @default(cuid())
+  universityId      String // denormalised tenant key
+  subjectId         String
+  semesterId        String
+  lecturerId        String? // primary lecturer
+  roomId            String? // default room
+  sectionNo         String // e.g. "001"
+  capacity          Int       @default(40)
+  /// Maintained by the enrolment service; denormalised for fast dashboards.
+  currentEnrollment Int       @default(0)
+  isActive          Boolean   @default(true)
+  metadata          Json?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+  deletedAt         DateTime?
+
+  university      University        @relation(fields: [universityId], references: [id], map: "sections_university_fk")
+  subject         Subject           @relation(fields: [subjectId], references: [id])
+  semester        Semester          @relation(fields: [semesterId], references: [id])
+  lecturer        Lecturer?         @relation("SectionPrimaryLecturer", fields: [lecturerId], references: [id])
+  room            Room?             @relation(fields: [roomId], references: [id])
+  coLecturers     SectionLecturer[]
+  schedules       SectionSchedule[]
+  classSessions   ClassSession[]
+  enrollments     Enrollment[]
+  attendanceRules AttendanceRule[]
+
+  @@unique([subjectId, semesterId, sectionNo])
+  @@index([universityId])
+  @@index([semesterId])
+  @@index([lecturerId])
+  @@map("sections")
+}
+
+/// Additional (co-)teachers on a section beyond the primary lecturer.
+model SectionLecturer {
+  id         String   @id @default(cuid())
+  sectionId  String
+  lecturerId String
+  role       String?  @default("CO_LECTURER") // CO_LECTURER, TA, CLINICAL_PRECEPTOR
+  createdAt  DateTime @default(now())
+
+  section  Section  @relation(fields: [sectionId], references: [id])
+  lecturer Lecturer @relation(fields: [lecturerId], references: [id])
+
+  @@unique([sectionId, lecturerId])
+  @@index([lecturerId])
+  @@map("section_lecturers")
+}
+
+// =============================================================================
+//  ROOMS
+// =============================================================================
+
+model Building {
+  id        String    @id @default(cuid())
+  campusId  String
+  code      String
+  nameEn    String
+  nameTh    String?
+  floors    Int?      @default(1)
+  isActive  Boolean   @default(true)
+  metadata  Json?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  campus Campus @relation(fields: [campusId], references: [id])
+  rooms  Room[]
+
+  @@unique([campusId, code])
+  @@index([campusId])
+  @@map("buildings")
+}
+
+model Room {
+  id         String     @id @default(cuid())
+  buildingId String
+  roomNumber String
+  nameEn     String?
+  floor      Int?
+  capacity   Int        @default(0)
+  /// Structured list, e.g. ["projector","whiteboard","manikin"].
+  equipment  Json?
+  status     RoomStatus @default(AVAILABLE)
+  isBookable Boolean    @default(true)
+  metadata   Json?
+  createdAt  DateTime   @default(now())
+  updatedAt  DateTime   @updatedAt
+  deletedAt  DateTime?
+
+  building         Building          @relation(fields: [buildingId], references: [id])
+  sections         Section[]
+  sectionSchedules SectionSchedule[]
+  classSessions    ClassSession[]
+
+  @@unique([buildingId, roomNumber])
+  @@index([buildingId])
+  @@index([status])
+  @@map("rooms")
+}
+
+// =============================================================================
+//  TIMETABLE: recurring schedule + concrete class sessions
+//
+//  SectionSchedule = the recurring weekly meeting pattern (used to render the
+//                    weekly/monthly timetable and to detect room/teacher/
+//                    section conflicts).
+//  ClassSession    = a concrete dated occurrence (generated from the schedule
+//                    or created ad-hoc for make-ups). Attendance attaches here.
+// =============================================================================
+
+model SectionSchedule {
+  id            String    @id @default(cuid())
+  sectionId     String
+  roomId        String?
+  lecturerId    String?
+  dayOfWeek     DayOfWeek
+  startTime     String // "HH:mm" 24h, campus-local
+  endTime       String
+  effectiveFrom DateTime? @db.Date
+  effectiveTo   DateTime? @db.Date
+  metadata      Json?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  section  Section   @relation(fields: [sectionId], references: [id])
+  room     Room?     @relation(fields: [roomId], references: [id])
+  lecturer Lecturer? @relation(fields: [lecturerId], references: [id])
+
+  @@index([sectionId])
+  @@index([roomId, dayOfWeek])
+  @@index([lecturerId, dayOfWeek])
+  @@map("section_schedules")
+}
+
+model ClassSession {
+  id               String             @id @default(cuid())
+  sectionId        String
+  roomId           String?
+  lecturerId       String?
+  sessionDate      DateTime           @db.Date
+  startTime        String // "HH:mm"
+  endTime          String
+  status           ClassSessionStatus @default(SCHEDULED)
+  topic            String?
+  isMakeup         Boolean            @default(false)
+  /// When attendance capture closes (derived from AttendanceRule.lockAfterMinutes).
+  attendanceLockAt DateTime?
+  cancelReason     String?
+  metadata         Json?
+  createdAt        DateTime           @default(now())
+  updatedAt        DateTime           @updatedAt
+
+  section    Section            @relation(fields: [sectionId], references: [id])
+  room       Room?              @relation(fields: [roomId], references: [id])
+  lecturer   Lecturer?          @relation(fields: [lecturerId], references: [id])
+  attendance AttendanceRecord[]
+
+  @@unique([sectionId, sessionDate, startTime])
+  @@index([sectionId])
+  @@index([sessionDate])
+  @@index([roomId, sessionDate])
+  @@map("class_sessions")
+}
+
+// =============================================================================
+//  PEOPLE: User (auth) + Student + Lecturer profiles
+// =============================================================================
+
+/// Authentication principal. Students and lecturers optionally link to a User
+/// (a student record can exist before the student ever logs in).
+model User {
+  id           String     @id @default(cuid())
+  universityId String
+  email        String
+  passwordHash String?
+  status       UserStatus @default(ACTIVE)
+  lastLoginAt  DateTime?
+  metadata     Json?
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+  deletedAt    DateTime?
+
+  university    University     @relation(fields: [universityId], references: [id])
+  roles         UserRole[]
+  refreshTokens RefreshToken[]
+  student       Student?
+  lecturer      Lecturer?
+  auditLogs     AuditLog[]
+  notifications Notification[]
+
+  @@unique([universityId, email])
+  @@index([universityId])
+  @@map("users")
+}
+
+model Student {
+  id           String  @id @default(cuid())
+  universityId String
+  programId    String
+  userId       String? @unique
+
+  studentCode String // Student ID
+  citizenId   String? // optional
+  passportNo  String?
+
+  nameEn    String
+  nameTh    String?
+  nickname  String?
+  gender    Gender    @default(UNSPECIFIED)
+  birthDate DateTime? @db.Date
+  email     String?
+  phone     String?
+
+  emergencyContact Json? // { name, relation, phone }
+  parentContact    Json?
+  address          Json?
+
+  photoId String?
+  qrCode  String? @unique // encoded student QR payload / token
+
+  admissionYear Int?
+  status        StudentStatus    @default(STUDYING)
+  graduation    GraduationStatus @default(NOT_GRADUATED)
+  graduatedAt   DateTime?        @db.Date
+
+  metadata  Json?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  university  University         @relation(fields: [universityId], references: [id])
+  program     Program            @relation(fields: [programId], references: [id])
+  user        User?              @relation(fields: [userId], references: [id])
+  photo       Attachment?        @relation("StudentPhoto", fields: [photoId], references: [id])
+  enrollments Enrollment[]
+  attendance  AttendanceRecord[]
+
+  @@unique([universityId, studentCode])
+  @@index([universityId])
+  @@index([programId])
+  @@index([status])
+  @@map("students")
+}
+
+model Lecturer {
+  id           String  @id @default(cuid())
+  universityId String
+  facultyId    String?
+  departmentId String?
+  userId       String? @unique
+
+  employeeCode String // Employee ID
+  nameEn       String
+  nameTh       String?
+  position     String?
+  email        String?
+  phone        String?
+  office       String?
+  officeHours  Json? // structured availability
+
+  photoId             String?
+  signatureId         String? // signature image
+  /// Opaque digital-signature material / key reference (never a private key value).
+  digitalSignatureRef String?
+
+  isActive  Boolean   @default(true)
+  metadata  Json?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  university        University        @relation(fields: [universityId], references: [id])
+  faculty           Faculty?          @relation(fields: [facultyId], references: [id])
+  department        Department?       @relation("LecturerDepartment", fields: [departmentId], references: [id])
+  user              User?             @relation(fields: [userId], references: [id])
+  photo             Attachment?       @relation("LecturerPhoto", fields: [photoId], references: [id])
+  signature         Attachment?       @relation("LecturerSignature", fields: [signatureId], references: [id])
+  headedDepartments Department[]      @relation("DepartmentHead")
+  primarySections   Section[]         @relation("SectionPrimaryLecturer")
+  coSections        SectionLecturer[]
+  sectionSchedules  SectionSchedule[]
+  classSessions     ClassSession[]
+
+  @@unique([universityId, employeeCode])
+  @@index([universityId])
+  @@index([departmentId])
+  @@map("lecturers")
+}
+
+// =============================================================================
+//  ENROLLMENT & ATTENDANCE
+// =============================================================================
+
+model Enrollment {
+  id             String           @id @default(cuid())
+  sectionId      String
+  studentId      String
+  status         EnrollmentStatus @default(ENROLLED)
+  enrollDate     DateTime         @default(now())
+  dropDate       DateTime?
+  dropReason     String?
+  /// Final attendance percentage snapshot (maintained by analytics).
+  attendanceRate Float?
+  metadata       Json?
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
+
+  section    Section            @relation(fields: [sectionId], references: [id])
+  student    Student            @relation(fields: [studentId], references: [id])
+  attendance AttendanceRecord[]
+
+  @@unique([sectionId, studentId])
+  @@index([studentId])
+  @@index([sectionId])
+  @@index([status])
+  @@map("enrollments")
+}
+
+model AttendanceRecord {
+  id             String           @id @default(cuid())
+  classSessionId String
+  enrollmentId   String
+  studentId      String // denormalised for fast per-student analytics
+  status         AttendanceStatus @default(ABSENT)
+  method         AttendanceMethod @default(MANUAL)
+  checkInAt      DateTime?
+  /// Minutes late relative to session start (computed at capture time).
+  minutesLate    Int?
+  /// Geolocation payload for GPS attendance ({ lat, lng, accuracy }).
+  geo            Json?
+  remark         String?
+  recordedById   String? // user who captured/edited the record
+  metadata       Json?
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
+
+  classSession ClassSession @relation(fields: [classSessionId], references: [id])
+  enrollment   Enrollment   @relation(fields: [enrollmentId], references: [id])
+  student      Student      @relation(fields: [studentId], references: [id])
+
+  @@unique([classSessionId, enrollmentId])
+  @@index([studentId])
+  @@index([classSessionId])
+  @@index([status])
+  @@map("attendance_records")
+}
+
+/// Configurable attendance rule engine. Rules resolve most-specific-scope-wins.
+model AttendanceRule {
+  id           String      @id @default(cuid())
+  universityId String
+  scope        ConfigScope @default(UNIVERSITY)
+  /// Set when scope == SECTION; null for broader scopes.
+  sectionId    String?
+  name         String      @default("Default attendance policy")
+
+  lateAfterMinutes       Int     @default(15)
+  autoAbsentAfterMinutes Int     @default(60)
+  /// Minutes after session start when capture locks.
+  lockAfterMinutes       Int?    @default(120)
+  /// Weight of attendance in overall assessment (0..100).
+  attendanceWeight       Float   @default(0)
+  countWeekend           Boolean @default(false)
+  countHoliday           Boolean @default(false)
+  /// Thresholds that drive the risk analytics (below X% => warning/risk).
+  warningThreshold       Float   @default(80)
+  riskThreshold          Float   @default(70)
+  criticalThreshold      Float   @default(60)
+
+  isActive  Boolean  @default(true)
+  metadata  Json?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  university University @relation(fields: [universityId], references: [id])
+  section    Section?   @relation(fields: [sectionId], references: [id])
+
+  @@index([universityId, scope])
+  @@index([sectionId])
+  @@map("attendance_rules")
+}
+
+/// Academic-calendar events: holidays, special events, cancellations, make-ups.
+/// Drives the holiday/weekend rules in attendance generation.
+model CalendarEvent {
+  id           String            @id @default(cuid())
+  universityId String
+  semesterId   String?
+  type         CalendarEventType
+  nameEn       String
+  nameTh       String?
+  startDate    DateTime          @db.Date
+  endDate      DateTime          @db.Date
+  isRecurring  Boolean           @default(false)
+  metadata     Json?
+  createdAt    DateTime          @default(now())
+  updatedAt    DateTime          @updatedAt
+
+  university University @relation(fields: [universityId], references: [id])
+  semester   Semester?  @relation(fields: [semesterId], references: [id])
+
+  @@index([universityId, type])
+  @@index([startDate])
+  @@map("calendar_events")
+}
+
+// =============================================================================
+//  SECURITY: RBAC (role/permission matrix) + refresh tokens
+// =============================================================================
+
+model Role {
+  id           String   @id @default(cuid())
+  /// Null = a system-wide role template shared by all tenants.
+  universityId String?
+  code         String // e.g. "ADMIN", "LECTURER", "STUDENT"
+  nameEn       String
+  nameTh       String?
+  description  String?
+  isSystem     Boolean  @default(false)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  permissions RolePermission[]
+  users       UserRole[]
+
+  @@unique([universityId, code])
+  @@map("roles")
+}
+
+/// A granular permission, e.g. resource="attendance", action="update".
+model Permission {
+  id          String   @id @default(cuid())
+  code        String   @unique // "attendance:update"
+  resource    String // "attendance"
+  action      String // "create" | "read" | "update" | "delete" | "export" | ...
+  description String?
+  createdAt   DateTime @default(now())
+
+  roles RolePermission[]
+
+  @@index([resource])
+  @@map("permissions")
+}
+
+model RolePermission {
+  roleId       String
+  permissionId String
+  createdAt    DateTime @default(now())
+
+  role       Role       @relation(fields: [roleId], references: [id])
+  permission Permission @relation(fields: [permissionId], references: [id])
+
+  @@id([roleId, permissionId])
+  @@index([permissionId])
+  @@map("role_permissions")
+}
+
+model UserRole {
+  userId    String
+  roleId    String
+  /// Optional scoping of the grant (e.g. lecturer-admin only within a faculty).
+  scopeType String?
+  scopeId   String?
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id])
+  role Role @relation(fields: [roleId], references: [id])
+
+  @@id([userId, roleId])
+  @@index([roleId])
+  @@map("user_roles")
+}
+
+model RefreshToken {
+  id        String    @id @default(cuid())
+  userId    String
+  /// Store a hash of the token, never the token itself.
+  tokenHash String    @unique
+  expiresAt DateTime
+  revokedAt DateTime?
+  userAgent String?
+  ipAddress String?
+  createdAt DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@index([userId])
+  @@index([expiresAt])
+  @@map("refresh_tokens")
+}
+
+// =============================================================================
+//  CROSS-CUTTING: attachments, settings, notifications, audit, backups
+// =============================================================================
+
+/// Generic file/asset metadata. Reused now (photos, signatures, logos, QR,
+/// reports) and by every future module (documents, portfolios, certificates)
+/// without schema changes.
+model Attachment {
+  id           String         @id @default(cuid())
+  universityId String
+  type         AttachmentType @default(OTHER)
+  fileName     String
+  mimeType     String
+  sizeBytes    Int?
+  /// Storage key/path (S3 key, disk path, …). Never a public URL secret.
+  storageKey   String
+  checksum     String?
+  uploadedById String?
+  metadata     Json?
+  createdAt    DateTime       @default(now())
+  deletedAt    DateTime?
+
+  university University @relation(fields: [universityId], references: [id])
+
+  universityLogos    University[] @relation("UniversityLogo")
+  facultyLogos       Faculty[]    @relation("FacultyLogo")
+  studentPhotos      Student[]    @relation("StudentPhoto")
+  lecturerPhotos     Lecturer[]   @relation("LecturerPhoto")
+  lecturerSignatures Lecturer[]   @relation("LecturerSignature")
+
+  @@index([universityId, type])
+  @@map("attachments")
+}
+
+/// Configurable settings resolved most-specific-scope-wins. Value is JSON so a
+/// single table backs logos, theme, PDF header/footer, email server config,
+/// backup schedule, attendance defaults, etc.
+model Setting {
+  id           String      @id @default(cuid())
+  universityId String
+  scope        ConfigScope @default(UNIVERSITY)
+  scopeId      String? // e.g. facultyId/semesterId when scope is narrower
+  key          String // e.g. "theme.primaryColor", "pdf.footer", "email.smtp"
+  value        Json
+  description  String?
+  createdAt    DateTime    @default(now())
+  updatedAt    DateTime    @updatedAt
+
+  university University @relation(fields: [universityId], references: [id])
+
+  @@unique([universityId, scope, scopeId, key])
+  @@index([universityId, scope])
+  @@map("settings")
+}
+
+model Notification {
+  id           String              @id @default(cuid())
+  universityId String
+  userId       String? // recipient (null for broadcast)
+  channel      NotificationChannel @default(SYSTEM)
+  status       NotificationStatus  @default(PENDING)
+  type         String // "ATTENDANCE_SUBMITTED", "STUDENT_ABSENT", "BELOW_80", "CLASS_CANCELLED", ...
+  title        String
+  body         String?
+  /// Loosely-coupled reference to any entity (studentId, sectionId, …).
+  refType      String?
+  refId        String?
+  payload      Json?
+  sentAt       DateTime?
+  readAt       DateTime?
+  createdAt    DateTime            @default(now())
+
+  user User? @relation(fields: [userId], references: [id])
+
+  @@index([universityId])
+  @@index([userId, status])
+  @@index([type])
+  @@map("notifications")
+}
+
+/// Immutable audit trail for every mutating/authentication action.
+model AuditLog {
+  id           String      @id @default(cuid())
+  universityId String?
+  userId       String?
+  action       AuditAction
+  entityType   String? // "Student", "AttendanceRecord", ...
+  entityId     String?
+  /// before/after diff or request context.
+  metadata     Json?
+  ipAddress    String?
+  userAgent    String?
+  createdAt    DateTime    @default(now())
+
+  university University? @relation(fields: [universityId], references: [id])
+  user       User?       @relation(fields: [userId], references: [id])
+
+  @@index([universityId, createdAt])
+  @@index([userId])
+  @@index([entityType, entityId])
+  @@index([action])
+  @@map("audit_logs")
+}
+
+model Backup {
+  id           String       @id @default(cuid())
+  universityId String?
+  type         BackupType   @default(MANUAL)
+  status       BackupStatus @default(PENDING)
+  fileName     String?
+  storageKey   String?
+  sizeBytes    Int?
+  startedAt    DateTime?
+  completedAt  DateTime?
+  createdById  String?
+  error        String?
+  metadata     Json?
+  createdAt    DateTime     @default(now())
+
+  university University? @relation(fields: [universityId], references: [id])
+
+  @@index([universityId, createdAt])
+  @@index([status])
+  @@map("backups")
+}

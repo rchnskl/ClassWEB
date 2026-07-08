@@ -1,0 +1,23 @@
+{
+  "name": "nursing-classroom-platform",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Enterprise multi-tenant classroom & attendance platform — Faculty of Nursing, Assumption University",
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "db:generate": "npm run generate -w @classweb/database",
+    "db:migrate": "npm run migrate:dev -w @classweb/database",
+    "db:migrate:sql": "npm run migrate:sql -w @classweb/database",
+    "db:seed": "npm run seed -w @classweb/database",
+    "db:studio": "npm run studio -w @classweb/database",
+    "db:up": "docker compose up -d postgres",
+    "db:down": "docker compose down"
+  },
+  "license": "UNLICENSED"
+}
