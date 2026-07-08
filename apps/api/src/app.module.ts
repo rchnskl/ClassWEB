@@ -7,6 +7,7 @@ import { validateEnv } from './config/env.validation';
 import { PrismaModule } from './prisma/prisma.module';
 import { AuthModule } from './auth/auth.module';
 import { UsersModule } from './users/users.module';
+import { DashboardModule } from './dashboard/dashboard.module';
 import { HealthModule } from './health/health.module';
 import { JwtAuthGuard } from './common/guards/jwt-auth.guard';
 import { PermissionsGuard } from './common/guards/permissions.guard';
@@ -24,6 +25,7 @@ import { AllExceptionsFilter } from './common/filters/all-exceptions.filter';
     PrismaModule,
     AuthModule,
     UsersModule,
+    DashboardModule,
     HealthModule,
   ],
   providers: [
