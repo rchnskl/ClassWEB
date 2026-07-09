@@ -1,22 +1,30 @@
-export default function Logo({ size = 40 }: { size?: number }) {
+/**
+ * Faculty of Nursing crest. Uses the official emblem from /public/logos.
+ * `variant="university"` renders the Assumption University seal instead.
+ */
+export default function Logo({
+  size = 40,
+  variant = 'faculty',
+}: {
+  size?: number;
+  variant?: 'faculty' | 'university';
+}) {
+  const src = variant === 'university' ? '/logos/university.png' : '/logos/faculty.png';
+  const alt = variant === 'university' ? 'Assumption University' : 'Faculty of Nursing';
   return (
-    <div
-      className="brand-gradient"
+    // eslint-disable-next-line @next/next/no-img-element
+    <img
+      src={src}
+      alt={alt}
+      width={size}
+      height={size}
       style={{
         width: size,
         height: size,
-        borderRadius: size * 0.32,
-        display: 'grid',
-        placeItems: 'center',
-        boxShadow: '0 8px 20px -8px rgba(14,124,123,0.8)',
+        objectFit: 'contain',
+        filter: 'drop-shadow(0 4px 10px rgba(0,0,0,0.25))',
         flexShrink: 0,
       }}
-    >
-      <svg width={size * 0.6} height={size * 0.6} viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
-        <path d="M12 3l9 4.5-9 4.5-9-4.5z" />
-        <path d="M21 7.5V13" />
-        <path d="M6.5 9.8V15c0 1.4 2.5 3 5.5 3s5.5-1.6 5.5-3V9.8" />
-      </svg>
-    </div>
+    />
   );
 }

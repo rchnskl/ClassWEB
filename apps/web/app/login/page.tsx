@@ -42,22 +42,23 @@ export default function LoginPage() {
       </div>
 
       <div className="glass glass-strong rise" style={{ width: '100%', maxWidth: 420, padding: 36 }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 14, marginBottom: 26 }}>
-          <Logo size={48} />
-          <div>
-            <div style={{ fontSize: 20, fontWeight: 700, letterSpacing: -0.3 }}>
-              Class<span className="brand-text">Web</span>
-            </div>
-            <div className="muted" style={{ fontSize: 13 }}>
-              Faculty of Nursing · Assumption University
-            </div>
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center', marginBottom: 24 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 14, marginBottom: 14 }}>
+            <Logo size={62} variant="faculty" />
+            <Logo size={54} variant="university" />
+          </div>
+          <div style={{ fontSize: 22, fontWeight: 750, letterSpacing: -0.4 }}>
+            Class<span className="brand-text">Web</span>
+          </div>
+          <div className="muted" style={{ fontSize: 13, marginTop: 2 }}>
+            Faculty of Nursing · Assumption University
           </div>
         </div>
 
-        <h1 style={{ fontSize: 26, fontWeight: 700, margin: '0 0 4px', letterSpacing: -0.4 }}>
+        <h1 style={{ fontSize: 24, fontWeight: 700, margin: '0 0 4px', letterSpacing: -0.4, textAlign: 'center' }}>
           Welcome back
         </h1>
-        <p className="muted" style={{ margin: '0 0 24px', fontSize: 14.5 }}>
+        <p className="muted" style={{ margin: '0 0 24px', fontSize: 14.5, textAlign: 'center' }}>
           Sign in to the classroom platform.
         </p>
 
