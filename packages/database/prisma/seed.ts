@@ -365,6 +365,29 @@ async function main() {
   const gen = await prisma.classSession.createMany({ data: sessionRows, skipDuplicates: true });
   console.log(`  ✓ generated ${gen.count} class sessions`);
 
+  // ---- Calendar entries (personal appointment + faculty activity) ---------
+  const calDefs = [
+    {
+      type: 'PERSONAL' as const, visibility: 'PRIVATE' as const,
+      title: 'พบนักศึกษา Year 2 (advising)',
+      startAt: new Date('2026-07-09T15:30:00+07:00'), endAt: new Date('2026-07-09T16:30:00+07:00'),
+      lecturerId: lecturer.id, color: '#6fa3d6',
+    },
+    {
+      type: 'ACTIVITY' as const, visibility: 'FACULTY' as const,
+      title: 'อบรมทักษะการพยาบาล (Skills Workshop)',
+      startAt: new Date('2026-07-10T09:00:00+07:00'), endAt: new Date('2026-07-10T12:00:00+07:00'),
+      roomId: rooms['NLAB-01'], color: '#ff8a4c',
+    },
+  ];
+  for (const c of calDefs) {
+    const exists = await prisma.calendarEntry.findFirst({ where: { universityId: university.id, title: c.title, startAt: c.startAt } });
+    if (!exists) {
+      await prisma.calendarEntry.create({ data: { universityId: university.id, ...c } });
+    }
+  }
+  console.log(`  ✓ ${calDefs.length} calendar entries`);
+
   console.log('✅ Seed complete.');
 }
 
