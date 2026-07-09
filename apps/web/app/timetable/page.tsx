@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import Sidebar from '@/components/Sidebar';
 import Topbar from '@/components/Topbar';
 import { apiFetch } from '@/lib/api';
+import { useI18n } from '@/lib/i18n';
 
 interface Slot {
   id: string;
@@ -23,11 +24,11 @@ const END_HOUR = 18;
 const PX_PER_MIN = 1.1;
 
 const PALETTE = [
-  ['#14b8a6', '#0e7c7b'],
-  ['#6366f1', '#4f46e5'],
-  ['#f59e0b', '#d97706'],
-  ['#ec4899', '#db2777'],
-  ['#0ea5e9', '#0284c7'],
+  ['#ff8a4c', '#f97316'], // orange
+  ['#6fa3d6', '#4f83c2'], // blue
+  ['#ffb27a', '#ff9e5e'], // peach
+  ['#89b4e0', '#6d9fd6'], // sky
+  ['#f4a259', '#e08a2b'], // amber
 ];
 function colorFor(code: string): [string, string] {
   let h = 0;
@@ -38,6 +39,7 @@ const toMin = (t: string) => { const [h, m] = t.split(':').map(Number); return h
 
 export default function TimetablePage() {
   const router = useRouter();
+  const { t } = useI18n();
   const [email, setEmail] = useState('admin@nursing.au.edu');
   const [slots, setSlots] = useState<Slot[]>([]);
   const [loading, setLoading] = useState(true);
@@ -71,24 +73,24 @@ export default function TimetablePage() {
         <Topbar email={email} />
 
         <div className="rise" style={{ marginBottom: 18 }}>
-          <h1 style={{ fontSize: 27, fontWeight: 750, letterSpacing: -0.6, margin: 0 }}>Timetable</h1>
+          <h1 style={{ fontSize: 27, fontWeight: 750, letterSpacing: -0.6, margin: 0 }}>{t('tt.title')}</h1>
           <p className="muted" style={{ margin: '4px 0 0', fontSize: 14.5 }}>
-            Weekly view · First Semester 2026 · {slots.length} scheduled slots
+            {t('tt.subtitle')} · {slots.length} {t('tt.slots')}
           </p>
         </div>
 
-        {error && <div className="glass" style={{ padding: 16, marginBottom: 16 }}><span className="chip chip-danger">Error</span> <span style={{ marginLeft: 8 }}>{error}</span></div>}
+        {error && <div className="glass" style={{ padding: 16, marginBottom: 16 }}><span className="chip chip-danger">{t('common.error')}</span> <span style={{ marginLeft: 8 }}>{error}</span></div>}
 
         <div className="glass rise" style={{ padding: 18, overflowX: 'auto' }}>
           {loading ? (
-            <div className="muted" style={{ padding: 40, textAlign: 'center' }}>Loading…</div>
+            <div className="muted" style={{ padding: 40, textAlign: 'center' }}>{t('common.loading')}</div>
           ) : (
             <div style={{ display: 'grid', gridTemplateColumns: '56px repeat(5, minmax(120px, 1fr))', gap: 8, minWidth: 720 }}>
               {/* header */}
               <div />
               {DAYS.map((d) => (
                 <div key={d} style={{ textAlign: 'center', fontWeight: 700, fontSize: 14, padding: '4px 0', color: d === todayDow ? 'var(--brand-2)' : 'var(--text-1)' }}>
-                  {DAY_LABEL[d]}{d === todayDow && <div className="muted" style={{ fontSize: 10.5, fontWeight: 600 }}>today</div>}
+                  {DAY_LABEL[d]}{d === todayDow && <div className="muted" style={{ fontSize: 10.5, fontWeight: 600 }}>{t('tt.today')}</div>}
                 </div>
               ))}
 

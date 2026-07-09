@@ -2,11 +2,14 @@
 
 import { useRouter } from 'next/navigation';
 import ThemeToggle from './ThemeToggle';
+import LanguageToggle from './LanguageToggle';
 import { IconSearch, IconBell, IconLogout } from './icons';
 import { clearSession } from '@/lib/api';
+import { useI18n } from '@/lib/i18n';
 
 export default function Topbar({ email }: { email: string }) {
   const router = useRouter();
+  const { t } = useI18n();
   const initials = email.slice(0, 2).toUpperCase();
 
   return (
@@ -19,12 +22,14 @@ export default function Topbar({ email }: { email: string }) {
         style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '9px 14px', borderRadius: 14, flex: 1, maxWidth: 420, color: 'var(--text-2)' }}
       >
         <IconSearch />
-        <span style={{ fontSize: 14 }}>Search students, sections, rooms…</span>
+        <span style={{ fontSize: 14 }}>{t('top.search')}</span>
       </div>
 
       <div style={{ flex: 1 }} />
 
-      <button className="glass hairline" style={{ width: 40, height: 40, borderRadius: 12, display: 'grid', placeItems: 'center', color: 'var(--text-1)', cursor: 'pointer', position: 'relative' }} aria-label="Notifications">
+      <LanguageToggle />
+
+      <button className="glass hairline icon-btn" style={{ width: 40, height: 40, position: 'relative' }} aria-label="Notifications">
         <IconBell />
         <span style={{ position: 'absolute', top: 9, right: 10, width: 7, height: 7, borderRadius: 999, background: 'var(--danger)' }} />
       </button>
@@ -37,15 +42,15 @@ export default function Topbar({ email }: { email: string }) {
         </div>
         <div style={{ lineHeight: 1.2 }}>
           <div style={{ fontSize: 13.5, fontWeight: 600 }}>{email}</div>
-          <div className="muted" style={{ fontSize: 11.5 }}>Administrator</div>
+          <div className="muted" style={{ fontSize: 11.5 }}>{t('top.role')}</div>
         </div>
       </div>
 
       <button
         onClick={() => { clearSession(); router.push('/login'); }}
-        className="glass hairline"
-        style={{ width: 40, height: 40, borderRadius: 12, display: 'grid', placeItems: 'center', color: 'var(--text-1)', cursor: 'pointer' }}
-        aria-label="Log out"
+        className="glass hairline icon-btn"
+        style={{ width: 40, height: 40 }}
+        aria-label={t('top.logout')}
       >
         <IconLogout />
       </button>

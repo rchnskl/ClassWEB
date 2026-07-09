@@ -5,9 +5,11 @@
 export default function Logo({
   size = 40,
   variant = 'faculty',
+  float = false,
 }: {
   size?: number;
   variant?: 'faculty' | 'university';
+  float?: boolean;
 }) {
   const src = variant === 'university' ? '/logos/university.png' : '/logos/faculty.png';
   const alt = variant === 'university' ? 'Assumption University' : 'Faculty of Nursing';
@@ -18,6 +20,7 @@ export default function Logo({
       alt={alt}
       width={size}
       height={size}
+      className={float ? 'floaty' : undefined}
       style={{
         width: size,
         height: size,

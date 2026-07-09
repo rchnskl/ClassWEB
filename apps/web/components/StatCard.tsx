@@ -12,14 +12,15 @@ export default function StatCard({
   value: ReactNode;
   hint?: string;
   icon: ReactNode;
-  tone?: 'brand' | 'danger' | 'warning' | 'success';
+  tone?: 'brand' | 'blue' | 'danger' | 'warning' | 'success';
   delay?: number;
 }) {
   const toneColor =
     tone === 'danger' ? 'var(--danger)'
     : tone === 'warning' ? 'var(--warning)'
     : tone === 'success' ? 'var(--success)'
-    : 'var(--brand-2)';
+    : tone === 'blue' ? 'var(--brand-blue)'
+    : 'var(--brand)';
 
   return (
     <div className="glass rise" style={{ padding: 20, animationDelay: `${delay}ms` }}>

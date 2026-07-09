@@ -45,3 +45,6 @@ storage/uploads/*
 
 # Claude Code local overrides
 .claude/settings.local.json
+
+# TS incremental build info
+*.tsbuildinfo

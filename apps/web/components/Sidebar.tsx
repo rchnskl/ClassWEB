@@ -2,44 +2,40 @@
 
 import Link from 'next/link';
 import Logo from './Logo';
+import { useI18n } from '@/lib/i18n';
 import {
   IconGrid, IconStudents, IconTeacher, IconBook, IconCalendar,
   IconCheck, IconReport, IconSettings,
 } from './icons';
 
 const NAV = [
-  { label: 'Dashboard', icon: IconGrid, href: '/dashboard' },
-  { label: 'Students', icon: IconStudents, href: '/students' },
-  { label: 'Lecturers', icon: IconTeacher, href: '/lecturers' },
-  { label: 'Subjects & Sections', icon: IconBook, href: '/sections' },
-  { label: 'Timetable', icon: IconCalendar, href: '/timetable' },
-  { label: 'Attendance', icon: IconCheck, href: '/attendance' },
-  { label: 'Reports', icon: IconReport, href: '/reports' },
-  { label: 'Settings', icon: IconSettings, href: '/settings' },
+  { key: 'nav.dashboard', icon: IconGrid, href: '/dashboard', id: 'Dashboard' },
+  { key: 'nav.students', icon: IconStudents, href: '/students', id: 'Students' },
+  { key: 'nav.lecturers', icon: IconTeacher, href: '/lecturers', id: 'Lecturers' },
+  { key: 'nav.sections', icon: IconBook, href: '/sections', id: 'Sections' },
+  { key: 'nav.timetable', icon: IconCalendar, href: '/timetable', id: 'Timetable' },
+  { key: 'nav.attendance', icon: IconCheck, href: '/attendance', id: 'Attendance' },
+  { key: 'nav.reports', icon: IconReport, href: '/reports', id: 'Reports' },
+  { key: 'nav.settings', icon: IconSettings, href: '/settings', id: 'Settings' },
 ];
 
 export default function Sidebar({ active = 'Dashboard' }: { active?: string }) {
+  const { t } = useI18n();
   return (
     <aside
       className="glass"
       style={{
-        width: 250,
-        padding: 18,
-        display: 'flex',
-        flexDirection: 'column',
-        gap: 6,
-        position: 'sticky',
-        top: 16,
-        height: 'calc(100vh - 32px)',
+        width: 250, padding: 18, display: 'flex', flexDirection: 'column', gap: 6,
+        position: 'sticky', top: 16, height: 'calc(100vh - 32px)',
       }}
     >
       <div style={{ display: 'flex', alignItems: 'center', gap: 11, padding: '6px 8px 16px' }}>
-        <Logo size={38} />
+        <Logo size={38} float />
         <div>
           <div style={{ fontWeight: 700, fontSize: 16.5, letterSpacing: -0.3 }}>
             Class<span className="brand-text">Web</span>
           </div>
-          <div className="muted" style={{ fontSize: 11 }}>Nursing · AU</div>
+          <div className="muted" style={{ fontSize: 11 }}>{t('brand.short')}</div>
         </div>
       </div>
 
@@ -47,17 +43,17 @@ export default function Sidebar({ active = 'Dashboard' }: { active?: string }) {
         {NAV.map((item) => {
           const Icon = item.icon;
           return (
-            <Link key={item.label} href={item.href} className={`nav-item${item.label === active ? ' active' : ''}`}>
+            <Link key={item.id} href={item.href} className={`nav-item${item.id === active ? ' active' : ''}`}>
               <Icon />
-              <span>{item.label}</span>
+              <span>{t(item.key)}</span>
             </Link>
           );
         })}
       </nav>
 
       <div className="glass hairline" style={{ marginTop: 'auto', padding: 14, borderRadius: 16 }}>
-        <div style={{ fontSize: 12.5, fontWeight: 600 }}>Academic Year 2026</div>
-        <div className="muted" style={{ fontSize: 11.5, marginTop: 2 }}>First Semester · active</div>
+        <div style={{ fontSize: 12.5, fontWeight: 600 }}>{t('nav.year')}</div>
+        <div className="muted" style={{ fontSize: 11.5, marginTop: 2 }}>{t('nav.semester')}</div>
       </div>
     </aside>
   );
