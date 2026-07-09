@@ -279,18 +279,35 @@ async function main() {
       lecturerId: lecturer.id, roomId: rooms['CL-1101'], sectionNo: '001', capacity: 40,
     },
   });
-  const scheduleExists = await prisma.sectionSchedule.findFirst({
-    where: { sectionId: section.id, dayOfWeek: DayOfWeek.MONDAY, startTime: '09:00' },
-  });
-  if (!scheduleExists) {
-    await prisma.sectionSchedule.create({
-      data: {
-        sectionId: section.id, roomId: rooms['CL-1101'], lecturerId: lecturer.id,
-        dayOfWeek: DayOfWeek.MONDAY, startTime: '09:00', endTime: '12:00',
+  // Second section (a different subject) so the timetable grid is meaningful.
+  const section2 = await prisma.section.upsert({
+    where: {
+      subjectId_semesterId_sectionNo: {
+        subjectId: subjects.NUR1102, semesterId: semester.id, sectionNo: '001',
       },
+    },
+    update: {},
+    create: {
+      universityId: university.id, subjectId: subjects.NUR1102, semesterId: semester.id,
+      lecturerId: lecturer.id, roomId: rooms['CL-1102'], sectionNo: '001', capacity: 40,
+    },
+  });
+
+  // Weekly schedule slots (idempotent per day+time).
+  const scheduleDefs = [
+    { sectionId: section.id, roomId: rooms['CL-1101'], dayOfWeek: DayOfWeek.MONDAY, startTime: '09:00', endTime: '12:00' },
+    { sectionId: section.id, roomId: rooms['NLAB-01'], dayOfWeek: DayOfWeek.THURSDAY, startTime: '13:00', endTime: '15:00' },
+    { sectionId: section2.id, roomId: rooms['CL-1102'], dayOfWeek: DayOfWeek.WEDNESDAY, startTime: '13:00', endTime: '16:00' },
+  ];
+  for (const sc of scheduleDefs) {
+    const exists = await prisma.sectionSchedule.findFirst({
+      where: { sectionId: sc.sectionId, dayOfWeek: sc.dayOfWeek, startTime: sc.startTime },
     });
+    if (!exists) {
+      await prisma.sectionSchedule.create({ data: { ...sc, lecturerId: lecturer.id } });
+    }
   }
-  console.log('  ✓ section NUR1101-001 + weekly schedule');
+  console.log(`  ✓ 2 sections + ${scheduleDefs.length} weekly schedule slots`);
 
   // ---- Students + enrollment ---------------------------------------------
   const studentDefs = [
@@ -306,18 +323,47 @@ async function main() {
         qrCode: `AU-STU-${s.studentCode}`, ...s,
       },
     });
-    await prisma.enrollment.upsert({
-      where: { sectionId_studentId: { sectionId: section.id, studentId: student.id } },
-      update: {},
-      create: { sectionId: section.id, studentId: student.id },
+    for (const sec of [section.id, section2.id]) {
+      await prisma.enrollment.upsert({
+        where: { sectionId_studentId: { sectionId: sec, studentId: student.id } },
+        update: {},
+        create: { sectionId: sec, studentId: student.id },
+      });
+    }
+  }
+  for (const sec of [section.id, section2.id]) {
+    await prisma.section.update({
+      where: { id: sec },
+      data: { currentEnrollment: await prisma.enrollment.count({ where: { sectionId: sec, status: 'ENROLLED' } }) },
     });
   }
-  // keep the denormalised counter honest
-  await prisma.section.update({
-    where: { id: section.id },
-    data: { currentEnrollment: await prisma.enrollment.count({ where: { sectionId: section.id, status: 'ENROLLED' } }) },
+  console.log(`  ✓ ${studentDefs.length} students enrolled into 2 sections`);
+
+  // ---- Expand schedules into concrete class sessions across the semester ---
+  const JS_DAY = [
+    DayOfWeek.SUNDAY, DayOfWeek.MONDAY, DayOfWeek.TUESDAY, DayOfWeek.WEDNESDAY,
+    DayOfWeek.THURSDAY, DayOfWeek.FRIDAY, DayOfWeek.SATURDAY,
+  ];
+  const allSchedules = await prisma.sectionSchedule.findMany({
+    where: { section: { semesterId: semester.id } },
+    select: { sectionId: true, roomId: true, lecturerId: true, dayOfWeek: true, startTime: true, endTime: true },
   });
-  console.log(`  ✓ ${studentDefs.length} students enrolled`);
+  const sessionRows: {
+    sectionId: string; roomId: string | null; lecturerId: string | null;
+    sessionDate: Date; startTime: string; endTime: string;
+  }[] = [];
+  for (let d = new Date(semester.startDate); d <= semester.endDate; d.setUTCDate(d.getUTCDate() + 1)) {
+    const dow = JS_DAY[d.getUTCDay()];
+    for (const sc of allSchedules) {
+      if (sc.dayOfWeek !== dow) continue;
+      sessionRows.push({
+        sectionId: sc.sectionId, roomId: sc.roomId, lecturerId: sc.lecturerId,
+        sessionDate: new Date(d), startTime: sc.startTime, endTime: sc.endTime,
+      });
+    }
+  }
+  const gen = await prisma.classSession.createMany({ data: sessionRows, skipDuplicates: true });
+  console.log(`  ✓ generated ${gen.count} class sessions`);
 
   console.log('✅ Seed complete.');
 }

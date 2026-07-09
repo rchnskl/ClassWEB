@@ -9,7 +9,7 @@ in the requirements brief is accounted for below.
 | **1. Data foundation** | Multi-tenant Prisma schema, migrations, seed, ERD docs | Multi-Tenant Architecture, Academic Structure, Course/Room/Student/Lecturer/Section/Enrollment/Attendance **data**, Audit/Settings/Backup tables | ✅ **Done & verified** |
 | **2. Backend core + security** | NestJS scaffold, JWT + refresh, RBAC guards, tenant scoping, audit interceptor, Swagger, health checks | Security, API, Audit Log, Monitoring | ✅ **Done & verified** |
 | **3. Core domain APIs** | CRUD + services for academic hierarchy, students, lecturers, rooms, sections, enrollment | Course/Room/Student/Lecturer/Section/Enrollment Management | ✅ **Done & verified** |
-| **4. Timetable + attendance engine** | Schedule generation, conflict detection, attendance capture (manual + QR), rule engine | Timetable, Attendance Features, Attendance Rule Engine | ⬜ |
+| **4. Timetable + attendance engine** | Schedule generation, conflict detection, attendance capture (manual + QR), rule engine | Timetable, Attendance Features, Attendance Rule Engine | 🔷 Timetable done; attendance next |
 | **5. Frontend (admin dashboard)** | Next.js glass-morphism UI, dashboards, search, filters, dark/light, responsive | Dashboard, Design, Search Engine, Filter System, Admin Dashboard | ⬜ |
 | **6. Analytics + notifications** | Risk analytics, attendance stats, notifications (email/LINE/push/system) | Dashboard stats, Student Risk Analytics, Notification System | ⬜ |
 | **7. Reporting + PDF** | Report center, PDF/Excel/CSV export, digital signature, QR verification | Report Center, PDF Design | ⬜ |
@@ -70,6 +70,28 @@ subjects/lecturers/rooms/programs with real seeded data; created a student via A
 and via the UI; enrolled a student (counter 2→3); duplicate enroll → 409; RBAC
 lecturer create-student → 403 while read → 200; Students page rendered with real
 data in the browser.
+
+## Phase 4a — timetable (delivered)
+
+- `timetable` module: add weekly schedule slots with **room / teacher / section
+  conflict detection** (time-overlap within the same semester + weekday →
+  409 with a specific message), expand schedules into concrete `ClassSession`
+  rows across the semester (idempotent, holiday-aware), and read the weekly grid
+  + class sessions by date.
+- Seed enriched: 2 sections, 4 weekly slots (incl. a session on the current
+  weekday), 60 generated class sessions — so the dashboard's "Today's classes"
+  and the timetable are populated with real data.
+- Frontend: **Timetable** weekly view (time grid, colour-by-subject blocks,
+  "today" highlight).
+
+**Verification (live Postgres):** weekly slots listed; room clash → 409
+("Room conflict: CL-1101 is already booked 09:00–12:00"); non-conflicting slot →
+201; today's sessions = 1; `dashboard.todayClasses` = 1; timetable rendered in
+the browser.
+
+**Next (Phase 4b):** attendance capture (manual + QR) + rule engine
+(late/auto-absent/lock), writing to `AttendanceRecord` and updating
+`enrollment.attendanceRate`.
 
 ## Resolved decisions
 

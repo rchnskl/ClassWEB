@@ -15,6 +15,7 @@ import { SubjectsModule } from './subjects/subjects.module';
 import { SectionsModule } from './sections/sections.module';
 import { RoomsModule } from './rooms/rooms.module';
 import { EnrollmentsModule } from './enrollments/enrollments.module';
+import { TimetableModule } from './timetable/timetable.module';
 import { HealthModule } from './health/health.module';
 import { JwtAuthGuard } from './common/guards/jwt-auth.guard';
 import { PermissionsGuard } from './common/guards/permissions.guard';
@@ -40,6 +41,7 @@ import { AllExceptionsFilter } from './common/filters/all-exceptions.filter';
     SectionsModule,
     RoomsModule,
     EnrollmentsModule,
+    TimetableModule,
     HealthModule,
   ],
   providers: [
