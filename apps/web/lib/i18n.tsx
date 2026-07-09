@@ -82,6 +82,16 @@ const EN: Dict = {
   'tt.slots': 'scheduled slots',
   'tt.today': 'today',
 
+  'widget.localTime': 'Local time',
+  'widget.weather': 'Weather',
+  'widget.airQuality': 'Air quality',
+  'widget.feelsLike': 'Feels like',
+  'widget.humidity': 'Humidity',
+  'widget.wind': 'Wind',
+  'widget.aqi': 'US AQI',
+  'widget.updated': 'Updated',
+  'widget.unavailable': 'Data unavailable',
+
   'common.loading': 'Loading…',
   'common.error': 'Error',
   'common.page': 'Page',
@@ -165,6 +175,16 @@ const TH: Dict = {
   'tt.subtitle': 'มุมมองรายสัปดาห์ · ภาคเรียนที่ 1 ปีการศึกษา 2569',
   'tt.slots': 'คาบที่จัดไว้',
   'tt.today': 'วันนี้',
+
+  'widget.localTime': 'เวลาท้องถิ่น',
+  'widget.weather': 'สภาพอากาศ',
+  'widget.airQuality': 'คุณภาพอากาศ',
+  'widget.feelsLike': 'รู้สึกเหมือน',
+  'widget.humidity': 'ความชื้น',
+  'widget.wind': 'ลม',
+  'widget.aqi': 'ดัชนี AQI (US)',
+  'widget.updated': 'อัปเดตเมื่อ',
+  'widget.unavailable': 'ไม่มีข้อมูล',
 
   'common.loading': 'กำลังโหลด…',
   'common.error': 'ข้อผิดพลาด',

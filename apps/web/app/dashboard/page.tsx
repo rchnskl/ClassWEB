@@ -6,6 +6,7 @@ import Sidebar from '@/components/Sidebar';
 import Topbar from '@/components/Topbar';
 import StatCard from '@/components/StatCard';
 import { IconStudents, IconBook, IconCheck, IconCalendar, IconReport } from '@/components/icons';
+import { ClockWidget, EnvironmentWidgets } from '@/components/DashboardWidgets';
 import { apiFetch, type DashboardSummary, type MeResponse } from '@/lib/api';
 import { useI18n } from '@/lib/i18n';
 
@@ -54,6 +55,12 @@ export default function DashboardPage() {
             {t('dash.greeting')} 👋
           </h1>
           <p className="muted" style={{ margin: '4px 0 0', fontSize: 14.5 }}>{t('dash.subtitle')}</p>
+        </div>
+
+        {/* Live widgets: clock (realtime, localised), weather, air quality. */}
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 16, marginBottom: 20 }}>
+          <ClockWidget />
+          <EnvironmentWidgets />
         </div>
 
         {error && (

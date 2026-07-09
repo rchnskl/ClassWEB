@@ -58,6 +58,18 @@ export interface DashboardSummary {
   generatedAt: string;
 }
 
+export interface Environment {
+  location: { name: string; lat: number; lng: number };
+  weather: {
+    temperature: number; apparentTemperature: number; humidity: number;
+    windSpeed: number; code: number; isDay: boolean; description: string;
+  } | null;
+  air: { pm25: number | null; pm10: number | null; usAqi: number | null; category: string } | null;
+  source: string;
+  fetchedAt: string;
+  errors: string[];
+}
+
 export interface MeResponse {
   id: string;
   email: string;
