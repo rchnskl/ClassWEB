@@ -10,6 +10,15 @@ import { FONT_TH, FONT_TH_BOLD, LOGO_FACULTY, LOGO_UNIVERSITY } from './report-a
 
 const WEB_BASE = process.env.WEB_BASE_URL ?? 'http://localhost:3000';
 
+function tierOf(rate: number): 'OK' | 'WARNING' | 'RISK' | 'CRITICAL' {
+  if (rate < 60) return 'CRITICAL';
+  if (rate < 70) return 'RISK';
+  if (rate < 80) return 'WARNING';
+  return 'OK';
+}
+const TIER_TH: Record<string, string> = { OK: 'ปกติ', WARNING: 'เฝ้าระวัง', RISK: 'เสี่ยง', CRITICAL: 'วิกฤต' };
+const STATUS_TH: Record<string, string> = { PRESENT: 'มาเรียน', LATE: 'สาย', ABSENT: 'ขาด', EXCUSED: 'ลาป่วย/ลากิจ', LEAVE: 'ลา' };
+
 @Injectable()
 export class ReportsService {
   constructor(
@@ -38,12 +47,15 @@ export class ReportsService {
     return { university, faculty, overview };
   }
 
-  private async register(universityId: string, format: ReportFormat, checksum: string, byId?: string, byName?: string) {
+  private async register(
+    universityId: string, format: ReportFormat, checksum: string,
+    byId?: string, byName?: string,
+    type = 'ATTENDANCE_SUMMARY', title = 'Attendance Summary Report',
+  ) {
     const reportNumber = this.newReportNumber();
     await this.prisma.report.create({
       data: {
-        universityId, reportNumber, format, checksum,
-        type: 'ATTENDANCE_SUMMARY', title: 'Attendance Summary Report',
+        universityId, reportNumber, format, checksum, type, title,
         generatedById: byId ?? null, generatedByName: byName ?? null,
       },
     });
@@ -206,5 +218,184 @@ export class ReportsService {
 
     const buffer = Buffer.from(await wb.xlsx.writeBuffer());
     return { buffer, reportNumber };
+  }
+
+  // ---- Per-student report ----------------------------------------------
+
+  private async gatherStudent(universityId: string, studentId: string) {
+    const [university, faculty, student] = await Promise.all([
+      this.prisma.university.findUnique({ where: { id: universityId }, select: { nameEn: true, nameTh: true } }),
+      this.prisma.faculty.findFirst({ where: { universityId, code: 'NURSING' }, select: { nameEn: true, nameTh: true } }),
+      this.prisma.student.findFirst({
+        where: { id: studentId, universityId, deletedAt: null },
+        select: { studentCode: true, nameEn: true, nameTh: true, status: true, admissionYear: true, program: { select: { code: true, nameEn: true } } },
+      }),
+    ]);
+    if (!student) throw new NotFoundException('Student not found in this tenant');
+
+    const records = await this.prisma.attendanceRecord.findMany({
+      where: { studentId, enrollment: { section: { universityId } } },
+      select: {
+        status: true,
+        classSession: { select: { sessionDate: true, section: { select: { subject: { select: { code: true, nameEn: true } } } } } },
+      },
+      orderBy: { classSession: { sessionDate: 'desc' } },
+    });
+
+    const total = records.length;
+    const present = records.filter((r) => r.status === 'PRESENT').length;
+    const late = records.filter((r) => r.status === 'LATE').length;
+    const absent = records.filter((r) => r.status === 'ABSENT').length;
+    const rate = total > 0 ? Math.round(((present + late) / total) * 1000) / 10 : 0;
+
+    const bySubjectMap = new Map<string, { code: string; name: string; present: number; late: number; absent: number; total: number }>();
+    for (const r of records) {
+      const code = r.classSession.section.subject.code;
+      const e = bySubjectMap.get(code) ?? { code, name: r.classSession.section.subject.nameEn, present: 0, late: 0, absent: 0, total: 0 };
+      e.total++;
+      if (r.status === 'PRESENT') e.present++; else if (r.status === 'LATE') e.late++; else if (r.status === 'ABSENT') e.absent++;
+      bySubjectMap.set(code, e);
+    }
+    const bySubject = [...bySubjectMap.values()].map((e) => ({ ...e, rate: e.total > 0 ? Math.round(((e.present + e.late) / e.total) * 1000) / 10 : 0 }));
+    const log = records.map((r) => ({ date: r.classSession.sessionDate, subject: r.classSession.section.subject.code, status: r.status }));
+
+    return { university, faculty, student, total, present, late, absent, rate, tier: tierOf(rate), bySubject, log };
+  }
+
+  async studentPdf(universityId: string, studentId: string, byId?: string, byName?: string): Promise<{ buffer: Buffer; reportNumber: string }> {
+    const d = await this.gatherStudent(universityId, studentId);
+    const checksum = createHash('sha256').update(JSON.stringify({ code: d.student.studentCode, rate: d.rate, total: d.total })).digest('hex');
+    const reportNumber = await this.register(universityId, 'PDF', checksum, byId, byName, 'STUDENT_ATTENDANCE', `Student report ${d.student.studentCode}`);
+    const verifyUrl = `${WEB_BASE}/verify/${reportNumber}`;
+    const qrPng = Buffer.from((await QRCode.toDataURL(verifyUrl, { margin: 1, width: 200 })).split(',')[1], 'base64');
+
+    const doc = new PDFDocument({ size: 'A4', margin: 40, bufferPages: true });
+    const chunks: Buffer[] = [];
+    doc.on('data', (c) => chunks.push(c as Buffer));
+    const done = new Promise<Buffer>((resolve) => doc.on('end', () => resolve(Buffer.concat(chunks))));
+
+    const th = FONT_TH(); const thBold = FONT_TH_BOLD();
+    if (th) doc.registerFont('TH', th);
+    if (thBold) doc.registerFont('THB', thBold);
+    const F = th ? 'TH' : 'Helvetica'; const FB = thBold ? 'THB' : 'Helvetica-Bold';
+    const pageW = doc.page.width; const left = 40; const right = pageW - 40;
+
+    // Header
+    const uniLogo = LOGO_UNIVERSITY(); const facLogo = LOGO_FACULTY();
+    if (uniLogo) doc.image(uniLogo, left, 38, { width: 50 });
+    if (facLogo) doc.image(facLogo, right - 50, 36, { width: 50 });
+    doc.font(FB).fontSize(18).fillColor('#26303f').text(d.university?.nameTh ?? 'University', 100, 44, { width: pageW - 200, align: 'center' });
+    doc.font(FB).fontSize(15).fillColor('#0e2a4a').text(d.faculty?.nameTh ?? 'Faculty of Nursing', 100, 66, { width: pageW - 200, align: 'center' });
+    doc.font(F).fontSize(14).fillColor('#4a5666').text('รายงานการเข้าเรียนรายบุคคล (Individual Attendance Report)', 100, 86, { width: pageW - 200, align: 'center' });
+    doc.moveTo(left, 112).lineTo(right, 112).strokeColor('#ff8a4c').lineWidth(2).stroke();
+
+    // Student info + summary box
+    let y = 122;
+    doc.font(F).fontSize(12).fillColor('#4a5666').text(`เลขที่รายงาน: ${reportNumber}    ออกเมื่อ: ${this.thaiDateTime(new Date())}`, left, y);
+    y += 22;
+    doc.roundedRect(left, y, right - left, 78, 10).fillAndStroke('#fff6ee', '#ffd9bf');
+    doc.fillColor('#26303f').font(FB).fontSize(14).text(`${d.student.nameTh ?? d.student.nameEn}  (${d.student.studentCode})`, left + 14, y + 10);
+    doc.font(F).fontSize(12).fillColor('#4a5666');
+    doc.text(`หลักสูตร: ${d.student.program.code} · สถานะ: ${d.student.status}${d.student.admissionYear ? ` · ปีที่เข้า: ${d.student.admissionYear}` : ''}`, left + 14, y + 32);
+    doc.font(FB).fontSize(13).fillColor('#26303f')
+      .text(`เข้าเรียนโดยรวม: ${d.rate}%  (${TIER_TH[d.tier]})    มาเรียน ${d.present} · สาย ${d.late} · ขาด ${d.absent}  รวม ${d.total} คาบ`, left + 14, y + 52);
+    y += 96;
+
+    // Per-subject breakdown
+    doc.font(FB).fontSize(14).fillColor('#26303f').text('สรุปแยกรายวิชา (By subject)', left, y); y += 22;
+    const sc = [left, left + 90, left + 300, left + 360, left + 420, left + 480];
+    doc.roundedRect(left, y - 4, right - left, 20, 4).fill('#0e7c7b');
+    doc.font(FB).fontSize(11).fillColor('#fff');
+    ['รหัสวิชา', 'ชื่อวิชา', 'มา', 'สาย', 'ขาด', 'เข้าเรียน%'].forEach((h, i) => doc.text(h, sc[i] + 3, y, { width: (sc[i + 1] ?? right) - sc[i] - 5 }));
+    y += 20;
+    doc.font(F).fontSize(11).fillColor('#26303f');
+    for (const s of d.bySubject) {
+      doc.text(s.code, sc[0] + 3, y, { width: sc[1] - sc[0] - 5 });
+      doc.text(s.name, sc[1] + 3, y, { width: sc[2] - sc[1] - 5, lineBreak: false, ellipsis: true });
+      doc.text(String(s.present), sc[2] + 3, y); doc.text(String(s.late), sc[3] + 3, y); doc.text(String(s.absent), sc[4] + 3, y);
+      doc.text(`${s.rate}%`, sc[5] + 3, y);
+      y += 18;
+    }
+    y += 12;
+
+    // Detailed session log (paginated)
+    doc.font(FB).fontSize(14).fillColor('#26303f').text('บันทึกการเข้าเรียนรายคาบ (Session log)', left, y); y += 22;
+    const lc = [left, left + 150, left + 320];
+    const drawLogHeader = (yy: number) => {
+      doc.roundedRect(left, yy - 4, right - left, 20, 4).fill('#0e7c7b');
+      doc.font(FB).fontSize(11).fillColor('#fff');
+      ['วันที่', 'รายวิชา', 'สถานะ'].forEach((h, i) => doc.text(h, lc[i] + 3, yy, { width: (lc[i + 1] ?? right) - lc[i] - 5 }));
+      return yy + 20;
+    };
+    y = drawLogHeader(y);
+    doc.font(F).fontSize(11).fillColor('#26303f');
+    const fmtDate = (dt: Date) => new Intl.DateTimeFormat('th-TH-u-ca-buddhist', { dateStyle: 'medium', timeZone: 'Asia/Bangkok' }).format(new Date(dt));
+    d.log.forEach((row, i) => {
+      if (y > doc.page.height - 80) { doc.addPage(); y = 50; y = drawLogHeader(y); doc.font(F).fontSize(11).fillColor('#26303f'); }
+      if (i % 2 === 1) { doc.rect(left, y - 3, right - left, 18).fill('#f6f8fb'); doc.fillColor('#26303f'); }
+      doc.text(fmtDate(row.date), lc[0] + 3, y, { width: lc[1] - lc[0] - 5 });
+      doc.text(row.subject, lc[1] + 3, y, { width: lc[2] - lc[1] - 5 });
+      doc.text(STATUS_TH[row.status] ?? row.status, lc[2] + 3, y);
+      y += 18;
+    });
+
+    // Signature + QR (flow after content)
+    if (y > doc.page.height - 170) { doc.addPage(); y = 60; }
+    const sy = y + 20;
+    doc.image(qrPng, left, sy, { width: 78 });
+    doc.font(F).fontSize(10).fillColor('#7c8798').text('สแกนเพื่อตรวจสอบ', left - 15, sy + 80, { width: 108, align: 'center', lineBreak: false });
+    doc.font(F).fontSize(13).fillColor('#26303f');
+    doc.text('.................................................', right - 220, sy + 28, { width: 220, align: 'center', lineBreak: false });
+    doc.text('ผู้รับรอง / Authorised signature', right - 220, sy + 46, { width: 220, align: 'center', lineBreak: false });
+
+    // Footer on every page. Zero the bottom margin while stamping so writing
+    // near the page edge never auto-appends a blank page.
+    const range = doc.bufferedPageRange();
+    for (let i = range.start; i < range.start + range.count; i++) {
+      doc.switchToPage(i);
+      doc.page.margins.bottom = 0;
+      doc.font(F).fontSize(9).fillColor('#a0aab8')
+        .text(`Generated by ClassWeb · ${reportNumber} · verify at ${verifyUrl} · หน้า ${i + 1}/${range.count}`, left, doc.page.height - 40, { width: right - left, align: 'center', lineBreak: false });
+    }
+    doc.flushPages();
+
+    doc.end();
+    return { buffer: await done, reportNumber };
+  }
+
+  async studentCsv(universityId: string, studentId: string, byId?: string, byName?: string): Promise<{ content: string; reportNumber: string }> {
+    const d = await this.gatherStudent(universityId, studentId);
+    const checksum = createHash('sha256').update(JSON.stringify({ code: d.student.studentCode, rate: d.rate })).digest('hex');
+    const reportNumber = await this.register(universityId, 'CSV', checksum, byId, byName, 'STUDENT_ATTENDANCE', `Student report ${d.student.studentCode}`);
+    const esc = (v: string) => (/[",\n]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v);
+    const rows: string[][] = [
+      ['Report No.', reportNumber],
+      ['Student', `${d.student.studentCode} ${d.student.nameEn}`],
+      ['Program', d.student.program.code],
+      ['Overall rate (%)', String(d.rate)],
+      ['Present/Late/Absent', `${d.present}/${d.late}/${d.absent}`],
+      [],
+      ['Date', 'Subject', 'Status'],
+      ...d.log.map((r) => [new Date(r.date).toISOString().slice(0, 10), r.subject, r.status]),
+    ];
+    return { content: '﻿' + rows.map((r) => r.map((c) => esc(String(c))).join(',')).join('\n'), reportNumber };
+  }
+
+  async studentXlsx(universityId: string, studentId: string, byId?: string, byName?: string): Promise<{ buffer: Buffer; reportNumber: string }> {
+    const d = await this.gatherStudent(universityId, studentId);
+    const checksum = createHash('sha256').update(JSON.stringify({ code: d.student.studentCode, rate: d.rate })).digest('hex');
+    const reportNumber = await this.register(universityId, 'XLSX', checksum, byId, byName, 'STUDENT_ATTENDANCE', `Student report ${d.student.studentCode}`);
+    const wb = new ExcelJS.Workbook();
+    const ws = wb.addWorksheet('Student');
+    ws.addRow([`${d.student.nameTh ?? d.student.nameEn} (${d.student.studentCode})`]);
+    ws.addRow([`Report No.: ${reportNumber}`]);
+    ws.addRow([`Overall: ${d.rate}%  ·  Present ${d.present} / Late ${d.late} / Absent ${d.absent}`]);
+    ws.addRow([]);
+    const header = ws.addRow(['Date', 'Subject', 'Status']);
+    header.font = { bold: true, color: { argb: 'FFFFFFFF' } };
+    header.eachCell((c) => { c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF0E7C7B' } }; });
+    d.log.forEach((r) => ws.addRow([new Date(r.date).toISOString().slice(0, 10), r.subject, r.status]));
+    ws.columns.forEach((c) => { c.width = 18; });
+    return { buffer: Buffer.from(await wb.xlsx.writeBuffer()), reportNumber };
   }
 }

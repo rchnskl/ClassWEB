@@ -6,7 +6,7 @@ import Sidebar from '@/components/Sidebar';
 import Topbar from '@/components/Topbar';
 import { IconSearch, IconStudents } from '@/components/icons';
 import StudentNotesDrawer from '@/components/StudentNotesDrawer';
-import { apiFetch, type MeResponse, type Paginated } from '@/lib/api';
+import { apiFetch, downloadFile, type MeResponse, type Paginated } from '@/lib/api';
 import { useI18n } from '@/lib/i18n';
 
 interface StudentRow {
@@ -41,6 +41,16 @@ export default function StudentsPage() {
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
   const [notesFor, setNotesFor] = useState<StudentRow | null>(null);
+  const [reporting, setReporting] = useState<string | null>(null);
+
+  async function downloadReport(s: StudentRow) {
+    setReporting(s.id);
+    try {
+      await downloadFile(`/reports/student/${s.id}/pdf`, `${s.studentCode}.pdf`);
+    } catch { /* ignore */ } finally {
+      setReporting(null);
+    }
+  }
 
   const load = useCallback(async (nextSkip: number, q: string) => {
     setLoading(true);
@@ -179,13 +189,23 @@ export default function StudentsPage() {
                     <Td>{s.admissionYear ?? <span className="muted">—</span>}</Td>
                     <Td><StatusChip status={s.status} /></Td>
                     <Td>
-                      <button
-                        onClick={() => setNotesFor(s)}
-                        className="glass hairline icon-btn"
-                        style={{ padding: '6px 12px', borderRadius: 10, fontSize: 12.5, fontWeight: 600, color: 'var(--text-1)', display: 'inline-flex', gap: 6 }}
-                      >
-                        📝 {t('students.notes')}
-                      </button>
+                      <div style={{ display: 'inline-flex', gap: 6 }}>
+                        <button
+                          onClick={() => setNotesFor(s)}
+                          className="glass hairline icon-btn"
+                          style={{ padding: '6px 12px', borderRadius: 10, fontSize: 12.5, fontWeight: 600, color: 'var(--text-1)' }}
+                        >
+                          📝 {t('students.notes')}
+                        </button>
+                        <button
+                          onClick={() => downloadReport(s)}
+                          disabled={reporting === s.id}
+                          className="glass hairline icon-btn"
+                          style={{ padding: '6px 12px', borderRadius: 10, fontSize: 12.5, fontWeight: 600, color: 'var(--text-1)', cursor: reporting === s.id ? 'wait' : 'pointer' }}
+                        >
+                          {reporting === s.id ? '…' : `📄 ${t('students.report')}`}
+                        </button>
+                      </div>
                     </Td>
                   </tr>
                 ))}

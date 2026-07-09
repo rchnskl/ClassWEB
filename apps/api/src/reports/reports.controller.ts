@@ -45,6 +45,39 @@ export class ReportsController {
     res.send(buffer);
   }
 
+  @Get('student/:studentId/pdf')
+  @ApiBearerAuth()
+  @Permissions('report:export')
+  @ApiOperation({ summary: 'Individual student attendance report — PDF' })
+  async studentPdf(@CurrentUser() user: AuthenticatedUser, @Param('studentId') studentId: string, @Res() res: Response) {
+    const { buffer, reportNumber } = await this.reports.studentPdf(user.universityId, studentId, user.id, user.email);
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="${reportNumber}.pdf"`);
+    res.send(buffer);
+  }
+
+  @Get('student/:studentId/csv')
+  @ApiBearerAuth()
+  @Permissions('report:export')
+  @ApiOperation({ summary: 'Individual student attendance report — CSV' })
+  async studentCsv(@CurrentUser() user: AuthenticatedUser, @Param('studentId') studentId: string, @Res() res: Response) {
+    const { content, reportNumber } = await this.reports.studentCsv(user.universityId, studentId, user.id, user.email);
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="${reportNumber}.csv"`);
+    res.send(content);
+  }
+
+  @Get('student/:studentId/xlsx')
+  @ApiBearerAuth()
+  @Permissions('report:export')
+  @ApiOperation({ summary: 'Individual student attendance report — Excel' })
+  async studentXlsx(@CurrentUser() user: AuthenticatedUser, @Param('studentId') studentId: string, @Res() res: Response) {
+    const { buffer, reportNumber } = await this.reports.studentXlsx(user.universityId, studentId, user.id, user.email);
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', `attachment; filename="${reportNumber}.xlsx"`);
+    res.send(buffer);
+  }
+
   @Public()
   @Get('verify/:reportNumber')
   @ApiOperation({ summary: 'Public report verification (QR target)' })
