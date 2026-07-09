@@ -18,6 +18,7 @@ import { RoomsModule } from './rooms/rooms.module';
 import { EnrollmentsModule } from './enrollments/enrollments.module';
 import { TimetableModule } from './timetable/timetable.module';
 import { CalendarModule } from './calendar/calendar.module';
+import { AttendanceModule } from './attendance/attendance.module';
 import { WidgetsModule } from './widgets/widgets.module';
 import { HealthModule } from './health/health.module';
 import { JwtAuthGuard } from './common/guards/jwt-auth.guard';
@@ -47,6 +48,7 @@ import { AllExceptionsFilter } from './common/filters/all-exceptions.filter';
     EnrollmentsModule,
     TimetableModule,
     CalendarModule,
+    AttendanceModule,
     WidgetsModule,
     HealthModule,
   ],

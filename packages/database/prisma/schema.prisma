@@ -610,10 +610,11 @@ model ClassSession {
   createdAt        DateTime           @default(now())
   updatedAt        DateTime           @updatedAt
 
-  section    Section            @relation(fields: [sectionId], references: [id])
-  room       Room?              @relation(fields: [roomId], references: [id])
-  lecturer   Lecturer?          @relation(fields: [lecturerId], references: [id])
-  attendance AttendanceRecord[]
+  section            Section             @relation(fields: [sectionId], references: [id])
+  room               Room?               @relation(fields: [roomId], references: [id])
+  lecturer           Lecturer?           @relation(fields: [lecturerId], references: [id])
+  attendance         AttendanceRecord[]
+  attendanceSessions AttendanceSession[]
 
   @@unique([sectionId, sessionDate, startTime])
   @@index([sectionId])
@@ -1194,4 +1195,72 @@ model StudentNote {
   @@index([studentId, createdAt])
   @@index([universityId])
   @@map("student_notes")
+}
+
+// =============================================================================
+//  ATTENDANCE CAPTURE — QR self-service + manual.
+//
+//  A lecturer OPENS an AttendanceSession for a ClassSession, which mints a
+//  short-lived QR token. Students scan the QR and submit their own student code;
+//  each submission is an AttendanceCheckIn. If the code matches an enrolment in
+//  the section it becomes an AttendanceRecord (rule engine decides present/late/
+//  absent). If it does not match, the check-in stays PENDING and the lecturer
+//  resolves it with a reason (make-up from another section, wrong code, late
+//  registration, …). Manual marking writes AttendanceRecord directly.
+// =============================================================================
+
+enum AttendanceCheckInStatus {
+  PENDING
+  MATCHED
+  REJECTED
+}
+
+enum AttendanceResolutionReason {
+  MAKEUP_OTHER_SECTION
+  WRONG_CODE
+  LATE_REGISTRATION
+  OTHER
+}
+
+model AttendanceSession {
+  id             String    @id @default(cuid())
+  classSessionId String
+  token          String    @unique
+  openedById     String?
+  openedAt       DateTime  @default(now())
+  expiresAt      DateTime
+  isOpen         Boolean   @default(true)
+  closedAt       DateTime?
+  createdAt      DateTime  @default(now())
+
+  classSession ClassSession        @relation(fields: [classSessionId], references: [id])
+  checkIns     AttendanceCheckIn[]
+
+  @@index([classSessionId])
+  @@map("attendance_sessions")
+}
+
+model AttendanceCheckIn {
+  id                  String                      @id @default(cuid())
+  attendanceSessionId String
+  classSessionId      String
+  enteredCode         String
+  status              AttendanceCheckInStatus     @default(PENDING)
+  matchedStudentId    String?
+  matchedEnrollmentId String?
+  /// Resulting attendance status when matched (rule-engine output).
+  attendanceStatus    AttendanceStatus?
+  minutesLate         Int?
+  reason              AttendanceResolutionReason?
+  reasonNote          String?
+  resolvedById        String?
+  resolvedAt          DateTime?
+  ipAddress           String?
+  createdAt           DateTime                    @default(now())
+
+  attendanceSession AttendanceSession @relation(fields: [attendanceSessionId], references: [id])
+
+  @@index([classSessionId, status])
+  @@index([attendanceSessionId])
+  @@map("attendance_checkins")
 }
