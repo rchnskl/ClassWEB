@@ -11,7 +11,7 @@ in the requirements brief is accounted for below.
 | **3. Core domain APIs** | CRUD + services for academic hierarchy, students, lecturers, rooms, sections, enrollment | Course/Room/Student/Lecturer/Section/Enrollment Management | ✅ **Done & verified** |
 | **4. Timetable + attendance engine** | Schedule generation, conflict detection, attendance capture (manual + QR), rule engine | Timetable, Attendance Features, Attendance Rule Engine | ✅ **Done & verified** |
 | **5. Frontend (admin dashboard)** | Next.js glass-morphism UI, dashboards, search, filters, dark/light, responsive | Dashboard, Design, Search Engine, Filter System, Admin Dashboard | ⬜ |
-| **6. Analytics + notifications** | Risk analytics, attendance stats, notifications (email/LINE/push/system) | Dashboard stats, Student Risk Analytics, Notification System | 🔷 Analytics/risk done; notifications next |
+| **6. Analytics + notifications** | Risk analytics, attendance stats, notifications (email/LINE/push/system) | Dashboard stats, Student Risk Analytics, Notification System | ✅ **Done & verified** (LINE/push senders await tokens) |
 | **7. Reporting + PDF** | Report center, PDF/Excel/CSV export, digital signature, QR verification | Report Center, PDF Design | 🔷 Attendance report done (PDF/Excel/CSV + QR verify) |
 | **8. Ops** | Backup/restore, system settings UI, CI/CD (GitHub Actions), monitoring/error tracking, tests (unit/integration/e2e) | Backup, System Settings, CI/CD, Monitoring, Testing | ⬜ |
 | **Future** | Gradebook, quiz/exam, OSCE, clinical logbook, portfolio, AI features, … — attach via new tables to existing anchors | Future Modules, AI Features | 🔷 Enabled by Phase-1 design, built on demand |

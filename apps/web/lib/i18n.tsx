@@ -32,6 +32,9 @@ const EN: Dict = {
   'top.search': 'Search students, sections, rooms…',
   'top.role': 'Administrator',
   'top.logout': 'Log out',
+  'notif.title': 'Notifications',
+  'notif.markAll': 'Mark all read',
+  'notif.empty': 'No notifications',
 
   'dash.greeting': 'Good day',
   'dash.subtitle': 'Here is what is happening across the Faculty of Nursing today.',
@@ -240,6 +243,9 @@ const TH: Dict = {
   'top.search': 'ค้นหานักศึกษา รายวิชา ห้องเรียน…',
   'top.role': 'ผู้ดูแลระบบ',
   'top.logout': 'ออกจากระบบ',
+  'notif.title': 'การแจ้งเตือน',
+  'notif.markAll': 'อ่านทั้งหมด',
+  'notif.empty': 'ไม่มีการแจ้งเตือน',
 
   'dash.greeting': 'สวัสดี',
   'dash.subtitle': 'ภาพรวมของคณะพยาบาลศาสตร์วันนี้',

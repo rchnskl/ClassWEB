@@ -79,6 +79,16 @@ export interface DashboardSummary {
   generatedAt: string;
 }
 
+export interface NotificationItem {
+  id: string;
+  type: string;
+  title: string;
+  body: string | null;
+  channel: string;
+  readAt: string | null;
+  createdAt: string;
+}
+
 export interface Environment {
   location: { name: string; lat: number; lng: number };
   weather: {

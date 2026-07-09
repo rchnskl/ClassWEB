@@ -3,7 +3,8 @@
 import { useRouter } from 'next/navigation';
 import ThemeToggle from './ThemeToggle';
 import LanguageToggle from './LanguageToggle';
-import { IconSearch, IconBell, IconLogout } from './icons';
+import NotificationBell from './NotificationBell';
+import { IconSearch, IconLogout } from './icons';
 import { clearSession } from '@/lib/api';
 import { useI18n } from '@/lib/i18n';
 
@@ -29,10 +30,7 @@ export default function Topbar({ email }: { email: string }) {
 
       <LanguageToggle />
 
-      <button className="glass hairline icon-btn" style={{ width: 40, height: 40, position: 'relative' }} aria-label="Notifications">
-        <IconBell />
-        <span style={{ position: 'absolute', top: 9, right: 10, width: 7, height: 7, borderRadius: 999, background: 'var(--danger)' }} />
-      </button>
+      <NotificationBell />
 
       <ThemeToggle />
 

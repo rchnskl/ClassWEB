@@ -429,6 +429,22 @@ async function main() {
   }
   console.log(`  ✓ ${recordCount} attendance records (history)`);
 
+  // ---- Sample notifications (tenant broadcast) ----------------------------
+  const notifDefs = [
+    { type: 'BELOW_80', title: 'นักศึกษาเข้าเรียนต่ำกว่า 80%', body: 'กฤต จันทร์ (NUR1101) เข้าเรียน 45.5%', readAt: null },
+    { type: 'ATTENDANCE_SUBMITTED', title: 'บันทึกการเช็คชื่อแล้ว', body: 'NUR1101 · คาบวันจันทร์ ส่งข้อมูลการเช็คชื่อเรียบร้อย', readAt: null },
+    { type: 'ACTIVITY', title: 'กิจกรรมคณะ', body: 'อบรมทักษะการพยาบาล (Skills Workshop) วันศุกร์นี้', readAt: new Date() },
+  ];
+  const existingNotif = await prisma.notification.count({ where: { universityId: university.id } });
+  if (existingNotif === 0) {
+    for (const n of notifDefs) {
+      await prisma.notification.create({
+        data: { universityId: university.id, channel: 'SYSTEM', status: n.readAt ? 'READ' : 'SENT', type: n.type, title: n.title, body: n.body, sentAt: new Date(), readAt: n.readAt },
+      });
+    }
+  }
+  console.log(`  ✓ ${notifDefs.length} sample notifications`);
+
   console.log('✅ Seed complete.');
 }
 

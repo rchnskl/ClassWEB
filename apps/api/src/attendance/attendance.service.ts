@@ -2,6 +2,7 @@ import { BadRequestException, Injectable, NotFoundException } from '@nestjs/comm
 import { randomBytes } from 'node:crypto';
 import { AttendanceStatus, AuditAction, Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+import { NotificationsService } from '../notifications/notifications.service';
 import { ManualMarkDto, ResolveCheckInDto } from './dto/attendance.dto';
 
 interface RuleConfig {
@@ -11,7 +12,10 @@ interface RuleConfig {
 
 @Injectable()
 export class AttendanceService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly notifications: NotificationsService,
+  ) {}
 
   // --- helpers -----------------------------------------------------------
 
@@ -168,6 +172,7 @@ export class AttendanceService {
       select: { id: true, status: true, method: true },
     });
     await this.recomputeRate(enrollment.id);
+    if (dto.status === 'ABSENT') await this.notifyAbsent(universityId, dto.studentId, session.section.subject.code);
     await this.prisma.auditLog.create({
       data: { universityId, userId, action: AuditAction.ATTENDANCE, entityType: 'AttendanceRecord', entityId: record.id, metadata: { classSessionId: dto.classSessionId, status: dto.status, method: 'MANUAL' } },
     });
@@ -202,7 +207,7 @@ export class AttendanceService {
         classSession: {
           select: {
             id: true, sessionDate: true, startTime: true,
-            section: { select: { id: true, universityId: true } },
+            section: { select: { id: true, universityId: true, subject: { select: { code: true } } } },
           },
         },
       },
@@ -260,6 +265,7 @@ export class AttendanceService {
       }),
     ]);
     await this.recomputeRate(enrollment.id);
+    if (status === 'ABSENT') await this.notifyAbsent(cs.section.universityId, enrollment.studentId, cs.section.subject.code);
     return { result: 'success', attendanceStatus: status, minutesLate };
   }
 
@@ -296,13 +302,48 @@ export class AttendanceService {
 
   // --- analytics ---------------------------------------------------------
 
-  /** Recompute an enrolment's attendance percentage from its records. */
+  /** Recompute an enrolment's attendance percentage; notify when it crosses below 80%. */
   private async recomputeRate(enrollmentId: string) {
+    const enrollment = await this.prisma.enrollment.findUnique({
+      where: { id: enrollmentId },
+      select: {
+        attendanceRate: true, studentId: true,
+        student: { select: { nameEn: true, nameTh: true } },
+        section: { select: { universityId: true, subject: { select: { code: true } } } },
+      },
+    });
+    if (!enrollment) return;
+    const previous = enrollment.attendanceRate;
+
     const [total, attended] = await this.prisma.$transaction([
       this.prisma.attendanceRecord.count({ where: { enrollmentId } }),
       this.prisma.attendanceRecord.count({ where: { enrollmentId, status: { in: ['PRESENT', 'LATE'] } } }),
     ]);
     const rate = total > 0 ? Math.round((attended / total) * 1000) / 10 : null;
     await this.prisma.enrollment.update({ where: { id: enrollmentId }, data: { attendanceRate: rate } });
+
+    // Fire a risk notification only on the transition into < 80% (avoids spam).
+    if (rate !== null && rate < 80 && (previous === null || previous >= 80)) {
+      const name = enrollment.student.nameTh ?? enrollment.student.nameEn;
+      void this.notifications.notify({
+        universityId: enrollment.section.universityId,
+        type: 'BELOW_80',
+        title: `นักศึกษาเข้าเรียนต่ำกว่า 80%`,
+        body: `${name} (${enrollment.section.subject.code}) เข้าเรียน ${rate}%`,
+        refType: 'Student', refId: enrollment.studentId,
+      }).catch(() => undefined);
+    }
+  }
+
+  /** Best-effort "student absent" notification. */
+  private async notifyAbsent(universityId: string, studentId: string, subjectCode: string) {
+    const student = await this.prisma.student.findUnique({ where: { id: studentId }, select: { nameEn: true, nameTh: true } });
+    const name = student?.nameTh ?? student?.nameEn ?? 'นักศึกษา';
+    void this.notifications.notify({
+      universityId, type: 'STUDENT_ABSENT',
+      title: 'นักศึกษาขาดเรียน',
+      body: `${name} ขาดเรียนวิชา ${subjectCode}`,
+      refType: 'Student', refId: studentId,
+    }).catch(() => undefined);
   }
 }
