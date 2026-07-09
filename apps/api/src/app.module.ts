@@ -8,6 +8,7 @@ import { PrismaModule } from './prisma/prisma.module';
 import { AuthModule } from './auth/auth.module';
 import { UsersModule } from './users/users.module';
 import { DashboardModule } from './dashboard/dashboard.module';
+import { AnalyticsModule } from './analytics/analytics.module';
 import { AcademicModule } from './academic/academic.module';
 import { StudentsModule } from './students/students.module';
 import { StudentNotesModule } from './student-notes/student-notes.module';
@@ -38,6 +39,7 @@ import { AllExceptionsFilter } from './common/filters/all-exceptions.filter';
     AuthModule,
     UsersModule,
     DashboardModule,
+    AnalyticsModule,
     AcademicModule,
     StudentsModule,
     StudentNotesModule,

@@ -26,7 +26,7 @@ export class DashboardService {
     const endOfDay = new Date(startOfDay);
     endOfDay.setDate(endOfDay.getDate() + 1);
 
-    const [students, lecturers, sections, enrollments, todayClasses, atRiskStudents, rateAgg] =
+    const [students, lecturers, sections, enrollments, todayClasses, atRiskGroups, rateAgg] =
       await this.prisma.$transaction([
         this.prisma.student.count({
           where: { universityId, deletedAt: null, status: 'STUDYING' },
@@ -43,8 +43,12 @@ export class DashboardService {
             status: { in: ['SCHEDULED', 'IN_PROGRESS', 'COMPLETED', 'MAKEUP'] },
           },
         }),
-        this.prisma.enrollment.count({
+        // Distinct students at risk (a student is counted once even across sections).
+        this.prisma.enrollment.groupBy({
+          by: ['studentId'],
           where: { status: 'ENROLLED', section: { universityId }, attendanceRate: { lt: 80 } },
+          _count: { _all: true },
+          orderBy: { studentId: 'asc' },
         }),
         this.prisma.enrollment.aggregate({
           where: { status: 'ENROLLED', section: { universityId }, attendanceRate: { not: null } },
@@ -58,7 +62,7 @@ export class DashboardService {
       sections,
       enrollments,
       todayClasses,
-      atRiskStudents,
+      atRiskStudents: atRiskGroups.length,
       attendanceRate: rateAgg._avg.attendanceRate,
       generatedAt: new Date().toISOString(),
     };

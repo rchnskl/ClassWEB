@@ -394,6 +394,41 @@ async function main() {
   }
   console.log(`  ✓ ${calDefs.length} calendar entries`);
 
+  // ---- Attendance history (so analytics/risk has real data) ---------------
+  const cutoff = new Date('2026-07-09T00:00:00+07:00');
+  const enrollmentsAll = await prisma.enrollment.findMany({
+    where: { section: { universityId: university.id } },
+    select: { id: true, studentId: true, sectionId: true, student: { select: { studentCode: true } } },
+  });
+  let recordCount = 0;
+  for (const en of enrollmentsAll) {
+    const past = await prisma.classSession.findMany({
+      where: { sectionId: en.sectionId, sessionDate: { lt: cutoff } },
+      select: { id: true }, orderBy: { sessionDate: 'asc' },
+    });
+    let attended = 0;
+    for (let i = 0; i < past.length; i++) {
+      const isKrit = en.student.studentCode === '6510002'; // deliberately at-risk
+      const status = isKrit
+        ? (i % 2 === 0 ? 'ABSENT' : (i % 3 === 0 ? 'LATE' : 'PRESENT'))
+        : (i % 13 === 0 ? 'ABSENT' : (i % 7 === 0 ? 'LATE' : 'PRESENT'));
+      if (status !== 'ABSENT') attended++;
+      await prisma.attendanceRecord.upsert({
+        where: { classSessionId_enrollmentId: { classSessionId: past[i].id, enrollmentId: en.id } },
+        update: {},
+        create: {
+          classSessionId: past[i].id, enrollmentId: en.id, studentId: en.studentId,
+          status: status as 'PRESENT' | 'LATE' | 'ABSENT', method: 'MANUAL',
+          checkInAt: status === 'ABSENT' ? null : new Date(),
+        },
+      });
+      recordCount++;
+    }
+    const rate = past.length > 0 ? Math.round((attended / past.length) * 1000) / 10 : null;
+    await prisma.enrollment.update({ where: { id: en.id }, data: { attendanceRate: rate } });
+  }
+  console.log(`  ✓ ${recordCount} attendance records (history)`);
+
   console.log('✅ Seed complete.');
 }
 
