@@ -239,6 +239,7 @@ model University {
   attendanceRules AttendanceRule[]
   calendarEvents  CalendarEvent[]
   calendarEntries CalendarEntry[]
+  studentNotes    StudentNote[]
 
   @@index([isActive])
   @@map("universities")
@@ -688,12 +689,13 @@ model Student {
   updatedAt DateTime  @updatedAt
   deletedAt DateTime?
 
-  university  University         @relation(fields: [universityId], references: [id])
-  program     Program            @relation(fields: [programId], references: [id])
-  user        User?              @relation(fields: [userId], references: [id])
-  photo       Attachment?        @relation("StudentPhoto", fields: [photoId], references: [id])
-  enrollments Enrollment[]
-  attendance  AttendanceRecord[]
+  university   University         @relation(fields: [universityId], references: [id])
+  program      Program            @relation(fields: [programId], references: [id])
+  user         User?              @relation(fields: [userId], references: [id])
+  photo        Attachment?        @relation("StudentPhoto", fields: [photoId], references: [id])
+  enrollments  Enrollment[]
+  attendance   AttendanceRecord[]
+  studentNotes StudentNote[]
 
   @@unique([universityId, studentCode])
   @@index([universityId])
@@ -1155,4 +1157,41 @@ model GoogleCalendarConnection {
   user User @relation(fields: [userId], references: [id])
 
   @@map("google_calendar_connections")
+}
+
+// =============================================================================
+//  STUDENT NOTES — append-only behaviour / daily log kept as evidence.
+//  Each note is stamped with the recorder's name and the moment it was written
+//  (immutable snapshot), so it stands as a record even if the author changes.
+// =============================================================================
+
+enum StudentNoteCategory {
+  BEHAVIOR
+  INCIDENT
+  ACADEMIC
+  HEALTH
+  GENERAL
+}
+
+model StudentNote {
+  id           String              @id @default(cuid())
+  universityId String
+  studentId    String
+  category     StudentNoteCategory @default(BEHAVIOR)
+  content      String
+  /// Immutable snapshot of the recorder at write time (evidence stamp).
+  authorUserId String?
+  authorName   String
+  /// Marks notes describing misconduct for quick filtering.
+  flagged      Boolean             @default(false)
+  metadata     Json?
+  createdAt    DateTime            @default(now())
+  deletedAt    DateTime?
+
+  university University @relation(fields: [universityId], references: [id])
+  student    Student    @relation(fields: [studentId], references: [id])
+
+  @@index([studentId, createdAt])
+  @@index([universityId])
+  @@map("student_notes")
 }

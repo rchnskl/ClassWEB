@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import Sidebar from '@/components/Sidebar';
 import Topbar from '@/components/Topbar';
 import { IconSearch, IconStudents } from '@/components/icons';
+import StudentNotesDrawer from '@/components/StudentNotesDrawer';
 import { apiFetch, type MeResponse, type Paginated } from '@/lib/api';
 import { useI18n } from '@/lib/i18n';
 
@@ -39,6 +40,7 @@ export default function StudentsPage() {
   const [form, setForm] = useState({ studentCode: '', nameEn: '', nameTh: '', nickname: '', programId: '', gender: 'FEMALE' });
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
+  const [notesFor, setNotesFor] = useState<StudentRow | null>(null);
 
   const load = useCallback(async (nextSkip: number, q: string) => {
     setLoading(true);
@@ -153,14 +155,14 @@ export default function StudentsPage() {
             <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 14 }}>
               <thead>
                 <tr style={{ textAlign: 'left', color: 'var(--text-2)' }}>
-                  <Th>{t('students.studentId')}</Th><Th>{t('students.name')}</Th><Th>{t('students.nickname')}</Th><Th>{t('students.program')}</Th><Th>{t('students.year')}</Th><Th>{t('students.status')}</Th>
+                  <Th>{t('students.studentId')}</Th><Th>{t('students.name')}</Th><Th>{t('students.nickname')}</Th><Th>{t('students.program')}</Th><Th>{t('students.year')}</Th><Th>{t('students.status')}</Th><Th> </Th>
                 </tr>
               </thead>
               <tbody>
                 {loading ? (
-                  <tr><td colSpan={6} style={{ padding: 40, textAlign: 'center' }} className="muted">{t('common.loading')}</td></tr>
+                  <tr><td colSpan={7} style={{ padding: 40, textAlign: 'center' }} className="muted">{t('common.loading')}</td></tr>
                 ) : rows.length === 0 ? (
-                  <tr><td colSpan={6} style={{ padding: 48, textAlign: 'center' }}>
+                  <tr><td colSpan={7} style={{ padding: 48, textAlign: 'center' }}>
                     <div className="brand-gradient floaty" style={{ width: 46, height: 46, borderRadius: 14, margin: '0 auto 12px', display: 'grid', placeItems: 'center' }}><IconStudents width={22} height={22} /></div>
                     <div style={{ fontWeight: 650 }}>{t('students.none')}</div>
                     <div className="muted" style={{ fontSize: 13, marginTop: 4 }}>{t('students.noneHint')}</div>
@@ -176,6 +178,15 @@ export default function StudentsPage() {
                     <Td><span className="chip" style={{ background: 'var(--glass-hairline)', color: 'var(--text-1)' }}>{s.program.code}</span></Td>
                     <Td>{s.admissionYear ?? <span className="muted">—</span>}</Td>
                     <Td><StatusChip status={s.status} /></Td>
+                    <Td>
+                      <button
+                        onClick={() => setNotesFor(s)}
+                        className="glass hairline icon-btn"
+                        style={{ padding: '6px 12px', borderRadius: 10, fontSize: 12.5, fontWeight: 600, color: 'var(--text-1)', display: 'inline-flex', gap: 6 }}
+                      >
+                        📝 {t('students.notes')}
+                      </button>
+                    </Td>
                   </tr>
                 ))}
               </tbody>
@@ -191,6 +202,15 @@ export default function StudentsPage() {
           </div>
         </div>
       </div>
+
+      {notesFor && (
+        <StudentNotesDrawer
+          studentId={notesFor.id}
+          studentName={notesFor.nameEn}
+          studentCode={notesFor.studentCode}
+          onClose={() => setNotesFor(null)}
+        />
+      )}
     </div>
   );
 }

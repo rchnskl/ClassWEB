@@ -14,9 +14,9 @@ export class UsersService {
         universityId: true,
         status: true,
         lastLoginAt: true,
-        roles: { select: { role: { select: { code: true, nameEn: true } } } },
-        lecturer: { select: { id: true, nameEn: true, employeeCode: true } },
-        student: { select: { id: true, nameEn: true, studentCode: true } },
+        roles: { select: { role: { select: { code: true, nameEn: true, nameTh: true } } } },
+        lecturer: { select: { id: true, nameEn: true, nameTh: true, employeeCode: true } },
+        student: { select: { id: true, nameEn: true, nameTh: true, studentCode: true } },
       },
     });
     if (!user) throw new NotFoundException('User not found');

@@ -12,7 +12,7 @@ import { useI18n } from '@/lib/i18n';
 
 export default function DashboardPage() {
   const router = useRouter();
-  const { t } = useI18n();
+  const { t, lang } = useI18n();
   const [me, setMe] = useState<MeResponse | null>(null);
   const [summary, setSummary] = useState<DashboardSummary | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -40,6 +40,12 @@ export default function DashboardPage() {
   }, [router]);
 
   const email = me?.email ?? 'admin@nursing.au.edu';
+  const displayName = me
+    ? (lang === 'th' ? me.lecturer?.nameTh ?? me.student?.nameTh : null) ??
+      me.lecturer?.nameEn ?? me.student?.nameEn ??
+      (lang === 'th' ? me.roles?.[0]?.role.nameTh : null) ?? me.roles?.[0]?.role.nameEn ??
+      email.split('@')[0]
+    : '';
   const attendanceLabel =
     summary?.attendanceRate != null ? `${summary.attendanceRate.toFixed(1)}%` : '—';
 
@@ -52,7 +58,7 @@ export default function DashboardPage() {
 
         <div className="rise" style={{ marginBottom: 20 }}>
           <h1 style={{ fontSize: 27, fontWeight: 750, letterSpacing: -0.6, margin: 0 }}>
-            {t('dash.greeting')} 👋
+            {t('dash.greeting')} 👋{displayName ? ` ${displayName}` : ''}
           </h1>
           <p className="muted" style={{ margin: '4px 0 0', fontSize: 14.5 }}>{t('dash.subtitle')}</p>
         </div>

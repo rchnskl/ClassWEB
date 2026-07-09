@@ -18,7 +18,7 @@ const RESOURCES = [
   'university', 'faculty', 'program', 'course', 'subject', 'section',
   'academicYear', 'semester', 'room', 'building',
   'student', 'lecturer', 'enrollment', 'attendance', 'timetable',
-  'report', 'notification', 'setting', 'audit', 'backup', 'user', 'role',
+  'note', 'report', 'notification', 'setting', 'audit', 'backup', 'user', 'role',
 ];
 const ACTIONS = ['create', 'read', 'update', 'delete', 'export'] as const;
 
@@ -27,7 +27,7 @@ const ROLE_MATRIX: Record<string, (resource: string, action: string) => boolean>
   ADMIN: () => true,
   // Lecturer — manage their teaching + attendance, read academic data.
   LECTURER: (r, a) => {
-    if (['attendance', 'timetable'].includes(r)) return true;
+    if (['attendance', 'timetable', 'note'].includes(r)) return true;
     if (r === 'report' && ['read', 'export'].includes(a)) return true;
     if (['section', 'student', 'lecturer', 'subject', 'course', 'enrollment'].includes(r) && a === 'read') return true;
     return false;

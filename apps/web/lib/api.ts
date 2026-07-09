@@ -74,7 +74,18 @@ export interface MeResponse {
   id: string;
   email: string;
   status: string;
-  roles: { role: { code: string; nameEn: string } }[];
+  roles: { role: { code: string; nameEn: string; nameTh?: string | null } }[];
+  lecturer?: { nameEn: string; nameTh?: string | null } | null;
+  student?: { nameEn: string; nameTh?: string | null } | null;
+}
+
+export interface StudentNote {
+  id: string;
+  category: string;
+  content: string;
+  flagged: boolean;
+  authorName: string;
+  createdAt: string;
 }
 
 export function saveSession(res: LoginResponse) {
