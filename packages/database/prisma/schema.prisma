@@ -240,6 +240,7 @@ model University {
   calendarEvents  CalendarEvent[]
   calendarEntries CalendarEntry[]
   studentNotes    StudentNote[]
+  reports         Report[]
 
   @@index([isActive])
   @@map("universities")
@@ -1264,4 +1265,35 @@ model AttendanceCheckIn {
   @@index([classSessionId, status])
   @@index([attendanceSessionId])
   @@map("attendance_checkins")
+}
+
+// =============================================================================
+//  REPORTS — every generated report is registered so its QR code links back to
+//  a public verification endpoint (authenticity + tamper-evidence via checksum).
+// =============================================================================
+
+enum ReportFormat {
+  PDF
+  CSV
+  XLSX
+}
+
+model Report {
+  id              String       @id @default(cuid())
+  universityId    String
+  reportNumber    String       @unique
+  type            String // e.g. "ATTENDANCE_SUMMARY"
+  title           String
+  format          ReportFormat
+  params          Json?
+  /// SHA-256 of the report payload for tamper-evidence.
+  checksum        String?
+  generatedById   String?
+  generatedByName String?
+  createdAt       DateTime     @default(now())
+
+  university University @relation(fields: [universityId], references: [id])
+
+  @@index([universityId, createdAt])
+  @@map("reports")
 }

@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Sidebar from '@/components/Sidebar';
 import Topbar from '@/components/Topbar';
-import { apiFetch } from '@/lib/api';
+import { apiFetch, downloadFile } from '@/lib/api';
 import { useI18n } from '@/lib/i18n';
 
 interface StudentRow {
@@ -31,6 +31,16 @@ export default function ReportsPage() {
   const [email, setEmail] = useState('admin@nursing.au.edu');
   const [data, setData] = useState<Overview | null>(null);
   const [loading, setLoading] = useState(true);
+  const [exporting, setExporting] = useState<string | null>(null);
+
+  async function exportAs(fmt: 'pdf' | 'xlsx' | 'csv') {
+    setExporting(fmt);
+    try {
+      await downloadFile(`/reports/attendance.${fmt}`, `attendance.${fmt}`);
+    } catch { /* ignore */ } finally {
+      setExporting(null);
+    }
+  }
 
   useEffect(() => {
     if (!localStorage.getItem('accessToken')) { router.replace('/login'); return; }
@@ -49,9 +59,17 @@ export default function ReportsPage() {
       <div style={{ flex: 1, minWidth: 0 }}>
         <Topbar email={email} />
 
-        <div className="rise" style={{ marginBottom: 18 }}>
-          <h1 style={{ fontSize: 27, fontWeight: 750, letterSpacing: -0.6, margin: 0 }}>{t('rep.title')}</h1>
-          <p className="muted" style={{ margin: '4px 0 0', fontSize: 14.5 }}>{t('rep.subtitle')}</p>
+        <div className="rise" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', gap: 12, flexWrap: 'wrap', marginBottom: 18 }}>
+          <div>
+            <h1 style={{ fontSize: 27, fontWeight: 750, letterSpacing: -0.6, margin: 0 }}>{t('rep.title')}</h1>
+            <p className="muted" style={{ margin: '4px 0 0', fontSize: 14.5 }}>{t('rep.subtitle')}</p>
+          </div>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+            <span className="muted" style={{ fontSize: 12.5, fontWeight: 600 }}>{t('rep.export')}:</span>
+            <ExportBtn label={`📄 ${t('rep.exportPdf')}`} busy={exporting === 'pdf'} onClick={() => exportAs('pdf')} primary />
+            <ExportBtn label={`📊 ${t('rep.exportExcel')}`} busy={exporting === 'xlsx'} onClick={() => exportAs('xlsx')} />
+            <ExportBtn label={`📁 ${t('rep.exportCsv')}`} busy={exporting === 'csv'} onClick={() => exportAs('csv')} />
+          </div>
         </div>
 
         {loading ? (
@@ -136,6 +154,18 @@ export default function ReportsPage() {
         )}
       </div>
     </div>
+  );
+}
+
+function ExportBtn({ label, busy, onClick, primary }: { label: string; busy: boolean; onClick: () => void; primary?: boolean }) {
+  return (
+    <button
+      onClick={onClick} disabled={busy}
+      className={primary ? 'btn-primary' : 'glass hairline'}
+      style={{ padding: '9px 14px', borderRadius: 12, fontSize: 13.5, fontWeight: 650, cursor: busy ? 'wait' : 'pointer', color: primary ? '#fff' : 'var(--text-1)' }}
+    >
+      {busy ? '…' : label}
+    </button>
   );
 }
 

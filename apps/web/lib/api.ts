@@ -32,6 +32,27 @@ export async function apiFetch<T>(path: string, init: RequestInit = {}): Promise
   return body as T;
 }
 
+/** Fetch a protected file endpoint with auth and trigger a browser download. */
+export async function downloadFile(path: string, fallbackName: string): Promise<void> {
+  const token = typeof window !== 'undefined' ? localStorage.getItem('accessToken') : null;
+  const res = await fetch(`${API_BASE}${path}`, {
+    headers: token ? { authorization: `Bearer ${token}` } : {},
+  });
+  if (!res.ok) throw new ApiError(res.status, 'Export failed');
+  const blob = await res.blob();
+  const cd = res.headers.get('content-disposition');
+  const match = cd ? /filename="?([^"]+)"?/.exec(cd) : null;
+  const name = match ? match[1] : fallbackName;
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = name;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
 export interface Paginated<T> {
   total: number;
   take: number;
