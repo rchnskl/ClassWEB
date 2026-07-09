@@ -379,6 +379,12 @@ async function main() {
       startAt: new Date('2026-07-10T09:00:00+07:00'), endAt: new Date('2026-07-10T12:00:00+07:00'),
       roomId: rooms['NLAB-01'], color: '#ff8a4c',
     },
+    {
+      type: 'EXAM' as const, visibility: 'FACULTY' as const,
+      title: 'สอบกลางภาค NUR1101 (Midterm)',
+      startAt: new Date('2026-07-08T13:00:00+07:00'), endAt: new Date('2026-07-08T15:00:00+07:00'),
+      roomId: rooms['CL-1101'], color: '#e2564d',
+    },
   ];
   for (const c of calDefs) {
     const exists = await prisma.calendarEntry.findFirst({ where: { universityId: university.id, title: c.title, startAt: c.startAt } });

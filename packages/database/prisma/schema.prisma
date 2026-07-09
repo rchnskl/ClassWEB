@@ -1091,6 +1091,7 @@ model Backup {
 
 enum CalendarEntryType {
   CLASS
+  EXAM
   PERSONAL
   ACTIVITY
   MEETING

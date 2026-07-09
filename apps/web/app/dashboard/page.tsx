@@ -10,11 +10,22 @@ import { ClockWidget, EnvironmentWidgets } from '@/components/DashboardWidgets';
 import { apiFetch, type DashboardSummary, type MeResponse } from '@/lib/api';
 import { useI18n } from '@/lib/i18n';
 
+interface AgendaItem { key: string; time: string; end: string; title: string; sub: string; kind: string; }
+
+const EVENT_ICON: Record<string, string> = {
+  CLASS: '📘', EXAM: '📝', PERSONAL: '👤', ACTIVITY: '🎉', MEETING: '👥', OTHER: '📌',
+};
+
+function bkkTime(iso: string): string {
+  return new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Bangkok', hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date(iso));
+}
+
 export default function DashboardPage() {
   const router = useRouter();
   const { t, lang } = useI18n();
   const [me, setMe] = useState<MeResponse | null>(null);
   const [summary, setSummary] = useState<DashboardSummary | null>(null);
+  const [agenda, setAgenda] = useState<AgendaItem[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -23,14 +34,24 @@ export default function DashboardPage() {
       router.replace('/login');
       return;
     }
+    const today = new Date().toISOString().slice(0, 10);
+    const dayStart = `${today}T00:00:00+07:00`;
+    const dayEnd = `${today}T23:59:59+07:00`;
     (async () => {
       try {
-        const [m, s] = await Promise.all([
+        const [m, s, sessions, events] = await Promise.all([
           apiFetch<MeResponse>('/users/me'),
           apiFetch<DashboardSummary>('/dashboard/summary'),
+          apiFetch<{ items: { id: string; startTime: string; endTime: string; section: { sectionNo: string; subject: { code: string; nameEn: string } }; room: { roomNumber: string } | null }[] }>(`/timetable/sessions?date=${today}`).catch(() => ({ items: [] })),
+          apiFetch<{ items: { id: string; type: string; title: string; startAt: string; endAt: string; location: string | null; room: { roomNumber: string } | null }[] }>(`/calendar/entries?from=${encodeURIComponent(dayStart)}&to=${encodeURIComponent(dayEnd)}`).catch(() => ({ items: [] })),
         ]);
         setMe(m);
         setSummary(s);
+        const items: AgendaItem[] = [
+          ...sessions.items.map((c) => ({ key: `c${c.id}`, time: c.startTime, end: c.endTime, title: `${c.section.subject.code} · ${c.section.subject.nameEn}`, sub: c.room?.roomNumber ?? '', kind: 'CLASS' })),
+          ...events.items.map((e) => ({ key: `e${e.id}`, time: bkkTime(e.startAt), end: bkkTime(e.endAt), title: e.title, sub: e.location ?? e.room?.roomNumber ?? '', kind: e.type })),
+        ].sort((a, b) => a.time.localeCompare(b.time));
+        setAgenda(items);
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Failed to load dashboard');
       } finally {
@@ -86,16 +107,28 @@ export default function DashboardPage() {
         </div>
 
         <div style={{ display: 'grid', gridTemplateColumns: '1.6fr 1fr', gap: 16 }}>
-          {/* Today's classes */}
+          {/* Today's agenda — a to-do list pulled from the timetable + calendar */}
           <div className="glass rise" style={{ padding: 22, animationDelay: '160ms' }}>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
-              <h2 style={{ fontSize: 17, fontWeight: 700, margin: 0 }}>{t('dash.todayClasses')}</h2>
-              <span className="chip chip-success">{summary?.todayClasses ?? 0} {t('dash.sessions')}</span>
+              <h2 style={{ fontSize: 17, fontWeight: 700, margin: 0 }}>🗓️ {t('dash.agenda')}</h2>
+              <a href="/timetable" className="muted" style={{ fontSize: 12.5, textDecoration: 'none', color: 'var(--brand)' }}>{t('dash.viewTimetable')}</a>
             </div>
-            {(summary?.todayClasses ?? 0) === 0 ? (
-              <EmptyState title={t('dash.noClassesTitle')} body={t('dash.noClassesBody')} />
+            {agenda.length === 0 ? (
+              <EmptyState title={t('dash.agendaEmpty')} body={t('dash.noClassesBody')} />
             ) : (
-              <p className="muted">{summary?.todayClasses} {t('dash.sessionsToday')}</p>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                {agenda.map((it) => (
+                  <div key={it.key} className="glass hairline" style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 14px', borderRadius: 12 }}>
+                    <div style={{ fontFamily: 'ui-monospace, monospace', fontSize: 12.5, fontWeight: 700, color: 'var(--brand)', minWidth: 82 }}>{it.time}–{it.end}</div>
+                    <div style={{ fontSize: 18 }}>{EVENT_ICON[it.kind] ?? '📌'}</div>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontWeight: 600, fontSize: 13.5, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{it.title}</div>
+                      {it.sub && <div className="muted" style={{ fontSize: 11.5 }}>{it.sub}</div>}
+                    </div>
+                    <span className="chip" style={{ background: 'var(--glass-hairline)', color: 'var(--text-2)', fontSize: 10.5 }}>{t(`tt.type.${it.kind}`)}</span>
+                  </div>
+                ))}
+              </div>
             )}
           </div>
 

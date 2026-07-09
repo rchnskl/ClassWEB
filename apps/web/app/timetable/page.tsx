@@ -37,6 +37,7 @@ function colorFor(code: string): [string, string] {
   return PALETTE[h % PALETTE.length] as [string, string];
 }
 const EVENT_STYLE: Record<string, { icon: string; color: string }> = {
+  EXAM: { icon: '📝', color: '#e2564d' },
   PERSONAL: { icon: '👤', color: '#6fa3d6' },
   ACTIVITY: { icon: '🎉', color: '#ff8a4c' },
   MEETING: { icon: '👥', color: '#a855f7' },
@@ -69,8 +70,9 @@ export default function TimetablePage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  const today0 = new Date().toISOString().slice(0, 10);
   const [showForm, setShowForm] = useState(false);
-  const [form, setForm] = useState({ type: 'PERSONAL', title: '', date: new Date().toISOString().slice(0, 10), start: '13:00', end: '14:00' });
+  const [form, setForm] = useState({ type: 'PERSONAL', title: '', location: '', startDate: today0, startTime: '13:00', endDate: today0, endTime: '14:00' });
   const [saving, setSaving] = useState(false);
 
   const loadEvents = useCallback(async () => {
@@ -113,11 +115,14 @@ export default function TimetablePage() {
     e.preventDefault();
     setSaving(true);
     try {
-      const startAt = `${form.date}T${form.start}:00+07:00`;
-      const endAt = `${form.date}T${form.end}:00+07:00`;
-      await apiFetch('/calendar/entries', { method: 'POST', body: JSON.stringify({ type: form.type, title: form.title, startAt, endAt }) });
+      const startAt = `${form.startDate}T${form.startTime}:00+07:00`;
+      const endAt = `${form.endDate}T${form.endTime}:00+07:00`;
+      await apiFetch('/calendar/entries', {
+        method: 'POST',
+        body: JSON.stringify({ type: form.type, title: form.title, startAt, endAt, location: form.location || undefined }),
+      });
       setShowForm(false);
-      setForm({ ...form, title: '' });
+      setForm({ ...form, title: '', location: '' });
       await loadEvents();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to save event');
@@ -152,19 +157,28 @@ export default function TimetablePage() {
         </div>
 
         {showForm && (
-          <form onSubmit={submitEvent} className="glass rise" style={{ padding: 18, marginBottom: 16, display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 12, alignItems: 'end' }}>
-            <Field label={t('tt.eventType')}>
-              <select className="input" value={form.type} onChange={(e) => setForm({ ...form, type: e.target.value })}>
-                <option value="PERSONAL">{t('tt.type.PERSONAL')}</option>
-                <option value="ACTIVITY">{t('tt.type.ACTIVITY')}</option>
-                <option value="MEETING">{t('tt.type.MEETING')}</option>
-              </select>
-            </Field>
-            <Field label={t('tt.eventTitle')}><input className="input" required value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} /></Field>
-            <Field label={t('tt.date')}><input className="input" type="date" required value={form.date} onChange={(e) => setForm({ ...form, date: e.target.value })} /></Field>
-            <Field label={t('tt.start')}><input className="input" type="time" required value={form.start} onChange={(e) => setForm({ ...form, start: e.target.value })} /></Field>
-            <Field label={t('tt.end')}><input className="input" type="time" required value={form.end} onChange={(e) => setForm({ ...form, end: e.target.value })} /></Field>
-            <button className="btn-primary" type="submit" disabled={saving} style={{ padding: 12, fontSize: 14 }}>{saving ? t('tt.saving') : t('tt.save')}</button>
+          <form onSubmit={submitEvent} className="glass rise" style={{ padding: 18, marginBottom: 16, display: 'flex', flexDirection: 'column', gap: 12 }}>
+            {/* Row 1: what */}
+            <div style={{ display: 'grid', gridTemplateColumns: '160px 1fr 200px', gap: 12 }}>
+              <Field label={t('tt.eventType')}>
+                <select className="input" value={form.type} onChange={(e) => setForm({ ...form, type: e.target.value })}>
+                  <option value="PERSONAL">{t('tt.type.PERSONAL')}</option>
+                  <option value="ACTIVITY">{t('tt.type.ACTIVITY')}</option>
+                  <option value="MEETING">{t('tt.type.MEETING')}</option>
+                  <option value="EXAM">{t('tt.type.EXAM')}</option>
+                </select>
+              </Field>
+              <Field label={t('tt.eventTitle')}><input className="input" required value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} /></Field>
+              <Field label={t('tt.location')}><input className="input" value={form.location} onChange={(e) => setForm({ ...form, location: e.target.value })} placeholder="—" /></Field>
+            </div>
+            {/* Row 2: when (start date/time → end date/time) */}
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr) auto', gap: 12, alignItems: 'end' }}>
+              <Field label={t('tt.startDate')}><input className="input" type="date" required value={form.startDate} onChange={(e) => setForm({ ...form, startDate: e.target.value, endDate: e.target.value > form.endDate ? e.target.value : form.endDate })} /></Field>
+              <Field label={t('tt.startTime')}><input className="input" type="time" required value={form.startTime} onChange={(e) => setForm({ ...form, startTime: e.target.value })} /></Field>
+              <Field label={t('tt.endDate')}><input className="input" type="date" required value={form.endDate} min={form.startDate} onChange={(e) => setForm({ ...form, endDate: e.target.value })} /></Field>
+              <Field label={t('tt.endTime')}><input className="input" type="time" required value={form.endTime} onChange={(e) => setForm({ ...form, endTime: e.target.value })} /></Field>
+              <button className="btn-primary" type="submit" disabled={saving} style={{ padding: '12px 20px', fontSize: 14 }}>{saving ? t('tt.saving') : t('tt.save')}</button>
+            </div>
           </form>
         )}
 
@@ -237,6 +251,7 @@ export default function TimetablePage() {
     return (
       <div style={{ display: 'flex', gap: 10, alignItems: 'center', fontSize: 11.5 }} className="muted">
         <span><span style={{ display: 'inline-block', width: 10, height: 10, borderRadius: 3, background: 'linear-gradient(140deg,#ff8a4c,#f97316)', verticalAlign: 'middle', marginRight: 4 }} />{t('tt.legendClass')}</span>
+        <span>📝 {t('tt.type.EXAM')}</span>
         <span>👤 {t('tt.type.PERSONAL')}</span>
         <span>🎉 {t('tt.type.ACTIVITY')}</span>
       </div>
