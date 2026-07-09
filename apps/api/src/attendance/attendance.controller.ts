@@ -68,6 +68,6 @@ export class AttendanceController {
   @Post('checkin')
   @ApiOperation({ summary: 'Student submits their student code to check in' })
   checkin(@Body() dto: CheckInDto, @Req() req: Request) {
-    return this.attendance.checkIn(dto.token, dto.studentCode, req.ip);
+    return this.attendance.checkIn(dto.token, dto.studentCode, req.ip, dto.confirm ?? false);
   }
 }

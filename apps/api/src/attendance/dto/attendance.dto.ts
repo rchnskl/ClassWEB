@@ -1,5 +1,5 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { IsEnum, IsIn, IsOptional, IsString, MinLength } from 'class-validator';
+import { IsBoolean, IsEnum, IsIn, IsOptional, IsString, MinLength } from 'class-validator';
 import { AttendanceResolutionReason, AttendanceStatus } from '@prisma/client';
 
 /** Student self check-in via the QR token (public endpoint). */
@@ -12,6 +12,11 @@ export class CheckInDto {
   @IsString()
   @MinLength(3)
   studentCode!: string;
+
+  @ApiPropertyOptional({ description: 'Set true to confirm check-in with an unmatched code (after the student verifies it is correct)' })
+  @IsOptional()
+  @IsBoolean()
+  confirm?: boolean;
 }
 
 /** Lecturer manual marking. */

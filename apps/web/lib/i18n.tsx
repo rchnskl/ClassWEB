@@ -141,6 +141,10 @@ const EN: Dict = {
   'ci.successLate': 'Checked in (late)',
   'ci.pending': 'Your ID did not match this class. Please contact the instructor.',
   'ci.expired': 'Attendance is closed or the code has expired.',
+  'ci.confirmQ': 'Check in with this student ID?',
+  'ci.confirmHint': "This ID isn't on the class list. If you mistyped, please edit it.",
+  'ci.edit': 'Edit',
+  'ci.confirmYes': 'Yes, check in',
 
   'common.loading': 'Loading…',
   'common.error': 'Error',
@@ -285,6 +289,10 @@ const TH: Dict = {
   'ci.successLate': 'เช็คชื่อแล้ว (สาย)',
   'ci.pending': 'รหัสของคุณไม่ตรงกับคลาสนี้ กรุณาติดต่ออาจารย์ผู้สอน',
   'ci.expired': 'การเช็คชื่อปิดแล้ว หรือรหัสหมดอายุ',
+  'ci.confirmQ': 'ยืนยันจะเช็คชื่อด้วยรหัสนี้หรือไม่?',
+  'ci.confirmHint': 'รหัสนี้ไม่ตรงกับรายชื่อในคลาส หากกรอกผิดกรุณาแก้ไขก่อน',
+  'ci.edit': 'แก้ไขรหัส',
+  'ci.confirmYes': 'ยืนยันเช็คชื่อ',
 
   'common.loading': 'กำลังโหลด…',
   'common.error': 'ข้อผิดพลาด',

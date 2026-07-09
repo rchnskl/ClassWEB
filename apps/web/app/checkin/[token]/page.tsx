@@ -14,7 +14,7 @@ interface Ctx {
   startTime: string;
   endTime: string;
 }
-type Result = { result: 'success' | 'pending'; attendanceStatus?: string; message?: string };
+type Result = { result: 'success' | 'pending' | 'unmatched_confirm'; attendanceStatus?: string; message?: string; enteredCode?: string };
 
 export default function CheckInPage({ params }: { params: Promise<{ token: string }> }) {
   const { token } = use(params);
@@ -24,6 +24,7 @@ export default function CheckInPage({ params }: { params: Promise<{ token: strin
   const [code, setCode] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [result, setResult] = useState<Result | null>(null);
+  const [confirmNeeded, setConfirmNeeded] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -32,22 +33,32 @@ export default function CheckInPage({ params }: { params: Promise<{ token: strin
       .catch(() => setExpired(true));
   }, [token]);
 
-  async function submit(e: React.FormEvent) {
-    e.preventDefault();
+  async function send(confirm: boolean) {
     setSubmitting(true);
     setError(null);
     try {
       const res = await apiFetch<Result>('/attendance/checkin', {
         method: 'POST',
-        body: JSON.stringify({ token, studentCode: code.trim() }),
+        body: JSON.stringify({ token, studentCode: code.trim(), confirm }),
       });
-      setResult(res);
+      if (res.result === 'unmatched_confirm') {
+        // Possible typo — ask the student to verify before committing.
+        setConfirmNeeded(true);
+      } else {
+        setConfirmNeeded(false);
+        setResult(res);
+      }
     } catch (err) {
       if (err instanceof ApiError && err.status === 404) setExpired(true);
       else setError(err instanceof Error ? err.message : 'Failed');
     } finally {
       setSubmitting(false);
     }
+  }
+
+  function submit(e: React.FormEvent) {
+    e.preventDefault();
+    void send(false);
   }
 
   return (
@@ -73,7 +84,24 @@ export default function CheckInPage({ params }: { params: Promise<{ token: strin
               Sec {ctx.sectionNo} · {ctx.startTime}–{ctx.endTime}
             </div>
 
-            {result ? (
+            {confirmNeeded && !result ? (
+              <div style={{ marginTop: 18 }}>
+                <div className="glass hairline" style={{ padding: 18, borderRadius: 16 }}>
+                  <div style={{ fontSize: 30, marginBottom: 6 }}>🤔</div>
+                  <div style={{ fontWeight: 700, fontSize: 15 }}>{t('ci.confirmQ')}</div>
+                  <div style={{ fontFamily: 'ui-monospace, monospace', fontSize: 26, fontWeight: 750, letterSpacing: 2, margin: '10px 0', color: 'var(--brand)' }}>{code}</div>
+                  <div className="muted" style={{ fontSize: 12.5, marginBottom: 14 }}>{t('ci.confirmHint')}</div>
+                  <div style={{ display: 'flex', gap: 10 }}>
+                    <button onClick={() => setConfirmNeeded(false)} className="glass hairline" style={{ flex: 1, padding: 11, borderRadius: 12, fontWeight: 650, color: 'var(--text-1)', cursor: 'pointer', fontSize: 14 }}>
+                      {t('ci.edit')}
+                    </button>
+                    <button onClick={() => void send(true)} disabled={submitting} className="btn-primary" style={{ flex: 1, padding: 11, fontSize: 14 }}>
+                      {submitting ? t('ci.submitting') : t('ci.confirmYes')}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            ) : result ? (
               <div style={{ marginTop: 20 }}>
                 {result.result === 'success' ? (
                   <div className="chip chip-success" style={{ fontSize: 15, padding: '14px 18px', borderRadius: 16, flexDirection: 'column', gap: 4 }}>

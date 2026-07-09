@@ -194,7 +194,7 @@ export class AttendanceService {
     };
   }
 
-  async checkIn(token: string, studentCode: string, ip?: string | null) {
+  async checkIn(token: string, studentCode: string, ip?: string | null, confirm = false) {
     const window = await this.prisma.attendanceSession.findFirst({
       where: { token, isOpen: true, expiresAt: { gt: new Date() } },
       select: {
@@ -226,7 +226,11 @@ export class AttendanceService {
     });
 
     if (!enrollment) {
-      // No match → stays PENDING for the lecturer to resolve.
+      // Ask the student to double-check a possible typo before committing anything.
+      // Only a confirmed unmatched code becomes a PENDING item for the lecturer.
+      if (!confirm) {
+        return { result: 'unmatched_confirm', enteredCode: code };
+      }
       await this.prisma.attendanceCheckIn.create({
         data: { attendanceSessionId: window.id, classSessionId: cs.id, enteredCode: code, status: 'PENDING', ipAddress: ip ?? null },
       });
