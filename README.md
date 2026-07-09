@@ -14,9 +14,13 @@ Architecture, Repository Pattern, DI) to serve as the faculty's official platfor
 | 1 · Multi-tenant data foundation | ✅ Done & verified |
 | 2 · Backend core + security (auth, RBAC, tenant scope, audit, Swagger) | ✅ Done & verified |
 | 3 · Core domain APIs (students, sections, subjects, lecturers, rooms, enrollment) | ✅ Done & verified |
-| 5 · Frontend shell (login, dashboard, students) — brought forward | 🔷 In progress |
-| 4 · Timetable + attendance engine | ⬜ Next |
+| 4 · Timetable (conflict detection) + attendance engine (QR + manual) | ✅ Done & verified |
+| 5 · Frontend (login, dashboard+widgets, students+notes, timetable, attendance, bilingual TH/EN) | 🔷 In progress |
 | 6–8 · Analytics, reporting, ops | ⬜ Planned |
+
+Extras delivered on request: pastel Liquid-Glass theme, TH/EN i18n, official
+logos, live dashboard widgets (clock/weather/AQI), student behaviour notes,
+calendar entries (class/personal/activity, Google-sync-ready).
 
 Full plan: [`docs/architecture/phase-roadmap.md`](docs/architecture/phase-roadmap.md).
 

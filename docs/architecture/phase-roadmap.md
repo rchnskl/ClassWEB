@@ -9,7 +9,7 @@ in the requirements brief is accounted for below.
 | **1. Data foundation** | Multi-tenant Prisma schema, migrations, seed, ERD docs | Multi-Tenant Architecture, Academic Structure, Course/Room/Student/Lecturer/Section/Enrollment/Attendance **data**, Audit/Settings/Backup tables | ✅ **Done & verified** |
 | **2. Backend core + security** | NestJS scaffold, JWT + refresh, RBAC guards, tenant scoping, audit interceptor, Swagger, health checks | Security, API, Audit Log, Monitoring | ✅ **Done & verified** |
 | **3. Core domain APIs** | CRUD + services for academic hierarchy, students, lecturers, rooms, sections, enrollment | Course/Room/Student/Lecturer/Section/Enrollment Management | ✅ **Done & verified** |
-| **4. Timetable + attendance engine** | Schedule generation, conflict detection, attendance capture (manual + QR), rule engine | Timetable, Attendance Features, Attendance Rule Engine | 🔷 Timetable done; attendance next |
+| **4. Timetable + attendance engine** | Schedule generation, conflict detection, attendance capture (manual + QR), rule engine | Timetable, Attendance Features, Attendance Rule Engine | ✅ **Done & verified** |
 | **5. Frontend (admin dashboard)** | Next.js glass-morphism UI, dashboards, search, filters, dark/light, responsive | Dashboard, Design, Search Engine, Filter System, Admin Dashboard | ⬜ |
 | **6. Analytics + notifications** | Risk analytics, attendance stats, notifications (email/LINE/push/system) | Dashboard stats, Student Risk Analytics, Notification System | ⬜ |
 | **7. Reporting + PDF** | Report center, PDF/Excel/CSV export, digital signature, QR verification | Report Center, PDF Design | ⬜ |
@@ -92,6 +92,26 @@ the browser.
 **Next (Phase 4b):** attendance capture (manual + QR) + rule engine
 (late/auto-absent/lock), writing to `AttendanceRecord` and updating
 `enrollment.attendanceRate`.
+
+## Phase 4b — attendance engine (delivered)
+
+- Schema (migration 0004): `AttendanceSession` (open window + QR token),
+  `AttendanceCheckIn` (raw scans → PENDING/MATCHED/REJECTED + resolution reason).
+- **QR self-service**: lecturer opens a session → QR minted → student scans →
+  enters their own student code → matched against the section's enrolment →
+  **rule engine** sets PRESENT/LATE/ABSENT (late-after / auto-absent thresholds).
+  No match → PENDING → student sees "contact the instructor"; lecturer resolves
+  with a reason (make-up from another section / wrong code / late registration /
+  other).
+- **Manual** marking (present/late/absent) always available. Enrolment
+  `attendanceRate` recomputed; every action audited.
+- Frontend: lecturer `/attendance` (session picker, live QR, roster + manual
+  marking, pending resolution, polling) and public `/checkin/[token]` student page.
+
+**Verified end-to-end in the browser:** lecturer opened attendance and showed the
+QR; student check-in with a matching code → ✅ success; non-matching code → ⚠
+"contact the instructor" (PENDING on the lecturer side); manual mark + resolve
+worked; attendance rate updated.
 
 ## Resolved decisions
 
