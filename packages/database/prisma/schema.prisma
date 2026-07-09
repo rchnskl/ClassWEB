@@ -238,6 +238,7 @@ model University {
   sections        Section[]
   attendanceRules AttendanceRule[]
   calendarEvents  CalendarEvent[]
+  calendarEntries CalendarEntry[]
 
   @@index([isActive])
   @@map("universities")
@@ -548,6 +549,7 @@ model Room {
   sections         Section[]
   sectionSchedules SectionSchedule[]
   classSessions    ClassSession[]
+  calendarEntries  CalendarEntry[]
 
   @@unique([buildingId, roomNumber])
   @@index([buildingId])
@@ -637,13 +639,14 @@ model User {
   updatedAt    DateTime   @updatedAt
   deletedAt    DateTime?
 
-  university    University     @relation(fields: [universityId], references: [id])
-  roles         UserRole[]
-  refreshTokens RefreshToken[]
-  student       Student?
-  lecturer      Lecturer?
-  auditLogs     AuditLog[]
-  notifications Notification[]
+  university               University                @relation(fields: [universityId], references: [id])
+  roles                    UserRole[]
+  refreshTokens            RefreshToken[]
+  student                  Student?
+  lecturer                 Lecturer?
+  auditLogs                AuditLog[]
+  notifications            Notification[]
+  googleCalendarConnection GoogleCalendarConnection?
 
   @@unique([universityId, email])
   @@index([universityId])
@@ -737,6 +740,7 @@ model Lecturer {
   coSections        SectionLecturer[]
   sectionSchedules  SectionSchedule[]
   classSessions     ClassSession[]
+  calendarEntries   CalendarEntry[]
 
   @@unique([universityId, employeeCode])
   @@index([universityId])
@@ -1070,4 +1074,85 @@ model Backup {
   @@index([universityId, createdAt])
   @@index([status])
   @@map("backups")
+}
+
+// =============================================================================
+//  CALENDAR: unified timetable entries (classes, personal appointments,
+//  lecturer activities/meetings) + Google Calendar connection (sync-ready).
+//
+//  Class *sessions* still live in ClassSession (generated from the recurring
+//  SectionSchedule). CalendarEntry holds concrete, dated non-recurring items
+//  and can also mirror class sessions when a unified agenda is needed. Google
+//  sync fields stay null until a GoogleCalendarConnection is authorised.
+// =============================================================================
+
+enum CalendarEntryType {
+  CLASS
+  PERSONAL
+  ACTIVITY
+  MEETING
+  OTHER
+}
+
+enum CalendarVisibility {
+  PRIVATE
+  FACULTY
+  PUBLIC
+}
+
+model CalendarEntry {
+  id           String             @id @default(cuid())
+  universityId String
+  type         CalendarEntryType  @default(PERSONAL)
+  visibility   CalendarVisibility @default(PRIVATE)
+  title        String
+  description  String?
+  startAt      DateTime
+  endAt        DateTime
+  allDay       Boolean            @default(false)
+  location     String?
+  roomId       String?
+  /// Owner (personal appointment / activity organiser). Null for faculty-wide.
+  lecturerId   String?
+  createdById  String?
+  color        String?
+
+  // Google Calendar sync — populated only when a connection is authorised.
+  googleEventId    String?
+  googleCalendarId String?
+  syncedAt         DateTime?
+
+  metadata  Json?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  university University @relation(fields: [universityId], references: [id])
+  room       Room?      @relation(fields: [roomId], references: [id])
+  lecturer   Lecturer?  @relation(fields: [lecturerId], references: [id])
+
+  @@index([universityId, startAt])
+  @@index([lecturerId])
+  @@index([type])
+  @@map("calendar_entries")
+}
+
+/// Per-user Google Calendar authorisation. Tokens are app-encrypted at rest.
+/// Architecture is in place now; the OAuth flow is wired when credentials exist.
+model GoogleCalendarConnection {
+  id           String    @id @default(cuid())
+  userId       String    @unique
+  googleEmail  String?
+  accessToken  String?
+  refreshToken String?
+  tokenExpiry  DateTime?
+  calendarId   String?   @default("primary")
+  syncToken    String?
+  lastSyncedAt DateTime?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@map("google_calendar_connections")
 }
