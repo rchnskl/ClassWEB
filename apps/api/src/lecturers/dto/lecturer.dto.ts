@@ -23,10 +23,9 @@ export class CreateLecturerDto {
   @IsString()
   position?: string;
 
-  @ApiPropertyOptional()
-  @IsOptional()
+  @ApiProperty({ description: 'Also used as the login email for the account created alongside this lecturer' })
   @IsEmail()
-  email?: string;
+  email!: string;
 
   @ApiPropertyOptional()
   @IsOptional()

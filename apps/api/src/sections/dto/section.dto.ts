@@ -1,4 +1,4 @@
-import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { ApiProperty, ApiPropertyOptional, PartialType } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
 import { IsInt, IsOptional, IsString, Min, MinLength } from 'class-validator';
 import { PaginationQueryDto } from '../../common/dto/pagination.dto';
@@ -34,6 +34,11 @@ export class CreateSectionDto {
   @Min(1)
   capacity?: number;
 }
+
+// All fields optional for PATCH. The service intentionally ignores
+// subjectId/semesterId here even if sent — moving a section to a different
+// subject/semester is effectively creating a new one.
+export class UpdateSectionDto extends PartialType(CreateSectionDto) {}
 
 export class QuerySectionDto extends PaginationQueryDto {
   @ApiPropertyOptional()

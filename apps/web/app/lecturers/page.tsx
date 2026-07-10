@@ -18,6 +18,7 @@ interface LecturerRow {
   phone?: string | null;
   office?: string | null;
   isActive: boolean;
+  userId?: string | null;
   department?: { id: string; code: string; nameEn: string } | null;
   _count: { primarySections: number };
 }
@@ -45,6 +46,8 @@ export default function LecturersPage() {
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [createdResult, setCreatedResult] = useState<{ email: string; tempPassword: string } | null>(null);
+  const [copied, setCopied] = useState(false);
 
   const load = useCallback(async (nextSkip: number, q: string) => {
     setLoading(true);
@@ -81,6 +84,8 @@ export default function LecturersPage() {
     setEditingId(null);
     setForm(EMPTY_FORM);
     setFormError(null);
+    setCreatedResult(null);
+    setCopied(false);
     setShowForm(true);
   }
   function openEdit(row: LecturerRow) {
@@ -111,18 +116,25 @@ export default function LecturersPage() {
       };
       if (editingId) {
         await apiFetch(`/lecturers/${editingId}`, { method: 'PATCH', body: JSON.stringify(body) });
+        setShowForm(false);
+        setEditingId(null);
+        setForm(EMPTY_FORM);
       } else {
-        await apiFetch('/lecturers', { method: 'POST', body: JSON.stringify(body) });
+        const res = await apiFetch<{ tempPassword: string; email: string }>('/lecturers', { method: 'POST', body: JSON.stringify(body) });
+        setCreatedResult({ email: res.email, tempPassword: res.tempPassword });
+        setForm(EMPTY_FORM);
       }
-      setShowForm(false);
-      setEditingId(null);
-      setForm(EMPTY_FORM);
       await load(skip, search);
     } catch (err) {
       setFormError(err instanceof Error ? err.message : 'Failed to save lecturer');
     } finally {
       setSaving(false);
     }
+  }
+
+  async function copyPassword() {
+    if (!createdResult) return;
+    try { await navigator.clipboard.writeText(createdResult.tempPassword); setCopied(true); } catch { /* ignore */ }
   }
 
   async function toggleActive(row: LecturerRow) {
@@ -154,7 +166,22 @@ export default function LecturersPage() {
           </button>
         </div>
 
-        {showForm && (
+        {showForm && createdResult && (
+          <div className="glass rise" style={{ padding: 20, marginBottom: 18 }}>
+            <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 6 }}>✓ {t('lecturers.createdTitle')}</div>
+            <p className="muted" style={{ fontSize: 13, margin: '0 0 14px' }}>{t('lecturers.createdHint')}</p>
+            <div style={{ marginBottom: 4 }}>
+              <span className="subtle" style={{ fontSize: 12.5, fontWeight: 600 }}>{createdResult.email}</span>
+            </div>
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 16, maxWidth: 360 }}>
+              <code style={{ flex: 1, padding: '10px 12px', borderRadius: 10, background: 'var(--popover-hover)', fontSize: 15, fontWeight: 700, letterSpacing: 0.5 }}>{createdResult.tempPassword}</code>
+              <button onClick={copyPassword} className="glass hairline" style={{ padding: '9px 14px', borderRadius: 10, fontSize: 12.5, fontWeight: 600 }}>{copied ? `✓ ${t('users.copied')}` : t('users.copy')}</button>
+            </div>
+            <button onClick={() => { setShowForm(false); setCreatedResult(null); }} className="btn-primary" style={{ padding: '10px 20px', fontSize: 14 }}>{t('users.done')}</button>
+          </div>
+        )}
+
+        {showForm && !createdResult && (
           <form onSubmit={submitForm} className="glass rise" style={{ padding: 20, marginBottom: 18, display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 12, alignItems: 'end' }}>
             <Field label={`${t('lecturers.employeeCode')} *`}><input className="input" required value={form.employeeCode} onChange={(e) => setForm({ ...form, employeeCode: e.target.value })} placeholder="EMP-0003" /></Field>
             <Field label={`${t('lecturers.englishName')} *`}><input className="input" required value={form.nameEn} onChange={(e) => setForm({ ...form, nameEn: e.target.value })} placeholder="Dr. Full Name" /></Field>
@@ -166,7 +193,9 @@ export default function LecturersPage() {
                 {departments.map((d) => <option key={d.id} value={d.id}>{d.code} — {d.nameEn}</option>)}
               </select>
             </Field>
-            <Field label={t('lecturers.email')}><input className="input" type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} placeholder="name@au.edu" /></Field>
+            <Field label={`${t('lecturers.email')} * ${editingId ? '' : `(${t('lecturers.loginEmailHint')})`}`}>
+              <input className="input" type="email" required={!editingId} value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} placeholder="name@au.edu" />
+            </Field>
             <Field label={t('lecturers.phone')}><input className="input" value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} placeholder="—" /></Field>
             <Field label={t('lecturers.office')}><input className="input" value={form.office} onChange={(e) => setForm({ ...form, office: e.target.value })} placeholder="—" /></Field>
             <button className="btn-primary" type="submit" disabled={saving} style={{ padding: '12px', fontSize: 14.5 }}>
@@ -214,7 +243,10 @@ export default function LecturersPage() {
                     </Td>
                     <Td>{l.department ? <span className="chip" style={{ background: 'var(--glass-hairline)', color: 'var(--text-1)' }}>{l.department.code}</span> : <span className="muted">—</span>}</Td>
                     <Td>{l._count.primarySections}</Td>
-                    <Td><span className={`chip ${l.isActive ? 'chip-success' : 'chip-danger'}`}>{l.isActive ? t('lecturers.active') : t('lecturers.inactive')}</span></Td>
+                    <Td>
+                      <span className={`chip ${l.isActive ? 'chip-success' : 'chip-danger'}`}>{l.isActive ? t('lecturers.active') : t('lecturers.inactive')}</span>
+                      {!l.userId && <div className="chip chip-warning" style={{ marginTop: 4 }}>{t('lecturers.noAccount')}</div>}
+                    </Td>
                     <Td>
                       <div style={{ display: 'inline-flex', gap: 6 }}>
                         <button onClick={() => openEdit(l)} className="glass hairline icon-btn" style={{ padding: '6px 12px', borderRadius: 10, fontSize: 12.5, fontWeight: 600, color: 'var(--text-1)' }}>

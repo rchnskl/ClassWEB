@@ -16,7 +16,7 @@ const prisma = new PrismaClient();
 // RBAC: the permission matrix. Resource:action pairs granted to each role.
 // ---------------------------------------------------------------------------
 const RESOURCES = [
-  'university', 'faculty', 'program', 'course', 'subject', 'section',
+  'university', 'faculty', 'program', 'course', 'subject', 'section', 'department',
   'academicYear', 'semester', 'room', 'building',
   'student', 'lecturer', 'enrollment', 'attendance', 'timetable',
   'note', 'assessment', 'report', 'notification', 'setting', 'audit', 'backup', 'user', 'role',
@@ -26,11 +26,15 @@ const ACTIONS = ['create', 'read', 'update', 'delete', 'export'] as const;
 const ROLE_MATRIX: Record<string, (resource: string, action: string) => boolean> = {
   // Faculty admin — full control of the tenant.
   ADMIN: () => true,
-  // Lecturer — manage their teaching + attendance, read academic data.
+  // Lecturer — manage their teaching + attendance, read academic data. Can add
+  // their own sections and manage that section's roster, but not curriculum
+  // (subjects/courses/departments) or other lecturers' sections.
   LECTURER: (r, a) => {
     if (['attendance', 'timetable', 'note', 'assessment'].includes(r)) return true;
     if (r === 'report' && ['read', 'export'].includes(a)) return true;
-    if (['section', 'student', 'lecturer', 'subject', 'course', 'enrollment'].includes(r) && a === 'read') return true;
+    if (r === 'section' && ['read', 'create', 'update'].includes(a)) return true;
+    if (r === 'enrollment' && ['read', 'create', 'update'].includes(a)) return true;
+    if (['student', 'lecturer', 'subject', 'course', 'room', 'department'].includes(r) && a === 'read') return true;
     return false;
   },
   // Student — read their own academic surface only.

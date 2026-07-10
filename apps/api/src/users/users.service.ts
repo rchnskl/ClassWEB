@@ -1,18 +1,10 @@
 import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
-import { randomBytes } from 'node:crypto';
 import * as bcrypt from 'bcryptjs';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
 import { TokenService } from '../auth/token.service';
-
-// Excludes visually ambiguous characters (0/O, 1/l/I) from generated temp passwords.
-const TEMP_PASSWORD_CHARS = 'ABCDEFGHJKMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789';
-
-function generateTempPassword(length = 12): string {
-  const bytes = randomBytes(length);
-  return Array.from(bytes, (b) => TEMP_PASSWORD_CHARS[b % TEMP_PASSWORD_CHARS.length]).join('');
-}
+import { generateTempPassword } from '../common/temp-password';
 
 @Injectable()
 export class UsersService {

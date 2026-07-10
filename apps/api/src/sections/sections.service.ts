@@ -1,8 +1,9 @@
-import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
-import { CreateSectionDto, QuerySectionDto } from './dto/section.dto';
+import { CreateSectionDto, QuerySectionDto, UpdateSectionDto } from './dto/section.dto';
 import { Paginated } from '../common/dto/pagination.dto';
+import { AuthenticatedUser } from '../common/authenticated-user';
 
 @Injectable()
 export class SectionsService {
@@ -12,7 +13,7 @@ export class SectionsService {
     id: true, sectionNo: true, capacity: true, currentEnrollment: true, isActive: true,
     subject: { select: { id: true, code: true, nameEn: true, credits: true } },
     semester: { select: { id: true, nameEn: true, academicYear: { select: { code: true } } } },
-    lecturer: { select: { id: true, nameEn: true, employeeCode: true } },
+    lecturer: { select: { id: true, nameEn: true, employeeCode: true, userId: true } },
     room: { select: { id: true, roomNumber: true } },
     _count: { select: { enrollments: true } },
   } satisfies Prisma.SectionSelect;
@@ -46,7 +47,15 @@ export class SectionsService {
     return section;
   }
 
-  async create(universityId: string, dto: CreateSectionDto) {
+  /** Resolves the caller's own Lecturer record, if any (used to scope self-service section management). */
+  private async myLecturer(universityId: string, userId: string) {
+    return this.prisma.lecturer.findFirst({ where: { universityId, userId, deletedAt: null }, select: { id: true } });
+  }
+
+  async create(actingUser: AuthenticatedUser, dto: CreateSectionDto) {
+    const universityId = actingUser.universityId;
+    const isAdmin = actingUser.roleCodes.includes('ADMIN');
+
     const subject = await this.prisma.subject.findFirst({
       where: { id: dto.subjectId, deletedAt: null, program: { faculty: { universityId } } },
       select: { id: true },
@@ -59,12 +68,23 @@ export class SectionsService {
     });
     if (!semester) throw new BadRequestException('Semester does not exist in this tenant');
 
-    if (dto.lecturerId) {
+    // Lecturers can only create a section taught by themselves; admins may
+    // assign any lecturer (or leave it unassigned).
+    let lecturerId = dto.lecturerId;
+    if (!isAdmin) {
+      const me = await this.myLecturer(universityId, actingUser.id);
+      if (!me) throw new ForbiddenException('Your account is not linked to a lecturer record');
+      if (dto.lecturerId && dto.lecturerId !== me.id) {
+        throw new ForbiddenException('You can only create a section taught by yourself');
+      }
+      lecturerId = me.id;
+    } else if (dto.lecturerId) {
       const lecturer = await this.prisma.lecturer.findFirst({
         where: { id: dto.lecturerId, universityId, deletedAt: null }, select: { id: true },
       });
       if (!lecturer) throw new BadRequestException('Lecturer does not exist in this tenant');
     }
+
     if (dto.roomId) {
       const room = await this.prisma.room.findFirst({
         where: { id: dto.roomId, deletedAt: null, building: { campus: { universityId } } }, select: { id: true },
@@ -85,10 +105,70 @@ export class SectionsService {
         semester: { connect: { id: dto.semesterId } },
         sectionNo: dto.sectionNo,
         capacity: dto.capacity ?? 40,
-        ...(dto.lecturerId ? { lecturer: { connect: { id: dto.lecturerId } } } : {}),
+        ...(lecturerId ? { lecturer: { connect: { id: lecturerId } } } : {}),
         ...(dto.roomId ? { room: { connect: { id: dto.roomId } } } : {}),
       },
       select: this.select,
     });
+  }
+
+  /** Throws unless the caller is an admin or the section's own lecturer. */
+  private async assertCanManage(actingUser: AuthenticatedUser, sectionId: string) {
+    const universityId = actingUser.universityId;
+    const section = await this.prisma.section.findFirst({
+      where: { id: sectionId, universityId, deletedAt: null },
+      select: { id: true, lecturerId: true },
+    });
+    if (!section) throw new NotFoundException('Section not found');
+    if (actingUser.roleCodes.includes('ADMIN')) return section;
+
+    const me = await this.myLecturer(universityId, actingUser.id);
+    if (!me || section.lecturerId !== me.id) {
+      throw new ForbiddenException('You can only manage sections you teach');
+    }
+    return section;
+  }
+
+  async update(actingUser: AuthenticatedUser, id: string, dto: UpdateSectionDto) {
+    const universityId = actingUser.universityId;
+    const isAdmin = actingUser.roleCodes.includes('ADMIN');
+    await this.assertCanManage(actingUser, id);
+
+    // Non-admins may not reassign the primary lecturer away from themselves.
+    if (dto.lecturerId !== undefined && !isAdmin) {
+      const me = await this.myLecturer(universityId, actingUser.id);
+      if (!me || dto.lecturerId !== me.id) {
+        throw new ForbiddenException('You cannot reassign this section to another lecturer');
+      }
+    }
+    if (dto.lecturerId) {
+      const lecturer = await this.prisma.lecturer.findFirst({ where: { id: dto.lecturerId, universityId, deletedAt: null }, select: { id: true } });
+      if (!lecturer) throw new BadRequestException('Lecturer does not exist in this tenant');
+    }
+    if (dto.roomId) {
+      const room = await this.prisma.room.findFirst({ where: { id: dto.roomId, deletedAt: null, building: { campus: { universityId } } }, select: { id: true } });
+      if (!room) throw new BadRequestException('Room does not exist in this tenant');
+    }
+
+    return this.prisma.section.update({
+      where: { id },
+      data: {
+        ...(dto.sectionNo !== undefined && { sectionNo: dto.sectionNo }),
+        ...(dto.capacity !== undefined && { capacity: dto.capacity }),
+        ...(dto.lecturerId !== undefined && { lecturer: dto.lecturerId ? { connect: { id: dto.lecturerId } } : { disconnect: true } }),
+        ...(dto.roomId !== undefined && { room: dto.roomId ? { connect: { id: dto.roomId } } : { disconnect: true } }),
+      },
+      select: this.select,
+    });
+  }
+
+  async remove(actingUser: AuthenticatedUser, id: string) {
+    const section = await this.assertCanManage(actingUser, id);
+    const enrolled = await this.prisma.enrollment.count({ where: { sectionId: id, status: 'ENROLLED' } });
+    if (enrolled > 0) {
+      throw new ConflictException(`This section has ${enrolled} enrolled student(s) and cannot be deleted`);
+    }
+    await this.prisma.section.update({ where: { id: section.id }, data: { deletedAt: new Date(), isActive: false } });
+    return { id: section.id, deleted: true };
   }
 }

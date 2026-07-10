@@ -1,8 +1,10 @@
 import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
+import * as bcrypt from 'bcryptjs';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateLecturerDto, QueryLecturerDto, UpdateLecturerDto } from './dto/lecturer.dto';
 import { Paginated } from '../common/dto/pagination.dto';
+import { generateTempPassword } from '../common/temp-password';
 
 @Injectable()
 export class LecturersService {
@@ -10,7 +12,7 @@ export class LecturersService {
 
   private select = {
     id: true, employeeCode: true, nameEn: true, nameTh: true, position: true,
-    email: true, phone: true, office: true, isActive: true,
+    email: true, phone: true, office: true, isActive: true, userId: true,
     department: { select: { id: true, code: true, nameEn: true } },
     _count: { select: { primarySections: true } },
   } satisfies Prisma.LecturerSelect;
@@ -42,6 +44,13 @@ export class LecturersService {
     return lecturer;
   }
 
+  /**
+   * Creates a Lecturer and its login User account together, in one
+   * transaction — a Lecturer with no way to sign in can't do anything on
+   * this platform (add their own sections, take attendance, grade), so the
+   * two are no longer created as separate steps. Returns the new lecturer
+   * plus a one-time temp password for the account.
+   */
   async create(universityId: string, dto: CreateLecturerDto) {
     if (dto.departmentId) {
       const dept = await this.prisma.department.findFirst({
@@ -50,26 +59,47 @@ export class LecturersService {
       });
       if (!dept) throw new BadRequestException('Department does not exist in this tenant');
     }
-    const clash = await this.prisma.lecturer.findFirst({
+    const codeClash = await this.prisma.lecturer.findFirst({
       where: { universityId, employeeCode: dto.employeeCode, deletedAt: null },
       select: { id: true },
     });
-    if (clash) throw new ConflictException(`Employee code ${dto.employeeCode} already exists`);
+    if (codeClash) throw new ConflictException(`Employee code ${dto.employeeCode} already exists`);
 
-    return this.prisma.lecturer.create({
-      data: {
-        university: { connect: { id: universityId } },
-        employeeCode: dto.employeeCode,
-        nameEn: dto.nameEn,
-        nameTh: dto.nameTh,
-        position: dto.position,
-        email: dto.email,
-        phone: dto.phone,
-        office: dto.office,
-        ...(dto.departmentId ? { department: { connect: { id: dto.departmentId } } } : {}),
-      },
-      select: this.select,
+    const emailClash = await this.prisma.user.findFirst({
+      where: { universityId, email: dto.email, deletedAt: null },
+      select: { id: true },
     });
+    if (emailClash) throw new ConflictException(`A user account with email ${dto.email} already exists`);
+
+    const role = await this.prisma.role.findFirst({ where: { universityId, code: 'LECTURER' } });
+    if (!role) throw new BadRequestException('LECTURER role is not configured for this tenant');
+
+    const tempPassword = generateTempPassword();
+    const passwordHash = await bcrypt.hash(tempPassword, 12);
+
+    const lecturer = await this.prisma.$transaction(async (tx) => {
+      const user = await tx.user.create({
+        data: { universityId, email: dto.email, passwordHash, status: 'ACTIVE' },
+      });
+      await tx.userRole.create({ data: { userId: user.id, roleId: role.id } });
+      return tx.lecturer.create({
+        data: {
+          university: { connect: { id: universityId } },
+          user: { connect: { id: user.id } },
+          employeeCode: dto.employeeCode,
+          nameEn: dto.nameEn,
+          nameTh: dto.nameTh,
+          position: dto.position,
+          email: dto.email,
+          phone: dto.phone,
+          office: dto.office,
+          ...(dto.departmentId ? { department: { connect: { id: dto.departmentId } } } : {}),
+        },
+        select: this.select,
+      });
+    });
+
+    return { ...lecturer, tempPassword };
   }
 
   async update(universityId: string, id: string, dto: UpdateLecturerDto) {

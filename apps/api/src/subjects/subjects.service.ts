@@ -1,7 +1,7 @@
 import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
-import { CreateSubjectDto, QuerySubjectDto } from './dto/subject.dto';
+import { CreateSubjectDto, QuerySubjectDto, UpdateSubjectDto } from './dto/subject.dto';
 import { Paginated } from '../common/dto/pagination.dto';
 
 @Injectable()
@@ -74,5 +74,54 @@ export class SubjectsService {
       },
       select: this.select,
     });
+  }
+
+  async update(universityId: string, id: string, dto: UpdateSubjectDto) {
+    const subject = await this.prisma.subject.findFirst({
+      where: { id, deletedAt: null, program: { faculty: { universityId } } },
+    });
+    if (!subject) throw new NotFoundException('Subject not found');
+
+    if (dto.programId) {
+      const program = await this.prisma.program.findFirst({ where: { id: dto.programId, faculty: { universityId } }, select: { id: true } });
+      if (!program) throw new BadRequestException('Program does not exist in this tenant');
+    }
+    if (dto.courseId) {
+      const course = await this.prisma.course.findFirst({ where: { id: dto.courseId, programId: dto.programId ?? subject.programId }, select: { id: true } });
+      if (!course) throw new BadRequestException('Course does not belong to the given program');
+    }
+    if (dto.code) {
+      const clash = await this.prisma.subject.findFirst({
+        where: { programId: dto.programId ?? subject.programId, code: dto.code, deletedAt: null, NOT: { id } },
+      });
+      if (clash) throw new ConflictException(`Subject code ${dto.code} already exists in this program`);
+    }
+
+    return this.prisma.subject.update({
+      where: { id },
+      data: {
+        ...(dto.programId !== undefined && { program: { connect: { id: dto.programId } } }),
+        ...(dto.courseId !== undefined && { course: { connect: { id: dto.courseId } } }),
+        ...(dto.code !== undefined && { code: dto.code }),
+        ...(dto.nameEn !== undefined && { nameEn: dto.nameEn }),
+        ...(dto.nameTh !== undefined && { nameTh: dto.nameTh }),
+        ...(dto.description !== undefined && { description: dto.description }),
+        ...(dto.credits !== undefined && { credits: dto.credits }),
+      },
+      select: this.select,
+    });
+  }
+
+  async remove(universityId: string, id: string) {
+    const subject = await this.prisma.subject.findFirst({
+      where: { id, deletedAt: null, program: { faculty: { universityId } } },
+      select: { id: true, _count: { select: { sections: true } } },
+    });
+    if (!subject) throw new NotFoundException('Subject not found');
+    if (subject._count.sections > 0) {
+      throw new ConflictException(`This subject has ${subject._count.sections} section(s) and cannot be deleted`);
+    }
+    await this.prisma.subject.update({ where: { id }, data: { deletedAt: new Date(), isActive: false } });
+    return { id, deleted: true };
   }
 }

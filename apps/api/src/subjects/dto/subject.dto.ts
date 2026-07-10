@@ -1,4 +1,4 @@
-import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { ApiProperty, ApiPropertyOptional, PartialType } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
 import { IsInt, IsOptional, IsString, Max, Min, MinLength } from 'class-validator';
 import { PaginationQueryDto } from '../../common/dto/pagination.dto';
@@ -40,6 +40,8 @@ export class CreateSubjectDto {
   @Max(12)
   credits?: number;
 }
+
+export class UpdateSubjectDto extends PartialType(CreateSubjectDto) {}
 
 export class QuerySubjectDto extends PaginationQueryDto {
   @ApiPropertyOptional()
