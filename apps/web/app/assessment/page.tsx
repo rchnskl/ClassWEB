@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import Sidebar from '@/components/Sidebar';
 import Topbar from '@/components/Topbar';
 import GradingDrawer, { type Rubric } from '@/components/GradingDrawer';
+import RubricBuilderDrawer from '@/components/RubricBuilderDrawer';
 import { apiFetch, downloadFile } from '@/lib/api';
 import { useI18n } from '@/lib/i18n';
 
@@ -35,6 +36,7 @@ export default function AssessmentPage() {
   const [showConfig, setShowConfig] = useState(false);
   const [savingConfig, setSavingConfig] = useState(false);
   const [exporting, setExporting] = useState<string | null>(null);
+  const [showBuilder, setShowBuilder] = useState(false);
 
   async function exportSection(fmt: 'pdf' | 'xlsx' | 'csv') {
     if (!sectionId) return;
@@ -132,6 +134,7 @@ export default function AssessmentPage() {
             <select className="input" value={sectionId} onChange={(e) => pickSection(e.target.value)} style={{ width: 'auto', minWidth: 160 }}>
               {sections.map((s) => <option key={s.id} value={s.id}>{s.subject.code} · {s.sectionNo}</option>)}
             </select>
+            <button className="glass hairline" style={{ padding: '9px 14px', borderRadius: 12, fontWeight: 650, fontSize: 13.5, color: 'var(--text-1)', cursor: 'pointer' }} onClick={() => setShowBuilder(true)}>{t('rubric.manageBtn')}</button>
             <button className="glass hairline" style={{ padding: '9px 14px', borderRadius: 12, fontWeight: 650, fontSize: 13.5, color: 'var(--text-1)', cursor: 'pointer' }} onClick={openConfig}>📋 {t('as.configRubrics')}</button>
             <button className="glass hairline" style={{ padding: '9px 14px', borderRadius: 12, fontWeight: 650, fontSize: 13.5, color: 'var(--text-1)', cursor: 'pointer' }} onClick={openScheme}>⚙︎ {t('as.gradeScheme')}</button>
           </div>
@@ -179,6 +182,13 @@ export default function AssessmentPage() {
           </div>
         </div>
       </div>
+
+      {showBuilder && (
+        <RubricBuilderDrawer
+          onClose={() => setShowBuilder(false)}
+          onChanged={() => { void loadSummary(sectionId); if (currentSubjectId) void loadRubrics(currentSubjectId); }}
+        />
+      )}
 
       {grading && sectionId && (
         <GradingDrawer

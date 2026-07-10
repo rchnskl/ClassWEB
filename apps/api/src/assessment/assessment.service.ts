@@ -1,7 +1,7 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { AuditAction } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
-import { SaveEvaluationDto, UpdateGradeBandsDto, UpdateRubricWeightsDto, UpdateSubjectRubricsDto } from './dto/assessment.dto';
+import { SaveEvaluationDto, SaveRubricDto, UpdateGradeBandsDto, UpdateRubricWeightsDto, UpdateSubjectRubricsDto } from './dto/assessment.dto';
 
 interface GradeBand { grade: string; gpa: number; label: string; minScore: number }
 
@@ -67,6 +67,103 @@ export class AssessmentService {
       }
     });
     return this.getRubric(universityId, id);
+  }
+
+  /** Shared weight-sum validation for the rubric builder (create + replace). */
+  private validateRubricStructure(dto: SaveRubricDto) {
+    const sectionSum = dto.sections.reduce((a, s) => a + s.weightPercent, 0);
+    if (sectionSum > 100.001) throw new BadRequestException('Section weights must not exceed 100%');
+    for (const section of dto.sections) {
+      const itemSum = section.items.reduce((a, i) => a + i.weightPercent, 0);
+      if (itemSum > 100.001) throw new BadRequestException(`Item weights within section "${section.nameEn}" must not exceed 100%`);
+    }
+  }
+
+  async createRubric(universityId: string, dto: SaveRubricDto) {
+    this.validateRubricStructure(dto);
+    const maxOrder = await this.prisma.rubric.aggregate({ where: { universityId, deletedAt: null }, _max: { order: true } });
+    const rubric = await this.prisma.rubric.create({
+      data: {
+        universityId,
+        code: dto.code,
+        nameEn: dto.nameEn,
+        nameTh: dto.nameTh,
+        description: dto.description,
+        weightPercent: dto.weightPercent ?? 0,
+        order: (maxOrder._max.order ?? 0) + 1,
+        sections: {
+          create: dto.sections.map((s, si) => ({
+            nameEn: s.nameEn,
+            nameTh: s.nameTh,
+            weightPercent: s.weightPercent,
+            order: si,
+            items: {
+              create: s.items.map((it, ii) => ({
+                textEn: it.textEn,
+                textTh: it.textTh,
+                weightPercent: it.weightPercent,
+                maxRating: it.maxRating ?? 5,
+                order: ii,
+              })),
+            },
+          })),
+        },
+      },
+      include: this.rubricInclude,
+    });
+    return rubric;
+  }
+
+  /** Fully replaces a rubric's sections/items (existing children are dropped and recreated). */
+  async updateRubricStructure(universityId: string, id: string, dto: SaveRubricDto) {
+    await this.getRubric(universityId, id); // ensures existence + tenant ownership
+    this.validateRubricStructure(dto);
+
+    await this.prisma.$transaction(async (tx) => {
+      await tx.rubric.update({
+        where: { id },
+        data: {
+          code: dto.code,
+          nameEn: dto.nameEn,
+          nameTh: dto.nameTh,
+          description: dto.description,
+          ...(dto.weightPercent !== undefined && { weightPercent: dto.weightPercent }),
+        },
+      });
+      // onDelete: Cascade on RubricSection→RubricItem takes items with it.
+      await tx.rubricSection.deleteMany({ where: { rubricId: id } });
+      for (const [si, s] of dto.sections.entries()) {
+        await tx.rubricSection.create({
+          data: {
+            rubricId: id,
+            nameEn: s.nameEn,
+            nameTh: s.nameTh,
+            weightPercent: s.weightPercent,
+            order: si,
+            items: {
+              create: s.items.map((it, ii) => ({
+                textEn: it.textEn,
+                textTh: it.textTh,
+                weightPercent: it.weightPercent,
+                maxRating: it.maxRating ?? 5,
+                order: ii,
+              })),
+            },
+          },
+        });
+      }
+    });
+    return this.getRubric(universityId, id);
+  }
+
+  async removeRubric(universityId: string, id: string) {
+    await this.getRubric(universityId, id);
+    const evalCount = await this.prisma.evaluation.count({ where: { rubricId: id } });
+    if (evalCount > 0) {
+      throw new ConflictException(`This rubric has ${evalCount} recorded evaluation(s) and cannot be deleted. Deactivate its subject assignments instead.`);
+    }
+    await this.prisma.rubric.update({ where: { id }, data: { deletedAt: new Date(), isActive: false } });
+    return { id, deleted: true };
   }
 
   /** Pure scoring: rubric (0–100) from a map of itemId→rating. */

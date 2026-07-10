@@ -1,7 +1,7 @@
-import { Body, Controller, Get, Param, Patch, Post, Query } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Patch, Post, Query } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { AssessmentService } from './assessment.service';
-import { SaveEvaluationDto, UpdateGradeBandsDto, UpdateRubricWeightsDto, UpdateSubjectRubricsDto } from './dto/assessment.dto';
+import { SaveEvaluationDto, SaveRubricDto, UpdateGradeBandsDto, UpdateRubricWeightsDto, UpdateSubjectRubricsDto } from './dto/assessment.dto';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { Permissions } from '../common/decorators/permissions.decorator';
 import { AuthenticatedUser } from '../common/authenticated-user';
@@ -30,6 +30,27 @@ export class AssessmentController {
   @ApiOperation({ summary: 'Adjust rubric / section / item weights (sums ≤ 100%)' })
   weights(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string, @Body() dto: UpdateRubricWeightsDto) {
     return this.assessment.updateWeights(user.universityId, id, dto);
+  }
+
+  @Post('rubrics')
+  @Permissions('assessment:create')
+  @ApiOperation({ summary: 'Create a new rubric from scratch (sections + items)' })
+  createRubric(@CurrentUser() user: AuthenticatedUser, @Body() dto: SaveRubricDto) {
+    return this.assessment.createRubric(user.universityId, dto);
+  }
+
+  @Patch('rubrics/:id')
+  @Permissions('assessment:update')
+  @ApiOperation({ summary: "Fully replace a rubric's sections/items (name/description also updated)" })
+  updateRubric(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string, @Body() dto: SaveRubricDto) {
+    return this.assessment.updateRubricStructure(user.universityId, id, dto);
+  }
+
+  @Delete('rubrics/:id')
+  @Permissions('assessment:delete')
+  @ApiOperation({ summary: 'Delete a rubric (blocked if it has recorded evaluations)' })
+  removeRubric(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string) {
+    return this.assessment.removeRubric(user.universityId, id);
   }
 
   @Get('subjects/:subjectId/rubric-config')
