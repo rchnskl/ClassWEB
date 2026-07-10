@@ -252,6 +252,47 @@ body {
 @keyframes rise { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: translateY(0); } }
 .rise { animation: rise 0.55s cubic-bezier(0.22, 1, 0.36, 1) both; }
 
+.btn-danger {
+  background: rgba(226, 86, 77, 0.14);
+  color: var(--danger);
+  border: 1px solid rgba(226, 86, 77, 0.3);
+  border-radius: 14px;
+  font-weight: 650;
+  cursor: pointer;
+  transition: transform 0.18s cubic-bezier(0.22,1,0.36,1), background 0.18s ease;
+}
+.btn-danger:hover { background: rgba(226, 86, 77, 0.22); transform: translateY(-1.5px); }
+.btn-danger:disabled { opacity: 0.55; cursor: not-allowed; transform: none; }
+
+.tabbar {
+  display: flex;
+  gap: 4px;
+  padding: 4px;
+  border-radius: 16px;
+  background: var(--glass-bg-strong);
+  border: 1px solid var(--glass-hairline);
+  width: fit-content;
+  flex-wrap: wrap;
+}
+.tab {
+  padding: 8px 16px;
+  border-radius: 12px;
+  border: none;
+  background: transparent;
+  color: var(--text-2);
+  font-weight: 650;
+  font-size: 13.5px;
+  cursor: pointer;
+  transition: background 0.18s ease, color 0.18s ease;
+  white-space: nowrap;
+}
+.tab:hover { color: var(--text-0); }
+.tab.active {
+  background: linear-gradient(120deg, rgba(255, 138, 76, 0.22), rgba(111, 163, 214, 0.22));
+  color: var(--text-0);
+  box-shadow: inset 0 1px 0 var(--glass-sheen);
+}
+
 @media (prefers-reduced-motion: reduce) {
   .aurora .blob, .nav-item.active svg, .floaty { animation: none !important; }
   .rise { animation: none; }

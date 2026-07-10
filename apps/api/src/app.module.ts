@@ -25,6 +25,9 @@ import { AttendanceModule } from './attendance/attendance.module';
 import { NotificationsModule } from './notifications/notifications.module';
 import { WidgetsModule } from './widgets/widgets.module';
 import { HealthModule } from './health/health.module';
+import { SettingsModule } from './settings/settings.module';
+import { AuditModule } from './audit/audit.module';
+import { BackupsModule } from './backups/backups.module';
 import { JwtAuthGuard } from './common/guards/jwt-auth.guard';
 import { PermissionsGuard } from './common/guards/permissions.guard';
 import { AuditInterceptor } from './common/interceptors/audit.interceptor';
@@ -59,6 +62,9 @@ import { AllExceptionsFilter } from './common/filters/all-exceptions.filter';
     NotificationsModule,
     WidgetsModule,
     HealthModule,
+    SettingsModule,
+    AuditModule,
+    BackupsModule,
   ],
   providers: [
     // Order matters: rate-limit → authenticate → authorize.
