@@ -10,7 +10,7 @@ import { apiFetch, downloadFile } from '@/lib/api';
 import { useI18n } from '@/lib/i18n';
 
 interface SectionRef { id: string; sectionNo: string; subject: { id: string; code: string; nameEn: string } }
-interface Row { studentId: string; studentCode: string; nameEn: string; nameTh: string | null; total: number; gradedWeight: number; gradedCount: number; grade: string | null; gpa: number | null }
+interface Row { studentId: string; studentCode: string; nameEn: string; nameTh: string | null; total: number; gradedWeight: number; gradedCount: number; grade: string | null; gpa: number | null; hasCriticalFail?: boolean }
 interface SectionSummary { section: { sectionNo: string; subject: { code: string; nameEn: string } }; rubricCount: number; students: Row[] }
 interface Band { id: string; grade: string; gpa: number; label: string; minScore: number }
 interface RubricConfigRow { rubricId: string; code: string; nameEn: string; nameTh: string | null; weightPercent: number; isActive: boolean }
@@ -164,7 +164,12 @@ export default function AssessmentPage() {
                     <Td><span style={{ fontWeight: 600 }}>{name(s.nameEn, s.nameTh)}</span></Td>
                     <Td><span className="muted">{s.gradedCount}/{summary.rubricCount}</span></Td>
                     <Td><b>{s.total}</b><span className="muted">/100</span></Td>
-                    <Td><span className="chip" style={{ background: `${GRADE_COLOR(s.grade)}22`, color: GRADE_COLOR(s.grade), fontWeight: 700 }}>{s.grade ?? '—'}{s.gpa != null ? ` · ${s.gpa.toFixed(2)}` : ''}</span></Td>
+                    <Td>
+                      <span className="chip" style={{ background: `${GRADE_COLOR(s.grade)}22`, color: GRADE_COLOR(s.grade), fontWeight: 700 }}>{s.grade ?? '—'}{s.gpa != null ? ` · ${s.gpa.toFixed(2)}` : ''}</span>
+                      {s.hasCriticalFail && (
+                        <span className="chip" title={t('as.criticalFail')} style={{ marginLeft: 6, background: 'var(--danger)22', color: 'var(--danger)', fontWeight: 700 }}>✕ {t('as.criticalFail')}</span>
+                      )}
+                    </Td>
                     <Td>
                       <div style={{ display: 'inline-flex', gap: 6 }}>
                         <button onClick={() => setGrading(s)} className="btn-primary" style={{ padding: '6px 14px', fontSize: 12.5 }}>{t('as.grade_btn')}</button>

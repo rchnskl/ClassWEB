@@ -4,13 +4,13 @@ import { useEffect, useState } from 'react';
 import { apiFetch } from '@/lib/api';
 import { useI18n } from '@/lib/i18n';
 
-interface ItemForm { textEn: string; textTh: string; weightPercent: number; maxRating: number }
+interface ItemForm { textEn: string; textTh: string; weightPercent: number; maxRating: number; isCritical: boolean }
 interface SectionForm { nameEn: string; nameTh: string; weightPercent: number; items: ItemForm[] }
 interface RubricForm { code: string; nameEn: string; nameTh: string; description: string; weightPercent: number; sections: SectionForm[] }
 
 interface RubricListItem { id: string; code: string | null; nameEn: string; nameTh: string | null; weightPercent: number; sections: { items: unknown[] }[] }
 
-const EMPTY_ITEM = (): ItemForm => ({ textEn: '', textTh: '', weightPercent: 0, maxRating: 5 });
+const EMPTY_ITEM = (): ItemForm => ({ textEn: '', textTh: '', weightPercent: 0, maxRating: 5, isCritical: false });
 const EMPTY_SECTION = (): SectionForm => ({ nameEn: '', nameTh: '', weightPercent: 0, items: [EMPTY_ITEM()] });
 const EMPTY_RUBRIC = (): RubricForm => ({ code: '', nameEn: '', nameTh: '', description: '', weightPercent: 0, sections: [EMPTY_SECTION()] });
 
@@ -37,12 +37,12 @@ export default function RubricBuilderDrawer({ onClose, onChanged }: { onClose: (
   }
 
   async function startEdit(id: string) {
-    const r = await apiFetch<{ code: string | null; nameEn: string; nameTh: string | null; description: string | null; weightPercent: number; sections: { nameEn: string; nameTh: string | null; weightPercent: number; items: { textEn: string; textTh: string | null; weightPercent: number; maxRating: number }[] }[] }>(`/assessment/rubrics/${id}`);
+    const r = await apiFetch<{ code: string | null; nameEn: string; nameTh: string | null; description: string | null; weightPercent: number; sections: { nameEn: string; nameTh: string | null; weightPercent: number; items: { textEn: string; textTh: string | null; weightPercent: number; maxRating: number; isCritical: boolean }[] }[] }>(`/assessment/rubrics/${id}`);
     setForm({
       code: r.code ?? '', nameEn: r.nameEn, nameTh: r.nameTh ?? '', description: r.description ?? '', weightPercent: r.weightPercent,
       sections: r.sections.map((s) => ({
         nameEn: s.nameEn, nameTh: s.nameTh ?? '', weightPercent: s.weightPercent,
-        items: s.items.map((it) => ({ textEn: it.textEn, textTh: it.textTh ?? '', weightPercent: it.weightPercent, maxRating: it.maxRating })),
+        items: s.items.map((it) => ({ textEn: it.textEn, textTh: it.textTh ?? '', weightPercent: it.weightPercent, maxRating: it.maxRating, isCritical: it.isCritical })),
       })),
     });
     setEditingId(id);
@@ -170,6 +170,10 @@ export default function RubricBuilderDrawer({ onClose, onChanged }: { onClose: (
                       <div style={{ width: 60 }}>
                         <F label={t('rubric.maxRating')}><input type="number" min={2} max={10} className="input" value={it.maxRating} onChange={(e) => updateItem(si, ii, { maxRating: Number(e.target.value) })} /></F>
                       </div>
+                      <label title={t('as.criticalItem')} style={{ display: 'flex', alignItems: 'center', gap: 4, paddingBottom: 12, cursor: 'pointer' }}>
+                        <input type="checkbox" checked={it.isCritical} onChange={(e) => updateItem(si, ii, { isCritical: e.target.checked })} style={{ width: 16, height: 16, cursor: 'pointer' }} />
+                        <span style={{ fontSize: 16, color: it.isCritical ? 'var(--danger)' : 'var(--text-2)' }}>★</span>
+                      </label>
                       <button onClick={() => removeItem(si, ii)} disabled={s.items.length <= 1} className="glass hairline icon-btn" style={{ padding: '10px 10px', borderRadius: 10, fontSize: 12, opacity: s.items.length <= 1 ? 0.4 : 1 }}>✕</button>
                     </div>
                   ))}

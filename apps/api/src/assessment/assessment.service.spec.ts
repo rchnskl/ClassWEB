@@ -10,9 +10,10 @@ describe('AssessmentService (pure scoring logic)', () => {
   // same technique used elsewhere in this codebase for direct verification.
   const service = new AssessmentService({} as any) as any;
 
-  function rubric(sections: { weightPercent: number; items: { id: string; weightPercent: number; maxRating: number }[] }[]) {
+  function rubric(sections: { weightPercent: number; items: { id: string; weightPercent: number; maxRating: number; isCritical?: boolean }[] }[]) {
     return { sections };
   }
+  const noPass = new Map<string, boolean>();
 
   describe('scoreRubric', () => {
     it('gives full marks (100) when every item is rated at its max', () => {
@@ -21,13 +22,13 @@ describe('AssessmentService (pure scoring logic)', () => {
         { weightPercent: 40, items: [{ id: 'b', weightPercent: 100, maxRating: 5 }] },
       ]);
       const ratings = new Map([['a', 5], ['b', 5]]);
-      expect(service.scoreRubric(r, ratings)).toBe(100);
+      expect(service.scoreRubric(r, ratings, noPass)).toEqual({ scorePercent: 100, criticalFailed: false });
     });
 
     it('scales proportionally to rating/maxRating within an item', () => {
       const r = rubric([{ weightPercent: 100, items: [{ id: 'a', weightPercent: 100, maxRating: 5 }] }]);
       // 3/5 of max -> 60% of the section's weight
-      expect(service.scoreRubric(r, new Map([['a', 3]]))).toBe(60);
+      expect(service.scoreRubric(r, new Map([['a', 3]]), noPass).scorePercent).toBe(60);
     });
 
     it('combines multiple weighted items within a section correctly', () => {
@@ -38,7 +39,7 @@ describe('AssessmentService (pure scoring logic)', () => {
         ] },
       ]);
       // a: 5/5 -> 50 pts, b: 0/5 -> 0 pts => 50 total
-      expect(service.scoreRubric(r, new Map([['a', 5], ['b', 0]]))).toBe(50);
+      expect(service.scoreRubric(r, new Map([['a', 5], ['b', 0]]), noPass).scorePercent).toBe(50);
     });
 
     it('treats an unrated item as zero, not as excluded from the denominator', () => {
@@ -47,7 +48,7 @@ describe('AssessmentService (pure scoring logic)', () => {
         { id: 'b', weightPercent: 50, maxRating: 5 },
       ] }]);
       // only "a" rated; "b" contributes nothing (not re-normalised to 100%)
-      expect(service.scoreRubric(r, new Map([['a', 5]]))).toBe(50);
+      expect(service.scoreRubric(r, new Map([['a', 5]]), noPass).scorePercent).toBe(50);
     });
 
     it('applies section weight as a fraction of 100, not additively', () => {
@@ -56,22 +57,64 @@ describe('AssessmentService (pure scoring logic)', () => {
         { weightPercent: 70, items: [{ id: 'b', weightPercent: 100, maxRating: 5 }] },
       ]);
       // only section a fully scored: 30% of 100 = 30
-      expect(service.scoreRubric(r, new Map([['a', 5]]))).toBe(30);
+      expect(service.scoreRubric(r, new Map([['a', 5]]), noPass).scorePercent).toBe(30);
     });
 
     it('returns 0 for a rubric with no ratings at all', () => {
       const r = rubric([{ weightPercent: 100, items: [{ id: 'a', weightPercent: 100, maxRating: 5 }] }]);
-      expect(service.scoreRubric(r, new Map())).toBe(0);
+      expect(service.scoreRubric(r, new Map(), noPass).scorePercent).toBe(0);
     });
 
     it('supports non-5 maxRating scales', () => {
       const r = rubric([{ weightPercent: 100, items: [{ id: 'a', weightPercent: 100, maxRating: 10 }] }]);
-      expect(service.scoreRubric(r, new Map([['a', 7]]))).toBe(70);
+      expect(service.scoreRubric(r, new Map([['a', 7]]), noPass).scorePercent).toBe(70);
     });
 
     it('ignores a rating of 0 (falsy) the same as unrated', () => {
       const r = rubric([{ weightPercent: 100, items: [{ id: 'a', weightPercent: 100, maxRating: 5 }] }]);
-      expect(service.scoreRubric(r, new Map([['a', 0]]))).toBe(0);
+      expect(service.scoreRubric(r, new Map([['a', 0]]), noPass).scorePercent).toBe(0);
+    });
+
+    // ---- OSCE-style critical failure -----------------------------------
+
+    it('forces the score to 0 when a critical item is marked not-passed, even with perfect ratings elsewhere', () => {
+      const r = rubric([
+        { weightPercent: 100, items: [
+          { id: 'critical', weightPercent: 20, maxRating: 5, isCritical: true },
+          { id: 'normal', weightPercent: 80, maxRating: 5 },
+        ] },
+      ]);
+      const ratings = new Map([['critical', 5], ['normal', 5]]);
+      const passed = new Map([['critical', false]]);
+      expect(service.scoreRubric(r, ratings, passed)).toEqual({ scorePercent: 0, criticalFailed: true });
+    });
+
+    it('does not fail when a critical item is explicitly marked passed', () => {
+      const r = rubric([{ weightPercent: 100, items: [{ id: 'critical', weightPercent: 100, maxRating: 5, isCritical: true }] }]);
+      const ratings = new Map([['critical', 5]]);
+      const passed = new Map([['critical', true]]);
+      expect(service.scoreRubric(r, ratings, passed)).toEqual({ scorePercent: 100, criticalFailed: false });
+    });
+
+    it('does not fail when a critical item has no explicit passed value (undefined is not false)', () => {
+      const r = rubric([{ weightPercent: 100, items: [{ id: 'critical', weightPercent: 100, maxRating: 5, isCritical: true }] }]);
+      expect(service.scoreRubric(r, new Map([['critical', 4]]), noPass).criticalFailed).toBe(false);
+    });
+
+    it('ignores a not-passed mark on a non-critical item', () => {
+      const r = rubric([{ weightPercent: 100, items: [{ id: 'a', weightPercent: 100, maxRating: 5, isCritical: false }] }]);
+      const passed = new Map([['a', false]]);
+      expect(service.scoreRubric(r, new Map([['a', 5]]), passed)).toEqual({ scorePercent: 100, criticalFailed: false });
+    });
+
+    it('one failed critical item among several fails the whole rubric', () => {
+      const r = rubric([
+        { weightPercent: 50, items: [{ id: 'c1', weightPercent: 100, maxRating: 5, isCritical: true }] },
+        { weightPercent: 50, items: [{ id: 'c2', weightPercent: 100, maxRating: 5, isCritical: true }] },
+      ]);
+      const ratings = new Map([['c1', 5], ['c2', 5]]);
+      const passed = new Map([['c1', true], ['c2', false]]);
+      expect(service.scoreRubric(r, ratings, passed).criticalFailed).toBe(true);
     });
   });
 

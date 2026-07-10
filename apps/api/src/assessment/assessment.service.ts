@@ -103,6 +103,7 @@ export class AssessmentService {
                 textTh: it.textTh,
                 weightPercent: it.weightPercent,
                 maxRating: it.maxRating ?? 5,
+                isCritical: it.isCritical ?? false,
                 order: ii,
               })),
             },
@@ -146,6 +147,7 @@ export class AssessmentService {
                 textTh: it.textTh,
                 weightPercent: it.weightPercent,
                 maxRating: it.maxRating ?? 5,
+                isCritical: it.isCritical ?? false,
                 order: ii,
               })),
             },
@@ -166,18 +168,31 @@ export class AssessmentService {
     return { id, deleted: true };
   }
 
-  /** Pure scoring: rubric (0–100) from a map of itemId→rating. */
-  private scoreRubric(rubric: Awaited<ReturnType<AssessmentService['getRubric']>>, ratings: Map<string, number>): number {
+  /**
+   * Pure scoring: rubric (0–100) from a map of itemId→rating, plus an
+   * OSCE-style critical-failure check. If any isCritical item is explicitly
+   * marked not-passed, the whole rubric score is forced to 0 — a missed
+   * safety-critical step (e.g. "did not verify patient identity") fails the
+   * station regardless of how well the rest was performed.
+   */
+  private scoreRubric(
+    rubric: Awaited<ReturnType<AssessmentService['getRubric']>>,
+    ratings: Map<string, number>,
+    passed: Map<string, boolean>,
+  ): { scorePercent: number; criticalFailed: boolean } {
     let rubricScore = 0;
+    let criticalFailed = false;
     for (const section of rubric.sections) {
       let sectionScore = 0; // 0..100
       for (const item of section.items) {
         const rating = ratings.get(item.id);
         if (rating != null && rating > 0) sectionScore += item.weightPercent * (rating / item.maxRating);
+        if (item.isCritical && passed.get(item.id) === false) criticalFailed = true;
       }
       rubricScore += (section.weightPercent / 100) * sectionScore;
     }
-    return Math.round(rubricScore * 100) / 100;
+    const scorePercent = criticalFailed ? 0 : Math.round(rubricScore * 100) / 100;
+    return { scorePercent, criticalFailed };
   }
 
   // ---- per-subject rubric selection ---------------------------------------
@@ -293,8 +308,9 @@ export class AssessmentService {
     return {
       rubric: await this.getRubric(universityId, rubricId),
       evaluation: evaluation
-        ? { id: evaluation.id, status: evaluation.status, scorePercent: evaluation.scorePercent, note: evaluation.note,
-            scores: Object.fromEntries(evaluation.scores.map((s) => [s.rubricItemId, s.rating])) }
+        ? { id: evaluation.id, status: evaluation.status, scorePercent: evaluation.scorePercent, criticalFailed: evaluation.criticalFailed, note: evaluation.note,
+            scores: Object.fromEntries(evaluation.scores.map((s) => [s.rubricItemId, s.rating])),
+            passed: Object.fromEntries(evaluation.scores.filter((s) => s.passed !== null).map((s) => [s.rubricItemId, s.passed])) }
         : null,
     };
   }
@@ -310,8 +326,13 @@ export class AssessmentService {
 
     const validItems = new Set(rubric.sections.flatMap((s) => s.items.map((i) => i.id)));
     const ratings = new Map<string, number>();
-    for (const s of dto.scores) if (validItems.has(s.rubricItemId)) ratings.set(s.rubricItemId, s.rating);
-    const scorePercent = this.scoreRubric(rubric, ratings);
+    const passed = new Map<string, boolean>();
+    for (const s of dto.scores) {
+      if (!validItems.has(s.rubricItemId)) continue;
+      ratings.set(s.rubricItemId, s.rating);
+      if (s.passed !== undefined) passed.set(s.rubricItemId, s.passed);
+    }
+    const { scorePercent, criticalFailed } = this.scoreRubric(rubric, ratings, passed);
 
     const existing = await this.prisma.evaluation.findFirst({
       where: { universityId, rubricId: dto.rubricId, studentId: dto.studentId, sectionId: dto.sectionId ?? null },
@@ -320,7 +341,7 @@ export class AssessmentService {
     const evaluation = existing
       ? await this.prisma.evaluation.update({
           where: { id: existing.id },
-          data: { evaluatorId: userId, evaluatorName: userName, status: 'SUBMITTED', scorePercent, note: dto.note },
+          data: { evaluatorId: userId, evaluatorName: userName, status: 'SUBMITTED', scorePercent, criticalFailed, note: dto.note },
         })
       : await this.prisma.evaluation.create({
           data: {
@@ -328,7 +349,7 @@ export class AssessmentService {
             rubric: { connect: { id: dto.rubricId } },
             student: { connect: { id: dto.studentId } },
             ...(dto.sectionId ? { section: { connect: { id: dto.sectionId } } } : {}),
-            evaluatorId: userId, evaluatorName: userName, status: 'SUBMITTED', scorePercent, note: dto.note,
+            evaluatorId: userId, evaluatorName: userName, status: 'SUBMITTED', scorePercent, criticalFailed, note: dto.note,
           },
         });
 
@@ -336,13 +357,15 @@ export class AssessmentService {
     await this.prisma.$transaction([
       this.prisma.evaluationScore.deleteMany({ where: { evaluationId: evaluation.id } }),
       this.prisma.evaluationScore.createMany({
-        data: [...ratings.entries()].map(([rubricItemId, rating]) => ({ evaluationId: evaluation.id, rubricItemId, rating })),
+        data: [...ratings.entries()].map(([rubricItemId, rating]) => ({
+          evaluationId: evaluation.id, rubricItemId, rating, passed: passed.get(rubricItemId) ?? null,
+        })),
       }),
     ]);
     await this.prisma.auditLog.create({
-      data: { universityId, userId, action: AuditAction.UPDATE, entityType: 'Evaluation', entityId: evaluation.id, metadata: { rubricId: dto.rubricId, studentId: dto.studentId, scorePercent } },
+      data: { universityId, userId, action: AuditAction.UPDATE, entityType: 'Evaluation', entityId: evaluation.id, metadata: { rubricId: dto.rubricId, studentId: dto.studentId, scorePercent, criticalFailed } },
     });
-    return { id: evaluation.id, scorePercent };
+    return { id: evaluation.id, scorePercent, criticalFailed };
   }
 
   // ---- reports ----------------------------------------------------------
@@ -364,7 +387,7 @@ export class AssessmentService {
     }
 
     const [evaluations, scheme] = await Promise.all([
-      this.prisma.evaluation.findMany({ where: { universityId, studentId, sectionId: sectionId ?? null }, select: { rubricId: true, scorePercent: true } }),
+      this.prisma.evaluation.findMany({ where: { universityId, studentId, sectionId: sectionId ?? null }, select: { rubricId: true, scorePercent: true, criticalFailed: true } }),
       this.gradeScheme(universityId),
     ]);
     const evalByRubric = new Map(evaluations.map((e) => [e.rubricId, e]));
@@ -374,7 +397,7 @@ export class AssessmentService {
       const scorePercent = ev?.scorePercent ?? null;
       return {
         rubricId: r.id, nameEn: r.nameEn, nameTh: r.nameTh, weightPercent,
-        scorePercent, graded: scorePercent != null,
+        scorePercent, graded: scorePercent != null, criticalFailed: ev?.criticalFailed ?? false,
         contribution: scorePercent != null ? Math.round((weightPercent / 100) * scorePercent * 100) / 100 : 0,
       };
     });
@@ -402,7 +425,7 @@ export class AssessmentService {
 
     const [enrollments, evaluations, scheme] = await Promise.all([
       this.prisma.enrollment.findMany({ where: { sectionId, status: 'ENROLLED' }, select: { studentId: true, student: { select: { studentCode: true, nameEn: true, nameTh: true } } }, orderBy: { student: { studentCode: 'asc' } } }),
-      this.prisma.evaluation.findMany({ where: { universityId, sectionId }, select: { studentId: true, rubricId: true, scorePercent: true } }),
+      this.prisma.evaluation.findMany({ where: { universityId, sectionId }, select: { studentId: true, rubricId: true, scorePercent: true, criticalFailed: true } }),
       this.gradeScheme(universityId),
     ]);
 
@@ -417,7 +440,7 @@ export class AssessmentService {
       const band = this.gradeFor(total, scheme.bands);
       return {
         studentId: en.studentId, studentCode: en.student.studentCode, nameEn: en.student.nameEn, nameTh: en.student.nameTh,
-        total, gradedWeight, gradedCount: evs.length,
+        total, gradedWeight, gradedCount: evs.length, hasCriticalFail: evs.some((e) => e.criticalFailed),
         grade: band?.grade ?? null, gpa: band?.gpa ?? null,
       };
     });

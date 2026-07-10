@@ -1391,6 +1391,10 @@ model RubricItem {
   weightPercent Float   @default(0)
   maxRating     Int     @default(5)
   order         Int     @default(0)
+  /// Must-pass step (e.g. a safety-critical action). Failing it forces the
+  /// whole rubric's score to 0 regardless of the numeric rating elsewhere —
+  /// mirrors OSCE-style "critical failure" grading used for clinical skills.
+  isCritical    Boolean @default(false)
 
   section RubricSection     @relation(fields: [sectionId], references: [id], onDelete: Cascade)
   scores  EvaluationScore[]
@@ -1421,19 +1425,23 @@ model SubjectRubric {
 
 /// One filled-in rubric for a student (optionally within a class section).
 model Evaluation {
-  id            String           @id @default(cuid())
-  universityId  String
-  rubricId      String
-  studentId     String
-  sectionId     String?
-  evaluatorId   String?
-  evaluatorName String?
-  status        EvaluationStatus @default(DRAFT)
+  id             String           @id @default(cuid())
+  universityId   String
+  rubricId       String
+  studentId      String
+  sectionId      String?
+  evaluatorId    String?
+  evaluatorName  String?
+  status         EvaluationStatus @default(DRAFT)
   /// Computed 0–100 weighted score for this rubric.
-  scorePercent  Float?
-  note          String?
-  createdAt     DateTime         @default(now())
-  updatedAt     DateTime         @updatedAt
+  scorePercent   Float?
+  /// True if any isCritical item was marked not-passed — scorePercent is
+  /// forced to 0 in that case, but this flag makes the reason explicit
+  /// instead of looking like an ordinary zero score.
+  criticalFailed Boolean          @default(false)
+  note           String?
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
 
   university University        @relation(fields: [universityId], references: [id])
   rubric     Rubric            @relation(fields: [rubricId], references: [id])
@@ -1449,10 +1457,12 @@ model Evaluation {
 }
 
 model EvaluationScore {
-  id           String @id @default(cuid())
+  id           String   @id @default(cuid())
   evaluationId String
   rubricItemId String
   rating       Int
+  /// Only meaningful when the item is isCritical; null for non-critical items.
+  passed       Boolean?
 
   evaluation Evaluation @relation(fields: [evaluationId], references: [id], onDelete: Cascade)
   rubricItem RubricItem @relation(fields: [rubricItemId], references: [id])

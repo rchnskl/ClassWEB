@@ -13,6 +13,11 @@ export class ScoreEntryDto {
   @Min(0)
   @Max(5)
   rating!: number;
+
+  @ApiPropertyOptional({ description: 'Pass/fail for a critical item; ignored for non-critical items' })
+  @IsOptional()
+  @IsBoolean()
+  passed?: boolean;
 }
 
 export class SaveEvaluationDto {
@@ -101,6 +106,10 @@ export class RubricItemInputDto {
   @ApiPropertyOptional({ default: 5, minimum: 2, maximum: 10 })
   @IsOptional() @Type(() => Number) @IsInt() @Min(2) @Max(10)
   maxRating?: number;
+
+  @ApiPropertyOptional({ description: 'Must-pass step; failing it forces the whole rubric score to 0', default: false })
+  @IsOptional() @IsBoolean()
+  isCritical?: boolean;
 }
 
 export class RubricSectionInputDto {
