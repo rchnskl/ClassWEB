@@ -8,10 +8,11 @@ import GradingDrawer, { type Rubric } from '@/components/GradingDrawer';
 import { apiFetch } from '@/lib/api';
 import { useI18n } from '@/lib/i18n';
 
-interface SectionRef { id: string; sectionNo: string; subject: { code: string; nameEn: string } }
+interface SectionRef { id: string; sectionNo: string; subject: { id: string; code: string; nameEn: string } }
 interface Row { studentId: string; studentCode: string; nameEn: string; nameTh: string | null; total: number; gradedWeight: number; gradedCount: number; grade: string | null; gpa: number | null }
 interface SectionSummary { section: { sectionNo: string; subject: { code: string; nameEn: string } }; rubricCount: number; students: Row[] }
 interface Band { id: string; grade: string; gpa: number; label: string; minScore: number }
+interface RubricConfigRow { rubricId: string; code: string; nameEn: string; nameTh: string | null; weightPercent: number; isActive: boolean }
 
 const GRADE_COLOR = (g: string | null) =>
   g == null ? 'var(--text-2)' : g.startsWith('A') ? 'var(--success)' : g.startsWith('B') ? 'var(--brand-blue)' : g.startsWith('C') ? 'var(--warning)' : 'var(--danger)';
@@ -19,6 +20,8 @@ const GRADE_COLOR = (g: string | null) =>
 export default function AssessmentPage() {
   const router = useRouter();
   const { t, lang } = useI18n();
+  const name = (en: string, th: string | null) => (lang === 'th' && th ? th : en);
+
   const [email, setEmail] = useState('admin@nursing.au.edu');
   const [sections, setSections] = useState<SectionRef[]>([]);
   const [sectionId, setSectionId] = useState('');
@@ -28,10 +31,20 @@ export default function AssessmentPage() {
   const [scheme, setScheme] = useState<Band[] | null>(null);
   const [showScheme, setShowScheme] = useState(false);
   const [savingScheme, setSavingScheme] = useState(false);
+  const [rubricConfig, setRubricConfig] = useState<RubricConfigRow[] | null>(null);
+  const [showConfig, setShowConfig] = useState(false);
+  const [savingConfig, setSavingConfig] = useState(false);
+
+  const currentSubjectId = sections.find((s) => s.id === sectionId)?.subject.id ?? '';
 
   const loadSummary = useCallback(async (sid: string) => {
     if (!sid) return;
     try { setSummary(await apiFetch<SectionSummary>(`/assessment/sections/${sid}/summary`)); } catch { setSummary(null); }
+  }, []);
+
+  const loadRubrics = useCallback(async (subjectId: string) => {
+    if (!subjectId) { setRubrics([]); return; }
+    try { setRubrics(await apiFetch<Rubric[]>(`/assessment/subjects/${subjectId}/rubrics`)); } catch { setRubrics([]); }
   }, []);
 
   useEffect(() => {
@@ -40,10 +53,20 @@ export default function AssessmentPage() {
     if (u) { try { setEmail(JSON.parse(u).email); } catch {} }
     apiFetch<{ items: SectionRef[] }>('/sections').then((d) => {
       setSections(d.items);
-      if (d.items[0]) { setSectionId(d.items[0].id); void loadSummary(d.items[0].id); }
+      if (d.items[0]) {
+        setSectionId(d.items[0].id);
+        void loadSummary(d.items[0].id);
+        void loadRubrics(d.items[0].subject.id);
+      }
     }).catch(() => {});
-    apiFetch<Rubric[]>('/assessment/rubrics').then(setRubrics).catch(() => {});
-  }, [router, loadSummary]);
+  }, [router, loadSummary, loadRubrics]);
+
+  function pickSection(id: string) {
+    setSectionId(id);
+    void loadSummary(id);
+    const subjectId = sections.find((s) => s.id === id)?.subject.id;
+    if (subjectId) void loadRubrics(subjectId);
+  }
 
   async function openScheme() {
     const s = await apiFetch<{ bands: Band[] }>('/assessment/grade-scheme');
@@ -60,7 +83,26 @@ export default function AssessmentPage() {
     } finally { setSavingScheme(false); }
   }
 
-  function pickSection(id: string) { setSectionId(id); void loadSummary(id); }
+  async function openConfig() {
+    if (!currentSubjectId) return;
+    const rows = await apiFetch<RubricConfigRow[]>(`/assessment/subjects/${currentSubjectId}/rubric-config`);
+    setRubricConfig(rows);
+    setShowConfig(true);
+  }
+  const activeSum = rubricConfig ? rubricConfig.filter((r) => r.isActive).reduce((a, r) => a + r.weightPercent, 0) : 0;
+  async function saveConfig() {
+    if (!rubricConfig || !currentSubjectId) return;
+    setSavingConfig(true);
+    try {
+      await apiFetch(`/assessment/subjects/${currentSubjectId}/rubric-config`, {
+        method: 'PATCH',
+        body: JSON.stringify({ rubrics: rubricConfig.map((r) => ({ rubricId: r.rubricId, weightPercent: r.weightPercent, isActive: r.isActive })) }),
+      });
+      setShowConfig(false);
+      await loadRubrics(currentSubjectId);
+      await loadSummary(sectionId);
+    } finally { setSavingConfig(false); }
+  }
 
   return (
     <div className="app-shell">
@@ -77,6 +119,7 @@ export default function AssessmentPage() {
             <select className="input" value={sectionId} onChange={(e) => pickSection(e.target.value)} style={{ width: 'auto', minWidth: 160 }}>
               {sections.map((s) => <option key={s.id} value={s.id}>{s.subject.code} · {s.sectionNo}</option>)}
             </select>
+            <button className="glass hairline" style={{ padding: '9px 14px', borderRadius: 12, fontWeight: 650, fontSize: 13.5, color: 'var(--text-1)', cursor: 'pointer' }} onClick={openConfig}>📋 {t('as.configRubrics')}</button>
             <button className="glass hairline" style={{ padding: '9px 14px', borderRadius: 12, fontWeight: 650, fontSize: 13.5, color: 'var(--text-1)', cursor: 'pointer' }} onClick={openScheme}>⚙︎ {t('as.gradeScheme')}</button>
           </div>
         </div>
@@ -95,7 +138,7 @@ export default function AssessmentPage() {
                 ) : summary.students.map((s) => (
                   <tr key={s.studentId} style={{ borderTop: '1px solid var(--glass-hairline)' }}>
                     <Td><span style={{ fontFamily: 'ui-monospace, monospace', fontWeight: 600 }}>{s.studentCode}</span></Td>
-                    <Td><span style={{ fontWeight: 600 }}>{lang === 'th' && s.nameTh ? s.nameTh : s.nameEn}</span></Td>
+                    <Td><span style={{ fontWeight: 600 }}>{name(s.nameEn, s.nameTh)}</span></Td>
                     <Td><span className="muted">{s.gradedCount}/{summary.rubricCount}</span></Td>
                     <Td><b>{s.total}</b><span className="muted">/100</span></Td>
                     <Td><span className="chip" style={{ background: `${GRADE_COLOR(s.grade)}22`, color: GRADE_COLOR(s.grade), fontWeight: 700 }}>{s.grade ?? '—'}{s.gpa != null ? ` · ${s.gpa.toFixed(2)}` : ''}</span></Td>
@@ -108,10 +151,10 @@ export default function AssessmentPage() {
         </div>
       </div>
 
-      {grading && sectionId && rubrics.length > 0 && (
+      {grading && sectionId && (
         <GradingDrawer
           studentId={grading.studentId} sectionId={sectionId}
-          studentName={lang === 'th' && grading.nameTh ? grading.nameTh : grading.nameEn}
+          studentName={name(grading.nameEn, grading.nameTh)}
           rubrics={rubrics}
           onClose={() => setGrading(null)}
           onSaved={() => loadSummary(sectionId)}
@@ -140,6 +183,37 @@ export default function AssessmentPage() {
               ))}
             </div>
             <button className="btn-primary" onClick={saveScheme} disabled={savingScheme} style={{ width: '100%', padding: 12, fontSize: 14.5, marginTop: 16 }}>{savingScheme ? t('as.saving') : t('as.save')}</button>
+          </div>
+        </div>
+      )}
+
+      {showConfig && rubricConfig && (
+        <div onClick={() => setShowConfig(false)} style={{ position: 'fixed', inset: 0, background: 'rgba(6,10,20,0.5)', backdropFilter: 'blur(3px)', zIndex: 1100, display: 'grid', placeItems: 'center', padding: 16 }}>
+          <div onClick={(e) => e.stopPropagation()} className="rise" style={{ width: 'min(480px, 100%)', maxHeight: '86vh', overflowY: 'auto', background: 'var(--popover-bg)', border: '1px solid var(--glass-hairline)', borderRadius: 18, boxShadow: 'var(--shadow-lg)', padding: 22 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+              <h2 style={{ fontSize: 17, fontWeight: 700, margin: 0 }}>{t('as.configRubrics')} · {sections.find((s) => s.id === sectionId)?.subject.code}</h2>
+              <button onClick={() => setShowConfig(false)} className="glass hairline icon-btn" style={{ width: 32, height: 32, fontSize: 17 }}>×</button>
+            </div>
+            <p className="muted" style={{ fontSize: 12, margin: '0 0 14px' }}>{t('as.configHint')}</p>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+              {rubricConfig.map((r, i) => (
+                <div key={r.rubricId} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '9px 10px', borderRadius: 10, background: r.isActive ? 'var(--popover-hover)' : 'transparent', border: '1px solid var(--glass-hairline)', opacity: r.isActive ? 1 : 0.55 }}>
+                  <input type="checkbox" checked={r.isActive} title={t('as.active')}
+                    onChange={(e) => setRubricConfig(rubricConfig.map((x, xi) => xi === i ? { ...x, isActive: e.target.checked } : x))}
+                    style={{ width: 17, height: 17, cursor: 'pointer' }} />
+                  <span style={{ flex: 1, fontSize: 13, fontWeight: 600 }}>{name(r.nameEn, r.nameTh)}</span>
+                  <input type="number" min={0} max={100} value={r.weightPercent} disabled={!r.isActive}
+                    onChange={(e) => setRubricConfig(rubricConfig.map((x, xi) => xi === i ? { ...x, weightPercent: Number(e.target.value) } : x))}
+                    style={{ width: 60, padding: '6px 8px', fontSize: 13, textAlign: 'right', borderRadius: 8, border: '1px solid var(--glass-hairline)', background: 'transparent', color: 'var(--text-0)' }} />
+                  <span className="muted" style={{ fontSize: 11.5, width: 14 }}>%</span>
+                </div>
+              ))}
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 12, padding: '8px 10px', fontSize: 13, fontWeight: 700 }}>
+              <span>{t('as.sumActive')}</span>
+              <span style={{ color: activeSum > 100 ? 'var(--danger)' : 'var(--success)' }}>{activeSum}% {activeSum > 100 ? `· ${t('as.overLimit')}` : ''}</span>
+            </div>
+            <button className="btn-primary" onClick={saveConfig} disabled={savingConfig || activeSum > 100} style={{ width: '100%', padding: 12, fontSize: 14.5, marginTop: 10 }}>{savingConfig ? t('as.saving') : t('as.save')}</button>
           </div>
         </div>
       )}

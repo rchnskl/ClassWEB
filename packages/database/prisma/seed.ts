@@ -446,29 +446,56 @@ async function main() {
   }
   console.log(`  ✓ ${notifDefs.length} sample notifications`);
 
-  // ---- Assessment: preload the 5 rubrics + default grade scheme -----------
+  // ---- Assessment: preload the 5 bilingual rubrics + default grade scheme --
+  const rubricIds: Record<string, string> = {};
   for (const r of RUBRICS) {
-    const existing = await prisma.rubric.findFirst({ where: { universityId: university.id, code: r.code } });
-    if (existing) continue;
-    await prisma.rubric.create({
-      data: {
-        universityId: university.id, code: r.code, name: r.name,
-        weightPercent: r.weightPercent, order: r.order,
-        sections: {
-          create: r.sections.map((s, si) => ({
-            name: s.name, weightPercent: s.weightPercent, order: si,
-            items: {
-              create: s.items.map((text, ii) => ({
-                text, order: ii, maxRating: 5,
-                weightPercent: Math.round((100 / s.items.length) * 100) / 100,
-              })),
-            },
-          })),
+    let rubric = await prisma.rubric.findFirst({ where: { universityId: university.id, code: r.code } });
+    if (!rubric) {
+      rubric = await prisma.rubric.create({
+        data: {
+          universityId: university.id, code: r.code, nameEn: r.nameEn, nameTh: r.nameTh,
+          weightPercent: r.weightPercent, order: r.order,
+          sections: {
+            create: r.sections.map((s, si) => ({
+              nameEn: s.nameEn, nameTh: s.nameTh, weightPercent: s.weightPercent, order: si,
+              items: {
+                create: s.items.map((item, ii) => ({
+                  textEn: item.en, textTh: item.th, order: ii, maxRating: 5,
+                  weightPercent: Math.round((100 / s.items.length) * 100) / 100,
+                })),
+              },
+            })),
+          },
         },
-      },
-    });
+      });
+    }
+    rubricIds[r.code] = rubric.id;
   }
-  console.log(`  ✓ ${RUBRICS.length} assessment rubrics`);
+  console.log(`  ✓ ${RUBRICS.length} assessment rubrics (bilingual)`);
+
+  // Not every subject uses every rubric — configure which apply per subject.
+  // NUR1101 (clinical fundamentals): all 5, at their default weights (=100%).
+  // NUR1102 (anatomy & physiology, theory-only): just report + conference,
+  // re-weighted to still total 100% — demonstrates the per-subject override.
+  const subjectRubricPlan: Record<string, { code: string; weightPercent: number }[]> = {
+    NUR1101: RUBRICS.map((r) => ({ code: r.code, weightPercent: r.weightPercent })),
+    NUR1102: [
+      { code: 'CASE_REPORT', weightPercent: 60 },
+      { code: 'PRE_POST_CONFERENCE', weightPercent: 40 },
+    ],
+  };
+  for (const [subjectCode, plan] of Object.entries(subjectRubricPlan)) {
+    const subjectId = subjects[subjectCode];
+    if (!subjectId) continue;
+    for (const [i, p] of plan.entries()) {
+      await prisma.subjectRubric.upsert({
+        where: { subjectId_rubricId: { subjectId, rubricId: rubricIds[p.code] } },
+        update: { weightPercent: p.weightPercent, isActive: true, order: i },
+        create: { subjectId, rubricId: rubricIds[p.code], weightPercent: p.weightPercent, isActive: true, order: i },
+      });
+    }
+  }
+  console.log('  ✓ per-subject rubric selection (NUR1101: all 5 · NUR1102: report+conference only)');
 
   const existingScheme = await prisma.gradeScheme.findFirst({ where: { universityId: university.id, isDefault: true } });
   if (!existingScheme) {

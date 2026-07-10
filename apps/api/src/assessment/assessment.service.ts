@@ -1,7 +1,7 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { AuditAction } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
-import { SaveEvaluationDto, UpdateGradeBandsDto, UpdateRubricWeightsDto } from './dto/assessment.dto';
+import { SaveEvaluationDto, UpdateGradeBandsDto, UpdateRubricWeightsDto, UpdateSubjectRubricsDto } from './dto/assessment.dto';
 
 interface GradeBand { grade: string; gpa: number; label: string; minScore: number }
 
@@ -16,7 +16,7 @@ export class AssessmentService {
     },
   };
 
-  // ---- rubrics ----------------------------------------------------------
+  // ---- rubrics (global catalogue) ----------------------------------------
 
   listRubrics(universityId: string) {
     return this.prisma.rubric.findMany({
@@ -81,6 +81,82 @@ export class AssessmentService {
       rubricScore += (section.weightPercent / 100) * sectionScore;
     }
     return Math.round(rubricScore * 100) / 100;
+  }
+
+  // ---- per-subject rubric selection ---------------------------------------
+  // Not every subject uses every rubric. If a subject has no SubjectRubric
+  // rows at all, it implicitly uses every rubric at that rubric's global
+  // default weight (keeps unconfigured subjects working out of the box).
+  // Once a subject is explicitly configured, only its active selections —
+  // at their subject-specific weights — apply.
+
+  private async assertSubjectInTenant(universityId: string, subjectId: string) {
+    const subject = await this.prisma.subject.findFirst({
+      where: { id: subjectId, deletedAt: null, program: { faculty: { universityId } } },
+      select: { id: true },
+    });
+    if (!subject) throw new NotFoundException('Subject not found in this tenant');
+  }
+
+  /** Lightweight config view: all 5 rubrics with this subject's active/weight state — for the settings UI. */
+  async subjectRubricConfig(universityId: string, subjectId: string) {
+    await this.assertSubjectInTenant(universityId, subjectId);
+    const [rubrics, configured] = await Promise.all([
+      this.prisma.rubric.findMany({
+        where: { universityId, deletedAt: null, isActive: true },
+        orderBy: { order: 'asc' },
+        select: { id: true, code: true, nameEn: true, nameTh: true, weightPercent: true },
+      }),
+      this.prisma.subjectRubric.findMany({ where: { subjectId }, select: { rubricId: true, weightPercent: true, isActive: true } }),
+    ]);
+    const hasConfig = configured.length > 0;
+    const map = new Map(configured.map((c) => [c.rubricId, c]));
+    return rubrics.map((r) => {
+      const c = map.get(r.id);
+      return {
+        rubricId: r.id, code: r.code, nameEn: r.nameEn, nameTh: r.nameTh,
+        weightPercent: c ? c.weightPercent : hasConfig ? 0 : r.weightPercent,
+        isActive: c ? c.isActive : !hasConfig,
+      };
+    });
+  }
+
+  async updateSubjectRubrics(universityId: string, subjectId: string, dto: UpdateSubjectRubricsDto) {
+    await this.assertSubjectInTenant(universityId, subjectId);
+    const validIds = new Set((await this.prisma.rubric.findMany({ where: { universityId, deletedAt: null }, select: { id: true } })).map((r) => r.id));
+    const activeSum = dto.rubrics.filter((r) => r.isActive && validIds.has(r.rubricId)).reduce((a, r) => a + r.weightPercent, 0);
+    if (activeSum > 100.001) throw new BadRequestException('Active rubric weights for this subject must not exceed 100%');
+
+    await this.prisma.$transaction(
+      dto.rubrics.filter((r) => validIds.has(r.rubricId)).map((r) =>
+        this.prisma.subjectRubric.upsert({
+          where: { subjectId_rubricId: { subjectId, rubricId: r.rubricId } },
+          update: { weightPercent: r.weightPercent, isActive: r.isActive },
+          create: { subjectId, rubricId: r.rubricId, weightPercent: r.weightPercent, isActive: r.isActive },
+        }),
+      ),
+    );
+    return this.subjectRubricConfig(universityId, subjectId);
+  }
+
+  /** Resolved (rubric, effective weight) pairs actually used for grading this subject. */
+  private async resolveSubjectRubrics(universityId: string, subjectId: string) {
+    const [allRubrics, configured] = await Promise.all([
+      this.listRubrics(universityId),
+      this.prisma.subjectRubric.findMany({ where: { subjectId }, select: { rubricId: true, weightPercent: true, isActive: true } }),
+    ]);
+    if (configured.length === 0) {
+      return allRubrics.map((r) => ({ rubric: r, weightPercent: r.weightPercent }));
+    }
+    const activeMap = new Map(configured.filter((c) => c.isActive).map((c) => [c.rubricId, c.weightPercent]));
+    return allRubrics.filter((r) => activeMap.has(r.id)).map((r) => ({ rubric: r, weightPercent: activeMap.get(r.id)! }));
+  }
+
+  /** Full rubric objects (sections+items, bilingual) for the rubrics this subject actually uses — for the grading UI. */
+  async activeRubricsForSubject(universityId: string, subjectId: string) {
+    await this.assertSubjectInTenant(universityId, subjectId);
+    const resolved = await this.resolveSubjectRubrics(universityId, subjectId);
+    return resolved.map(({ rubric, weightPercent }) => ({ ...rubric, weightPercent }));
   }
 
   // ---- grade scheme -----------------------------------------------------
@@ -174,24 +250,35 @@ export class AssessmentService {
 
   // ---- reports ----------------------------------------------------------
 
-  /** Per-student breakdown across all rubrics + weighted total + grade. */
+  /** Per-student breakdown across the rubrics that apply to this section's subject + weighted total + grade. */
   async studentSummary(universityId: string, studentId: string, sectionId?: string) {
-    const [student, rubrics, evaluations, scheme] = await Promise.all([
-      this.prisma.student.findFirst({ where: { id: studentId, universityId, deletedAt: null }, select: { studentCode: true, nameEn: true, nameTh: true, program: { select: { code: true } } } }),
-      this.listRubrics(universityId),
-      this.prisma.evaluation.findMany({ where: { universityId, studentId, sectionId: sectionId ?? null }, select: { rubricId: true, scorePercent: true, status: true } }),
-      this.gradeScheme(universityId),
-    ]);
+    const student = await this.prisma.student.findFirst({
+      where: { id: studentId, universityId, deletedAt: null },
+      select: { studentCode: true, nameEn: true, nameTh: true, program: { select: { code: true } } },
+    });
     if (!student) throw new NotFoundException('Student not found');
 
+    let resolved: { rubric: Awaited<ReturnType<AssessmentService['listRubrics']>>[number]; weightPercent: number }[];
+    if (sectionId) {
+      const section = await this.prisma.section.findFirst({ where: { id: sectionId, universityId, deletedAt: null }, select: { subjectId: true } });
+      resolved = section ? await this.resolveSubjectRubrics(universityId, section.subjectId) : [];
+    } else {
+      resolved = (await this.listRubrics(universityId)).map((r) => ({ rubric: r, weightPercent: r.weightPercent }));
+    }
+
+    const [evaluations, scheme] = await Promise.all([
+      this.prisma.evaluation.findMany({ where: { universityId, studentId, sectionId: sectionId ?? null }, select: { rubricId: true, scorePercent: true } }),
+      this.gradeScheme(universityId),
+    ]);
     const evalByRubric = new Map(evaluations.map((e) => [e.rubricId, e]));
-    const rows = rubrics.map((r) => {
+
+    const rows = resolved.map(({ rubric: r, weightPercent }) => {
       const ev = evalByRubric.get(r.id);
       const scorePercent = ev?.scorePercent ?? null;
       return {
-        rubricId: r.id, name: r.name, weightPercent: r.weightPercent,
+        rubricId: r.id, nameEn: r.nameEn, nameTh: r.nameTh, weightPercent,
         scorePercent, graded: scorePercent != null,
-        contribution: scorePercent != null ? Math.round((r.weightPercent / 100) * scorePercent * 100) / 100 : 0,
+        contribution: scorePercent != null ? Math.round((weightPercent / 100) * scorePercent * 100) / 100 : 0,
       };
     });
     const total = Math.round(rows.reduce((a, r) => a + r.contribution, 0) * 100) / 100;
@@ -205,24 +292,25 @@ export class AssessmentService {
     };
   }
 
-  /** Per-section table: every enrolled student with total + grade. */
+  /** Per-section table: every enrolled student with total + grade, using the section's subject rubric config. */
   async sectionSummary(universityId: string, sectionId: string) {
     const section = await this.prisma.section.findFirst({
       where: { id: sectionId, universityId, deletedAt: null },
-      select: { sectionNo: true, subject: { select: { code: true, nameEn: true } } },
+      select: { subjectId: true, sectionNo: true, subject: { select: { code: true, nameEn: true, nameTh: true } } },
     });
     if (!section) throw new NotFoundException('Section not found');
 
-    const [enrollments, rubrics, evaluations, scheme] = await Promise.all([
+    const resolved = await this.resolveSubjectRubrics(universityId, section.subjectId);
+    const weightByRubric = new Map(resolved.map(({ rubric, weightPercent }) => [rubric.id, weightPercent]));
+
+    const [enrollments, evaluations, scheme] = await Promise.all([
       this.prisma.enrollment.findMany({ where: { sectionId, status: 'ENROLLED' }, select: { studentId: true, student: { select: { studentCode: true, nameEn: true, nameTh: true } } }, orderBy: { student: { studentCode: 'asc' } } }),
-      this.listRubrics(universityId),
       this.prisma.evaluation.findMany({ where: { universityId, sectionId }, select: { studentId: true, rubricId: true, scorePercent: true } }),
       this.gradeScheme(universityId),
     ]);
-    const weightByRubric = new Map(rubrics.map((r) => [r.id, r.weightPercent]));
 
     const students = enrollments.map((en) => {
-      const evs = evaluations.filter((e) => e.studentId === en.studentId);
+      const evs = evaluations.filter((e) => e.studentId === en.studentId && weightByRubric.has(e.rubricId));
       let total = 0, gradedWeight = 0;
       for (const e of evs) {
         const w = weightByRubric.get(e.rubricId) ?? 0;
@@ -237,6 +325,6 @@ export class AssessmentService {
       };
     });
 
-    return { section, rubricCount: rubrics.length, students };
+    return { section, rubricCount: resolved.length, students };
   }
 }

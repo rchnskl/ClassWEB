@@ -1,6 +1,6 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
-import { IsArray, IsInt, IsNumber, IsOptional, IsString, Max, Min, ValidateNested } from 'class-validator';
+import { IsArray, IsBoolean, IsInt, IsNumber, IsOptional, IsString, Max, Min, ValidateNested } from 'class-validator';
 
 export class ScoreEntryDto {
   @ApiProperty()
@@ -69,4 +69,16 @@ export class UpdateGradeBandsDto {
   @ApiProperty({ type: [BandDto] })
   @IsArray() @ValidateNested({ each: true }) @Type(() => BandDto)
   bands!: BandDto[];
+}
+
+class SubjectRubricEntryDto {
+  @IsString() rubricId!: string;
+  @Type(() => Number) @IsNumber() @Min(0) @Max(100) weightPercent!: number;
+  @IsBoolean() isActive!: boolean;
+}
+
+export class UpdateSubjectRubricsDto {
+  @ApiProperty({ type: [SubjectRubricEntryDto], description: 'Full set of 5 rubric selections for this subject; active weights sum ≤ 100%' })
+  @IsArray() @ValidateNested({ each: true }) @Type(() => SubjectRubricEntryDto)
+  rubrics!: SubjectRubricEntryDto[];
 }

@@ -1,7 +1,7 @@
 import { Body, Controller, Get, Param, Patch, Post, Query } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { AssessmentService } from './assessment.service';
-import { SaveEvaluationDto, UpdateGradeBandsDto, UpdateRubricWeightsDto } from './dto/assessment.dto';
+import { SaveEvaluationDto, UpdateGradeBandsDto, UpdateRubricWeightsDto, UpdateSubjectRubricsDto } from './dto/assessment.dto';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { Permissions } from '../common/decorators/permissions.decorator';
 import { AuthenticatedUser } from '../common/authenticated-user';
@@ -30,6 +30,27 @@ export class AssessmentController {
   @ApiOperation({ summary: 'Adjust rubric / section / item weights (sums ≤ 100%)' })
   weights(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string, @Body() dto: UpdateRubricWeightsDto) {
     return this.assessment.updateWeights(user.universityId, id, dto);
+  }
+
+  @Get('subjects/:subjectId/rubric-config')
+  @Permissions('assessment:read')
+  @ApiOperation({ summary: 'All 5 rubrics with this subject\'s active/weight selection (for the config UI)' })
+  subjectRubricConfig(@CurrentUser() user: AuthenticatedUser, @Param('subjectId') subjectId: string) {
+    return this.assessment.subjectRubricConfig(user.universityId, subjectId);
+  }
+
+  @Patch('subjects/:subjectId/rubric-config')
+  @Permissions('assessment:update')
+  @ApiOperation({ summary: 'Choose which rubrics this subject uses + their weight (active weights sum ≤ 100%)' })
+  updateSubjectRubricConfig(@CurrentUser() user: AuthenticatedUser, @Param('subjectId') subjectId: string, @Body() dto: UpdateSubjectRubricsDto) {
+    return this.assessment.updateSubjectRubrics(user.universityId, subjectId, dto);
+  }
+
+  @Get('subjects/:subjectId/rubrics')
+  @Permissions('assessment:read')
+  @ApiOperation({ summary: "Full rubric objects (bilingual, sections+items) this subject actually uses — for grading" })
+  activeRubrics(@CurrentUser() user: AuthenticatedUser, @Param('subjectId') subjectId: string) {
+    return this.assessment.activeRubricsForSubject(user.universityId, subjectId);
   }
 
   @Get('grade-scheme')

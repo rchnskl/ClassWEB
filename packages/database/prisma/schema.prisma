@@ -448,9 +448,10 @@ model Subject {
   updatedAt   DateTime  @updatedAt
   deletedAt   DateTime?
 
-  program  Program   @relation(fields: [programId], references: [id])
-  course   Course    @relation(fields: [courseId], references: [id])
-  sections Section[]
+  program        Program         @relation(fields: [programId], references: [id])
+  course         Course          @relation(fields: [courseId], references: [id])
+  sections       Section[]
+  subjectRubrics SubjectRubric[]
 
   @@unique([programId, code])
   @@index([programId])
@@ -1320,9 +1321,11 @@ model Rubric {
   id            String    @id @default(cuid())
   universityId  String
   code          String?
-  name          String
+  nameEn        String
+  nameTh        String?
   description   String?
-  /// Overall weight toward the final grade (e.g. 70).
+  /// Overall weight toward the final grade (e.g. 70). Default suggestion —
+  /// actual grading weight per subject comes from SubjectRubric.weightPercent.
   weightPercent Float     @default(0)
   order         Int       @default(0)
   isActive      Boolean   @default(true)
@@ -1331,9 +1334,10 @@ model Rubric {
   updatedAt     DateTime  @updatedAt
   deletedAt     DateTime?
 
-  university  University      @relation(fields: [universityId], references: [id])
-  sections    RubricSection[]
-  evaluations Evaluation[]
+  university     University      @relation(fields: [universityId], references: [id])
+  sections       RubricSection[]
+  evaluations    Evaluation[]
+  subjectRubrics SubjectRubric[]
 
   @@index([universityId])
   @@map("rubrics")
@@ -1342,12 +1346,13 @@ model Rubric {
 /// A weighted group of items within a rubric (e.g. "I. Nursing Performance 40%").
 /// Rubrics without natural groups use one section at 100%.
 model RubricSection {
-  id            String @id @default(cuid())
+  id            String  @id @default(cuid())
   rubricId      String
-  name          String
+  nameEn        String
+  nameTh        String?
   /// Weight of this section within the rubric (sections sum ≤ 100).
-  weightPercent Float  @default(0)
-  order         Int    @default(0)
+  weightPercent Float   @default(0)
+  order         Int     @default(0)
 
   rubric Rubric       @relation(fields: [rubricId], references: [id], onDelete: Cascade)
   items  RubricItem[]
@@ -1358,19 +1363,40 @@ model RubricSection {
 
 /// A scoreable sub-item, rated 1..maxRating.
 model RubricItem {
-  id            String @id @default(cuid())
+  id            String  @id @default(cuid())
   sectionId     String
-  text          String
+  textEn        String
+  textTh        String?
   /// Weight of this item within its section (items sum ≤ 100). Editable.
-  weightPercent Float  @default(0)
-  maxRating     Int    @default(5)
-  order         Int    @default(0)
+  weightPercent Float   @default(0)
+  maxRating     Int     @default(5)
+  order         Int     @default(0)
 
   section RubricSection     @relation(fields: [sectionId], references: [id], onDelete: Cascade)
   scores  EvaluationScore[]
 
   @@index([sectionId])
   @@map("rubric_items")
+}
+
+/// Which rubrics a Subject uses for grading, and at what weight within that
+/// subject (a subject need not use all rubrics — active ones should sum ≤ 100).
+/// This is the curriculum-level configuration; grading resolves a section's
+/// weights via its Subject.
+model SubjectRubric {
+  id            String  @id @default(cuid())
+  subjectId     String
+  rubricId      String
+  weightPercent Float   @default(0)
+  isActive      Boolean @default(true)
+  order         Int     @default(0)
+
+  subject Subject @relation(fields: [subjectId], references: [id], onDelete: Cascade)
+  rubric  Rubric  @relation(fields: [rubricId], references: [id], onDelete: Cascade)
+
+  @@unique([subjectId, rubricId])
+  @@index([subjectId])
+  @@map("subject_rubrics")
 }
 
 /// One filled-in rubric for a student (optionally within a class section).
