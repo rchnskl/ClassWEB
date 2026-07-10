@@ -1,5 +1,5 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { gunzipSync, gzipSync } from 'node:zlib';
 import { createHash } from 'node:crypto';
@@ -257,9 +257,9 @@ export class BackupsService {
     });
   }
 
-  async create(universityId: string, createdById: string, note?: string) {
+  async create(universityId: string, createdById: string | null, note?: string, type: 'MANUAL' | 'AUTOMATIC' = 'MANUAL') {
     const backup = await this.prisma.backup.create({
-      data: { universityId, type: 'MANUAL', status: 'IN_PROGRESS', startedAt: new Date(), createdById, metadata: note ? { note } : undefined },
+      data: { universityId, type, status: 'IN_PROGRESS', startedAt: new Date(), createdById, metadata: note ? { note } : undefined },
     });
 
     try {
@@ -309,6 +309,24 @@ export class BackupsService {
     if (!backup) throw new NotFoundException('Backup not found');
     await this.prisma.backup.delete({ where: { id } });
     return { ok: true };
+  }
+
+  /** Keeps only the most recent `keep` completed automatic backups for a tenant, deleting the rest (row + file). */
+  async pruneOldAutomatic(universityId: string, keep: number) {
+    const old = await this.prisma.backup.findMany({
+      where: { universityId, type: 'AUTOMATIC', status: 'COMPLETED' },
+      orderBy: { createdAt: 'desc' },
+      skip: keep,
+      select: { id: true, storageKey: true },
+    });
+    for (const b of old) {
+      if (b.storageKey) {
+        const path = join(storageDir(), b.storageKey);
+        if (existsSync(path)) unlinkSync(path);
+      }
+    }
+    if (old.length > 0) await this.prisma.backup.deleteMany({ where: { id: { in: old.map((b) => b.id) } } });
+    return { pruned: old.length };
   }
 
   /** Reads+decompresses the backup file for download; caller streams it as a response. */
