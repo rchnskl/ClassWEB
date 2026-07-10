@@ -6,6 +6,7 @@ import ExcelJS from 'exceljs';
 import { AuditAction, ReportFormat } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { AnalyticsService } from '../analytics/analytics.service';
+import { AssessmentService } from '../assessment/assessment.service';
 import { FONT_TH, FONT_TH_BOLD, LOGO_FACULTY, LOGO_UNIVERSITY } from './report-assets';
 
 const WEB_BASE = process.env.WEB_BASE_URL ?? 'http://localhost:3000';
@@ -24,6 +25,7 @@ export class ReportsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly analytics: AnalyticsService,
+    private readonly assessment: AssessmentService,
   ) {}
 
   private thaiDateTime(d: Date): string {
@@ -396,6 +398,302 @@ export class ReportsService {
     header.eachCell((c) => { c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF0E7C7B' } }; });
     d.log.forEach((r) => ws.addRow([new Date(r.date).toISOString().slice(0, 10), r.subject, r.status]));
     ws.columns.forEach((c) => { c.width = 18; });
+    return { buffer: Buffer.from(await wb.xlsx.writeBuffer()), reportNumber };
+  }
+
+  // ---- Grade reports: per-section grade sheet ----------------------------
+
+  private async gatherSectionGrades(universityId: string, sectionId: string) {
+    const [university, faculty, section] = await Promise.all([
+      this.prisma.university.findUnique({ where: { id: universityId }, select: { nameEn: true, nameTh: true } }),
+      this.prisma.faculty.findFirst({ where: { universityId, code: 'NURSING' }, select: { nameEn: true, nameTh: true } }),
+      this.prisma.section.findFirst({
+        where: { id: sectionId, universityId, deletedAt: null },
+        select: { subjectId: true, sectionNo: true, subject: { select: { code: true, nameEn: true, nameTh: true } } },
+      }),
+    ]);
+    if (!section) throw new NotFoundException('Section not found in this tenant');
+
+    const [rubrics, summary, evaluations] = await Promise.all([
+      this.assessment.activeRubricsForSubject(universityId, section.subjectId),
+      this.assessment.sectionSummary(universityId, sectionId),
+      this.prisma.evaluation.findMany({ where: { universityId, sectionId }, select: { studentId: true, rubricId: true, scorePercent: true } }),
+    ]);
+    const scoreMap = new Map(evaluations.map((e) => [`${e.studentId}:${e.rubricId}`, e.scorePercent]));
+    const students = summary.students.map((s) => ({ ...s, scores: rubrics.map((r) => scoreMap.get(`${s.studentId}:${r.id}`) ?? null) }));
+
+    return { university, faculty, section, rubrics, students };
+  }
+
+  async sectionGradesPdf(universityId: string, sectionId: string, byId?: string, byName?: string): Promise<{ buffer: Buffer; reportNumber: string }> {
+    const d = await this.gatherSectionGrades(universityId, sectionId);
+    const checksum = createHash('sha256').update(JSON.stringify({ sectionId, students: d.students.map((s) => [s.studentId, s.total]) })).digest('hex');
+    const reportNumber = await this.register(universityId, 'PDF', checksum, byId, byName, 'SECTION_GRADES', `Grade report — ${d.section.subject.code}`);
+    const verifyUrl = `${WEB_BASE}/verify/${reportNumber}`;
+    const qrPng = Buffer.from((await QRCode.toDataURL(verifyUrl, { margin: 1, width: 200 })).split(',')[1], 'base64');
+
+    // Landscape: rubric-per-student score sheets typically need more columns
+    // than an A4 portrait page comfortably fits.
+    const doc = new PDFDocument({ size: 'A4', layout: 'landscape', margin: 36, bufferPages: true });
+    const chunks: Buffer[] = [];
+    doc.on('data', (c) => chunks.push(c as Buffer));
+    const done = new Promise<Buffer>((resolve) => doc.on('end', () => resolve(Buffer.concat(chunks))));
+
+    const th = FONT_TH(); const thBold = FONT_TH_BOLD();
+    if (th) doc.registerFont('TH', th);
+    if (thBold) doc.registerFont('THB', thBold);
+    const F = th ? 'TH' : 'Helvetica'; const FB = thBold ? 'THB' : 'Helvetica-Bold';
+    const pageW = doc.page.width; const left = 36; const right = pageW - 36;
+
+    const uniLogo = LOGO_UNIVERSITY(); const facLogo = LOGO_FACULTY();
+    if (uniLogo) doc.image(uniLogo, left, 30, { width: 44 });
+    if (facLogo) doc.image(facLogo, right - 44, 28, { width: 44 });
+    doc.font(FB).fontSize(16).fillColor('#26303f').text(d.university?.nameTh ?? 'University', 88, 34, { width: pageW - 176, align: 'center' });
+    doc.font(FB).fontSize(13).fillColor('#0e2a4a').text(d.faculty?.nameTh ?? 'Faculty of Nursing', 88, 53, { width: pageW - 176, align: 'center' });
+    doc.font(F).fontSize(12).fillColor('#4a5666')
+      .text(`รายงานผลการเรียนราย Section (Section Grade Report) — ${d.section.subject.code} ${d.section.subject.nameTh ?? d.section.subject.nameEn} · Sec ${d.section.sectionNo}`, 88, 71, { width: pageW - 176, align: 'center' });
+    doc.moveTo(left, 94).lineTo(right, 94).strokeColor('#ff8a4c').lineWidth(1.5).stroke();
+    doc.font(F).fontSize(10).fillColor('#4a5666').text(`เลขที่รายงาน: ${reportNumber}    ออกเมื่อ: ${this.thaiDateTime(new Date())}`, left, 100);
+
+    // Table geometry — R1..Rn columns are equal width; a legend below the
+    // table maps them to full rubric names (keeps columns readable at any
+    // rubric count instead of squeezing long names into narrow cells).
+    let y = 122;
+    const fixedW = { no: 22, code: 62, name: 120, total: 46, grade: 44 };
+    const rubricColW = Math.max(42, (right - left - fixedW.no - fixedW.code - fixedW.name - fixedW.total - fixedW.grade) / Math.max(1, d.rubrics.length));
+    const colX: number[] = [left];
+    colX.push(colX[0] + fixedW.no);
+    colX.push(colX[1] + fixedW.code);
+    colX.push(colX[2] + fixedW.name);
+    const rubricStart = 3;
+    for (let i = 0; i < d.rubrics.length; i++) colX.push(colX[rubricStart + i] + rubricColW);
+    const totalCol = colX.length - 1;
+    colX.push(colX[totalCol] + fixedW.total);
+    const gradeCol = colX.length - 1;
+    colX.push(colX[gradeCol] + fixedW.grade);
+
+    const headerLabels = ['#', 'รหัส', 'ชื่อ-สกุล', ...d.rubrics.map((_, i) => `R${i + 1}`), 'รวม', 'เกรด'];
+    const drawHeader = (yy: number) => {
+      doc.roundedRect(left, yy - 4, right - left, 20, 3).fill('#0e7c7b');
+      doc.font(FB).fontSize(9).fillColor('#fff');
+      headerLabels.forEach((h, i) => doc.text(h, colX[i] + 3, yy, { width: colX[i + 1] - colX[i] - 5, align: i >= rubricStart ? 'center' : 'left' }));
+      return yy + 20;
+    };
+    y = drawHeader(y);
+    doc.font(F).fontSize(9);
+    d.students.forEach((s, i) => {
+      if (y > doc.page.height - 100) { doc.addPage(); y = drawHeader(40); doc.font(F).fontSize(9); }
+      if (i % 2 === 1) { doc.rect(left, y - 3, right - left, 17).fill('#f6f8fb'); }
+      doc.fillColor('#26303f');
+      doc.text(String(i + 1), colX[0] + 3, y, { width: colX[1] - colX[0] - 5 });
+      doc.text(s.studentCode, colX[1] + 3, y, { width: colX[2] - colX[1] - 5 });
+      doc.text(s.nameTh ?? s.nameEn, colX[2] + 3, y, { width: colX[3] - colX[2] - 5, lineBreak: false, ellipsis: true });
+      d.rubrics.forEach((_, ri) => {
+        const sc = s.scores[ri];
+        doc.text(sc == null ? '—' : String(sc), colX[rubricStart + ri] + 3, y, { width: colX[rubricStart + ri + 1] - colX[rubricStart + ri] - 5, align: 'center' });
+      });
+      doc.font(FB).text(String(s.total), colX[totalCol] + 3, y, { width: colX[totalCol + 1] - colX[totalCol] - 5, align: 'center' });
+      doc.text(s.grade ?? '—', colX[gradeCol] + 3, y, { width: colX[gradeCol + 1] - colX[gradeCol] - 5, align: 'center' });
+      doc.font(F);
+      y += 17;
+    });
+
+    // Legend
+    y += 12;
+    if (y > doc.page.height - 70) { doc.addPage(); y = 40; }
+    doc.font(FB).fontSize(10).fillColor('#26303f').text('แบบประเมิน (Rubrics):', left, y); y += 15;
+    doc.font(F).fontSize(9).fillColor('#4a5666');
+    d.rubrics.forEach((r, i) => { doc.text(`R${i + 1} = ${r.nameTh ?? r.nameEn} (${r.weightPercent}%)`, left, y, { width: right - left }); y += 13; });
+
+    // Signature + QR
+    if (y > doc.page.height - 130) { doc.addPage(); y = 40; }
+    const sy = y + 16;
+    doc.image(qrPng, left, sy, { width: 66 });
+    doc.font(F).fontSize(9).fillColor('#7c8798').text('สแกนเพื่อตรวจสอบ', left - 12, sy + 68, { width: 92, align: 'center', lineBreak: false });
+    doc.font(F).fontSize(12).fillColor('#26303f');
+    doc.text('.................................................', right - 200, sy + 22, { width: 200, align: 'center', lineBreak: false });
+    doc.text('ผู้รับรอง / Authorised signature', right - 200, sy + 40, { width: 200, align: 'center', lineBreak: false });
+
+    const range = doc.bufferedPageRange();
+    for (let i = range.start; i < range.start + range.count; i++) {
+      doc.switchToPage(i);
+      doc.page.margins.bottom = 0;
+      doc.font(F).fontSize(8).fillColor('#a0aab8')
+        .text(`Generated by ClassWeb · ${reportNumber} · verify at ${verifyUrl} · หน้า ${i + 1}/${range.count}`, left, doc.page.height - 30, { width: right - left, align: 'center', lineBreak: false });
+    }
+    doc.flushPages();
+
+    doc.end();
+    return { buffer: await done, reportNumber };
+  }
+
+  async sectionGradesCsv(universityId: string, sectionId: string, byId?: string, byName?: string): Promise<{ content: string; reportNumber: string }> {
+    const d = await this.gatherSectionGrades(universityId, sectionId);
+    const checksum = createHash('sha256').update(JSON.stringify({ sectionId, n: d.students.length })).digest('hex');
+    const reportNumber = await this.register(universityId, 'CSV', checksum, byId, byName, 'SECTION_GRADES', `Grade report — ${d.section.subject.code}`);
+    const esc = (v: string) => (/[",\n]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v);
+    const rubricHeaders = d.rubrics.map((r) => `${r.nameEn} (${r.weightPercent}%)`);
+    const rows: string[][] = [
+      ['Report No.', reportNumber],
+      ['Section', `${d.section.subject.code} · ${d.section.sectionNo}`],
+      [],
+      ['#', 'Student code', 'Name (EN)', 'Name (TH)', ...rubricHeaders, 'Total', 'Grade', 'GPA'],
+      ...d.students.map((s, i) => [
+        String(i + 1), s.studentCode, s.nameEn, s.nameTh ?? '',
+        ...s.scores.map((sc) => (sc == null ? '' : String(sc))),
+        String(s.total), s.grade ?? '', s.gpa != null ? String(s.gpa) : '',
+      ]),
+    ];
+    return { content: '﻿' + rows.map((r) => r.map((c) => esc(String(c))).join(',')).join('\n'), reportNumber };
+  }
+
+  async sectionGradesXlsx(universityId: string, sectionId: string, byId?: string, byName?: string): Promise<{ buffer: Buffer; reportNumber: string }> {
+    const d = await this.gatherSectionGrades(universityId, sectionId);
+    const checksum = createHash('sha256').update(JSON.stringify({ sectionId, n: d.students.length })).digest('hex');
+    const reportNumber = await this.register(universityId, 'XLSX', checksum, byId, byName, 'SECTION_GRADES', `Grade report — ${d.section.subject.code}`);
+    const wb = new ExcelJS.Workbook();
+    const ws = wb.addWorksheet('Grades');
+    ws.addRow([`${d.section.subject.code} · Section ${d.section.sectionNo}`]);
+    ws.addRow([`Report No.: ${reportNumber}`]);
+    ws.addRow([`Generated: ${this.thaiDateTime(new Date())}`]);
+    ws.addRow([]);
+    const rubricHeaders = d.rubrics.map((r) => `${r.nameEn} (${r.weightPercent}%)`);
+    const header = ws.addRow(['#', 'Student code', 'Name (EN)', 'Name (TH)', ...rubricHeaders, 'Total', 'Grade', 'GPA']);
+    header.font = { bold: true, color: { argb: 'FFFFFFFF' } };
+    header.eachCell((c) => { c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF0E7C7B' } }; });
+    d.students.forEach((s, i) => ws.addRow([i + 1, s.studentCode, s.nameEn, s.nameTh ?? '', ...s.scores.map((sc) => sc ?? ''), s.total, s.grade ?? '', s.gpa ?? '']));
+    ws.columns.forEach((c) => { c.width = 16; });
+    ws.getColumn(3).width = 22; ws.getColumn(4).width = 22;
+    return { buffer: Buffer.from(await wb.xlsx.writeBuffer()), reportNumber };
+  }
+
+  // ---- Grade reports: per-student breakdown -------------------------------
+
+  async studentGradePdf(universityId: string, studentId: string, sectionId: string, byId?: string, byName?: string): Promise<{ buffer: Buffer; reportNumber: string }> {
+    const [university, faculty, section, summary] = await Promise.all([
+      this.prisma.university.findUnique({ where: { id: universityId }, select: { nameEn: true, nameTh: true } }),
+      this.prisma.faculty.findFirst({ where: { universityId, code: 'NURSING' }, select: { nameEn: true, nameTh: true } }),
+      this.prisma.section.findFirst({ where: { id: sectionId, universityId, deletedAt: null }, select: { sectionNo: true, subject: { select: { code: true, nameEn: true, nameTh: true } } } }),
+      this.assessment.studentSummary(universityId, studentId, sectionId),
+    ]);
+    if (!section) throw new NotFoundException('Section not found in this tenant');
+
+    const checksum = createHash('sha256').update(JSON.stringify({ studentId, sectionId, total: summary.total })).digest('hex');
+    const reportNumber = await this.register(universityId, 'PDF', checksum, byId, byName, 'STUDENT_GRADE', `Grade report ${summary.student.studentCode}`);
+    const verifyUrl = `${WEB_BASE}/verify/${reportNumber}`;
+    const qrPng = Buffer.from((await QRCode.toDataURL(verifyUrl, { margin: 1, width: 200 })).split(',')[1], 'base64');
+
+    const doc = new PDFDocument({ size: 'A4', margin: 40, bufferPages: true });
+    const chunks: Buffer[] = [];
+    doc.on('data', (c) => chunks.push(c as Buffer));
+    const done = new Promise<Buffer>((resolve) => doc.on('end', () => resolve(Buffer.concat(chunks))));
+
+    const th = FONT_TH(); const thBold = FONT_TH_BOLD();
+    if (th) doc.registerFont('TH', th);
+    if (thBold) doc.registerFont('THB', thBold);
+    const F = th ? 'TH' : 'Helvetica'; const FB = thBold ? 'THB' : 'Helvetica-Bold';
+    const pageW = doc.page.width; const left = 40; const right = pageW - 40;
+
+    const uniLogo = LOGO_UNIVERSITY(); const facLogo = LOGO_FACULTY();
+    if (uniLogo) doc.image(uniLogo, left, 38, { width: 50 });
+    if (facLogo) doc.image(facLogo, right - 50, 36, { width: 50 });
+    doc.font(FB).fontSize(18).fillColor('#26303f').text(university?.nameTh ?? 'University', 100, 44, { width: pageW - 200, align: 'center' });
+    doc.font(FB).fontSize(15).fillColor('#0e2a4a').text(faculty?.nameTh ?? 'Faculty of Nursing', 100, 66, { width: pageW - 200, align: 'center' });
+    doc.font(F).fontSize(14).fillColor('#4a5666').text('รายงานผลการเรียนรายบุคคล (Individual Grade Report)', 100, 86, { width: pageW - 200, align: 'center' });
+    doc.moveTo(left, 112).lineTo(right, 112).strokeColor('#ff8a4c').lineWidth(2).stroke();
+
+    let y = 122;
+    doc.font(F).fontSize(12).fillColor('#4a5666').text(`เลขที่รายงาน: ${reportNumber}    ออกเมื่อ: ${this.thaiDateTime(new Date())}`, left, y);
+    y += 22;
+
+    doc.roundedRect(left, y, right - left, 78, 10).fillAndStroke('#fff6ee', '#ffd9bf');
+    doc.fillColor('#26303f').font(FB).fontSize(14).text(`${summary.student.nameTh ?? summary.student.nameEn}  (${summary.student.studentCode})`, left + 14, y + 10);
+    doc.font(F).fontSize(12).fillColor('#4a5666')
+      .text(`หลักสูตร: ${summary.student.program.code} · รายวิชา: ${section.subject.code} ${section.subject.nameTh ?? section.subject.nameEn} · Sec ${section.sectionNo}`, left + 14, y + 32);
+    const gradeText = summary.grade ? `${summary.grade.grade} (${summary.grade.gpa.toFixed(2)} ${summary.grade.label})` : '—';
+    doc.font(FB).fontSize(13).fillColor('#26303f').text(`คะแนนรวม: ${summary.total}/100    เกรด: ${gradeText}`, left + 14, y + 52);
+    y += 96;
+
+    // Rubric breakdown table
+    doc.font(FB).fontSize(14).fillColor('#26303f').text('รายละเอียดคะแนนแยกตามแบบประเมิน (Score breakdown)', left, y); y += 22;
+    // Column widths as offsets from `left`. The status column needs room for
+    // Thai text ("ยังไม่ให้คะแนน") and the last (contribution) column must fit
+    // decimals like "55.99" — an earlier version left it only ~9pt wide,
+    // which wrapped numbers onto multiple lines.
+    const cols = [left, left + 210, left + 265, left + 320, left + 420];
+    doc.roundedRect(left, y - 4, right - left, 20, 4).fill('#0e7c7b');
+    doc.font(FB).fontSize(11).fillColor('#fff');
+    ['แบบประเมิน', 'น้ำหนัก', 'คะแนน', 'สถานะ', 'คิดเป็น'].forEach((h, i) => doc.text(h, cols[i] + 4, y, { width: (cols[i + 1] ?? right) - cols[i] - 6 }));
+    y += 20;
+    doc.font(F).fontSize(11).fillColor('#26303f');
+    summary.rubrics.forEach((r, i) => {
+      if (i % 2 === 1) { doc.rect(left, y - 3, right - left, 20).fill('#f6f8fb'); doc.fillColor('#26303f'); }
+      doc.text(r.nameTh ?? r.nameEn, cols[0] + 4, y, { width: cols[1] - cols[0] - 6 });
+      doc.text(`${r.weightPercent}%`, cols[1] + 4, y, { width: cols[2] - cols[1] - 6 });
+      doc.text(r.scorePercent != null ? `${r.scorePercent}` : '—', cols[2] + 4, y, { width: cols[3] - cols[2] - 6 });
+      doc.text(r.graded ? 'ให้คะแนนแล้ว' : 'ยังไม่ให้คะแนน', cols[3] + 4, y, { width: cols[4] - cols[3] - 6 });
+      doc.text(`${r.contribution}`, cols[4] + 4, y, { width: right - cols[4] - 6 });
+      y += 20;
+    });
+    y += 6;
+    doc.font(FB).fontSize(12).fillColor('#26303f').text(`รวม (Total): ${summary.total}/100`, left, y); y += 20;
+
+    // Signature + QR
+    if (y > doc.page.height - 170) { doc.addPage(); y = 60; }
+    const sy = y + 20;
+    doc.image(qrPng, left, sy, { width: 78 });
+    doc.font(F).fontSize(10).fillColor('#7c8798').text('สแกนเพื่อตรวจสอบ', left - 15, sy + 80, { width: 108, align: 'center', lineBreak: false });
+    doc.font(F).fontSize(13).fillColor('#26303f');
+    doc.text('.................................................', right - 220, sy + 28, { width: 220, align: 'center', lineBreak: false });
+    doc.text('ผู้รับรอง / Authorised signature', right - 220, sy + 46, { width: 220, align: 'center', lineBreak: false });
+
+    const range = doc.bufferedPageRange();
+    for (let i = range.start; i < range.start + range.count; i++) {
+      doc.switchToPage(i);
+      doc.page.margins.bottom = 0;
+      doc.font(F).fontSize(9).fillColor('#a0aab8')
+        .text(`Generated by ClassWeb · ${reportNumber} · verify at ${verifyUrl} · หน้า ${i + 1}/${range.count}`, left, doc.page.height - 40, { width: right - left, align: 'center', lineBreak: false });
+    }
+    doc.flushPages();
+
+    doc.end();
+    return { buffer: await done, reportNumber };
+  }
+
+  async studentGradeCsv(universityId: string, studentId: string, sectionId: string, byId?: string, byName?: string): Promise<{ content: string; reportNumber: string }> {
+    const summary = await this.assessment.studentSummary(universityId, studentId, sectionId);
+    const checksum = createHash('sha256').update(JSON.stringify({ studentId, sectionId, total: summary.total })).digest('hex');
+    const reportNumber = await this.register(universityId, 'CSV', checksum, byId, byName, 'STUDENT_GRADE', `Grade report ${summary.student.studentCode}`);
+    const esc = (v: string) => (/[",\n]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v);
+    const rows: string[][] = [
+      ['Report No.', reportNumber],
+      ['Student', `${summary.student.studentCode} ${summary.student.nameEn}`],
+      ['Program', summary.student.program.code],
+      ['Total', String(summary.total)],
+      ['Grade', summary.grade ? `${summary.grade.grade} (${summary.grade.gpa})` : ''],
+      [],
+      ['Rubric', 'Weight %', 'Score %', 'Graded', 'Contribution'],
+      ...summary.rubrics.map((r) => [r.nameEn, String(r.weightPercent), r.scorePercent != null ? String(r.scorePercent) : '', r.graded ? 'Yes' : 'No', String(r.contribution)]),
+    ];
+    return { content: '﻿' + rows.map((r) => r.map((c) => esc(String(c))).join(',')).join('\n'), reportNumber };
+  }
+
+  async studentGradeXlsx(universityId: string, studentId: string, sectionId: string, byId?: string, byName?: string): Promise<{ buffer: Buffer; reportNumber: string }> {
+    const summary = await this.assessment.studentSummary(universityId, studentId, sectionId);
+    const checksum = createHash('sha256').update(JSON.stringify({ studentId, sectionId, total: summary.total })).digest('hex');
+    const reportNumber = await this.register(universityId, 'XLSX', checksum, byId, byName, 'STUDENT_GRADE', `Grade report ${summary.student.studentCode}`);
+    const wb = new ExcelJS.Workbook();
+    const ws = wb.addWorksheet('Grades');
+    ws.addRow([`${summary.student.nameTh ?? summary.student.nameEn} (${summary.student.studentCode})`]);
+    ws.addRow([`Report No.: ${reportNumber}`]);
+    ws.addRow([`Total: ${summary.total}/100  ·  Grade: ${summary.grade ? summary.grade.grade + ' (' + summary.grade.gpa + ')' : '-'}`]);
+    ws.addRow([]);
+    const header = ws.addRow(['Rubric', 'Weight %', 'Score %', 'Graded', 'Contribution']);
+    header.font = { bold: true, color: { argb: 'FFFFFFFF' } };
+    header.eachCell((c) => { c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF0E7C7B' } }; });
+    summary.rubrics.forEach((r) => ws.addRow([r.nameEn, r.weightPercent, r.scorePercent ?? '', r.graded ? 'Yes' : 'No', r.contribution]));
+    ws.columns.forEach((c) => { c.width = 20; });
+    ws.getColumn(1).width = 40;
     return { buffer: Buffer.from(await wb.xlsx.writeBuffer()), reportNumber };
   }
 }

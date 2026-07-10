@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation';
 import Sidebar from '@/components/Sidebar';
 import Topbar from '@/components/Topbar';
 import GradingDrawer, { type Rubric } from '@/components/GradingDrawer';
-import { apiFetch } from '@/lib/api';
+import { apiFetch, downloadFile } from '@/lib/api';
 import { useI18n } from '@/lib/i18n';
 
 interface SectionRef { id: string; sectionNo: string; subject: { id: string; code: string; nameEn: string } }
@@ -34,6 +34,19 @@ export default function AssessmentPage() {
   const [rubricConfig, setRubricConfig] = useState<RubricConfigRow[] | null>(null);
   const [showConfig, setShowConfig] = useState(false);
   const [savingConfig, setSavingConfig] = useState(false);
+  const [exporting, setExporting] = useState<string | null>(null);
+
+  async function exportSection(fmt: 'pdf' | 'xlsx' | 'csv') {
+    if (!sectionId) return;
+    setExporting(`section-${fmt}`);
+    try { await downloadFile(`/reports/grades/section/${sectionId}/${fmt}`, `section-grades.${fmt}`); }
+    catch { /* ignore */ } finally { setExporting(null); }
+  }
+  async function exportStudent(studentId: string) {
+    setExporting(`student-${studentId}`);
+    try { await downloadFile(`/reports/grades/student/${studentId}/pdf?sectionId=${sectionId}`, `grade-report.pdf`); }
+    catch { /* ignore */ } finally { setExporting(null); }
+  }
 
   const currentSubjectId = sections.find((s) => s.id === sectionId)?.subject.id ?? '';
 
@@ -124,6 +137,13 @@ export default function AssessmentPage() {
           </div>
         </div>
 
+        <div className="rise" style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 16 }}>
+          <span className="muted" style={{ fontSize: 12.5, fontWeight: 600 }}>{t('as.export')}:</span>
+          <ExportBtn label="📄 PDF" busy={exporting === 'section-pdf'} onClick={() => exportSection('pdf')} primary />
+          <ExportBtn label="📊 Excel" busy={exporting === 'section-xlsx'} onClick={() => exportSection('xlsx')} />
+          <ExportBtn label="📁 CSV" busy={exporting === 'section-csv'} onClick={() => exportSection('csv')} />
+        </div>
+
         <div className="glass rise" style={{ padding: 8, overflow: 'hidden' }}>
           <div style={{ overflowX: 'auto' }}>
             <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 14 }}>
@@ -142,7 +162,16 @@ export default function AssessmentPage() {
                     <Td><span className="muted">{s.gradedCount}/{summary.rubricCount}</span></Td>
                     <Td><b>{s.total}</b><span className="muted">/100</span></Td>
                     <Td><span className="chip" style={{ background: `${GRADE_COLOR(s.grade)}22`, color: GRADE_COLOR(s.grade), fontWeight: 700 }}>{s.grade ?? '—'}{s.gpa != null ? ` · ${s.gpa.toFixed(2)}` : ''}</span></Td>
-                    <Td><button onClick={() => setGrading(s)} className="btn-primary" style={{ padding: '6px 14px', fontSize: 12.5 }}>{t('as.grade_btn')}</button></Td>
+                    <Td>
+                      <div style={{ display: 'inline-flex', gap: 6 }}>
+                        <button onClick={() => setGrading(s)} className="btn-primary" style={{ padding: '6px 14px', fontSize: 12.5 }}>{t('as.grade_btn')}</button>
+                        <button onClick={() => exportStudent(s.studentId)} disabled={exporting === `student-${s.studentId}`}
+                          className="glass hairline icon-btn" style={{ padding: '6px 12px', borderRadius: 10, fontSize: 12.5, fontWeight: 600, color: 'var(--text-1)', cursor: exporting === `student-${s.studentId}` ? 'wait' : 'pointer' }}
+                          title={t('as.exportStudent')}>
+                          {exporting === `student-${s.studentId}` ? '…' : '📄'}
+                        </button>
+                      </div>
+                    </Td>
                   </tr>
                 ))}
               </tbody>
@@ -218,6 +247,18 @@ export default function AssessmentPage() {
         </div>
       )}
     </div>
+  );
+}
+
+function ExportBtn({ label, busy, onClick, primary }: { label: string; busy: boolean; onClick: () => void; primary?: boolean }) {
+  return (
+    <button
+      onClick={onClick} disabled={busy}
+      className={primary ? 'btn-primary' : 'glass hairline'}
+      style={{ padding: '9px 14px', borderRadius: 12, fontSize: 13.5, fontWeight: 650, cursor: busy ? 'wait' : 'pointer', color: primary ? '#fff' : 'var(--text-1)' }}
+    >
+      {busy ? '…' : label}
+    </button>
   );
 }
 
