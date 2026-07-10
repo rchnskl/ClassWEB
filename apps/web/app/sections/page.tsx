@@ -296,6 +296,11 @@ function SubjectsTab({ isAdmin }: { isAdmin: boolean }) {
   const [formError, setFormError] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
 
+  const [showCourseForm, setShowCourseForm] = useState(false);
+  const [courseForm, setCourseForm] = useState({ code: '', nameEn: '', nameTh: '' });
+  const [savingCourse, setSavingCourse] = useState(false);
+  const [courseError, setCourseError] = useState<string | null>(null);
+
   const load = useCallback(async () => {
     setLoading(true);
     try {
@@ -351,6 +356,30 @@ function SubjectsTab({ isAdmin }: { isAdmin: boolean }) {
 
   const coursesForProgram = courses.filter((c) => c.programId === form.programId);
 
+  function openCourseForm() {
+    setCourseForm({ code: '', nameEn: '', nameTh: '' });
+    setCourseError(null);
+    setShowCourseForm(true);
+  }
+
+  async function submitCourseForm(e: React.FormEvent) {
+    e.preventDefault();
+    if (!form.programId) return;
+    setSavingCourse(true);
+    setCourseError(null);
+    try {
+      const created = await apiFetch<CourseRef>('/courses', {
+        method: 'POST',
+        body: JSON.stringify({ programId: form.programId, code: courseForm.code, nameEn: courseForm.nameEn, nameTh: courseForm.nameTh || undefined }),
+      });
+      setCourses((prev) => [...prev, created]);
+      setForm((f) => ({ ...f, courseId: created.id }));
+      setShowCourseForm(false);
+    } catch (err) {
+      setCourseError(err instanceof Error ? err.message : 'Failed to create course');
+    } finally { setSavingCourse(false); }
+  }
+
   return (
     <div>
       <div className="rise" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', gap: 12, flexWrap: 'wrap', marginBottom: 14 }}>
@@ -371,10 +400,17 @@ function SubjectsTab({ isAdmin }: { isAdmin: boolean }) {
             </select>
           </F>
           <F label={`${t('subj.course')} *`}>
-            <select className="input" required value={form.courseId} onChange={(e) => setForm({ ...form, courseId: e.target.value })} disabled={!form.programId}>
-              <option value="" disabled>{t('subj.select')}</option>
-              {coursesForProgram.map((c) => <option key={c.id} value={c.id}>{c.code} — {c.nameEn}</option>)}
-            </select>
+            <div style={{ display: 'flex', gap: 6 }}>
+              <select className="input" required value={form.courseId} onChange={(e) => setForm({ ...form, courseId: e.target.value })} disabled={!form.programId} style={{ flex: 1 }}>
+                <option value="" disabled>{t('subj.select')}</option>
+                {coursesForProgram.map((c) => <option key={c.id} value={c.id}>{c.code} — {c.nameEn}</option>)}
+              </select>
+              <button type="button" className="glass hairline" disabled={!form.programId} onClick={openCourseForm}
+                title={t('subj.addCourse')} style={{ padding: '0 12px', borderRadius: 10, fontWeight: 700, fontSize: 15, cursor: form.programId ? 'pointer' : 'not-allowed' }}>+</button>
+            </div>
+            {form.programId && coursesForProgram.length === 0 && (
+              <div className="muted" style={{ fontSize: 12, marginTop: 4 }}>{t('subj.noCoursesHint')}</div>
+            )}
           </F>
           <F label={`${t('subj.code')} *`}><input className="input" required value={form.code} onChange={(e) => setForm({ ...form, code: e.target.value })} placeholder="NUR1103" /></F>
           <F label={`${t('subj.nameEn')} *`}><input className="input" required value={form.nameEn} onChange={(e) => setForm({ ...form, nameEn: e.target.value })} /></F>
@@ -383,6 +419,20 @@ function SubjectsTab({ isAdmin }: { isAdmin: boolean }) {
           <F label={t('subj.description')}><input className="input" value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} /></F>
           <button className="btn-primary" type="submit" disabled={saving} style={{ padding: 12, fontSize: 14.5 }}>{saving ? t('subj.saving') : editingId ? t('subj.save') : t('subj.create')}</button>
           {formError && <div className="chip chip-danger" style={{ gridColumn: '1 / -1', borderRadius: 12, padding: '9px 12px' }}>{formError}</div>}
+        </form>
+      )}
+
+      {showCourseForm && isAdmin && (
+        <form onSubmit={submitCourseForm} className="glass rise" style={{ padding: 20, marginBottom: 16, display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 12, alignItems: 'end', border: '1px solid var(--brand-orange)' }}>
+          <div style={{ gridColumn: '1 / -1', fontWeight: 650, fontSize: 14 }}>{t('subj.addCourse')}</div>
+          <F label={`${t('subj.courseCode')} *`}><input className="input" required value={courseForm.code} onChange={(e) => setCourseForm({ ...courseForm, code: e.target.value })} placeholder="NUR-FND" /></F>
+          <F label={`${t('subj.courseNameEn')} *`}><input className="input" required value={courseForm.nameEn} onChange={(e) => setCourseForm({ ...courseForm, nameEn: e.target.value })} /></F>
+          <F label={t('subj.courseNameTh')}><input className="input" value={courseForm.nameTh} onChange={(e) => setCourseForm({ ...courseForm, nameTh: e.target.value })} /></F>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button className="btn-primary" type="submit" disabled={savingCourse} style={{ padding: 12, fontSize: 14 }}>{savingCourse ? t('subj.saving') : t('subj.create')}</button>
+            <button type="button" className="glass hairline" onClick={() => setShowCourseForm(false)} style={{ padding: 12, borderRadius: 10, fontSize: 14, fontWeight: 600 }}>{t('subj.close')}</button>
+          </div>
+          {courseError && <div className="chip chip-danger" style={{ gridColumn: '1 / -1', borderRadius: 12, padding: '9px 12px' }}>{courseError}</div>}
         </form>
       )}
 
