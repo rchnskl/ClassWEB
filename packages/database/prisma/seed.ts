@@ -8,6 +8,7 @@
  */
 import { PrismaClient, SemesterType, DayOfWeek, Gender } from '@prisma/client';
 import bcrypt from 'bcryptjs';
+import { RUBRICS, GRADE_BANDS } from './rubrics.data';
 
 const prisma = new PrismaClient();
 
@@ -18,7 +19,7 @@ const RESOURCES = [
   'university', 'faculty', 'program', 'course', 'subject', 'section',
   'academicYear', 'semester', 'room', 'building',
   'student', 'lecturer', 'enrollment', 'attendance', 'timetable',
-  'note', 'report', 'notification', 'setting', 'audit', 'backup', 'user', 'role',
+  'note', 'assessment', 'report', 'notification', 'setting', 'audit', 'backup', 'user', 'role',
 ];
 const ACTIONS = ['create', 'read', 'update', 'delete', 'export'] as const;
 
@@ -27,7 +28,7 @@ const ROLE_MATRIX: Record<string, (resource: string, action: string) => boolean>
   ADMIN: () => true,
   // Lecturer — manage their teaching + attendance, read academic data.
   LECTURER: (r, a) => {
-    if (['attendance', 'timetable', 'note'].includes(r)) return true;
+    if (['attendance', 'timetable', 'note', 'assessment'].includes(r)) return true;
     if (r === 'report' && ['read', 'export'].includes(a)) return true;
     if (['section', 'student', 'lecturer', 'subject', 'course', 'enrollment'].includes(r) && a === 'read') return true;
     return false;
@@ -444,6 +445,41 @@ async function main() {
     }
   }
   console.log(`  ✓ ${notifDefs.length} sample notifications`);
+
+  // ---- Assessment: preload the 5 rubrics + default grade scheme -----------
+  for (const r of RUBRICS) {
+    const existing = await prisma.rubric.findFirst({ where: { universityId: university.id, code: r.code } });
+    if (existing) continue;
+    await prisma.rubric.create({
+      data: {
+        universityId: university.id, code: r.code, name: r.name,
+        weightPercent: r.weightPercent, order: r.order,
+        sections: {
+          create: r.sections.map((s, si) => ({
+            name: s.name, weightPercent: s.weightPercent, order: si,
+            items: {
+              create: s.items.map((text, ii) => ({
+                text, order: ii, maxRating: 5,
+                weightPercent: Math.round((100 / s.items.length) * 100) / 100,
+              })),
+            },
+          })),
+        },
+      },
+    });
+  }
+  console.log(`  ✓ ${RUBRICS.length} assessment rubrics`);
+
+  const existingScheme = await prisma.gradeScheme.findFirst({ where: { universityId: university.id, isDefault: true } });
+  if (!existingScheme) {
+    await prisma.gradeScheme.create({
+      data: {
+        universityId: university.id, name: 'Default', isDefault: true,
+        bands: { create: GRADE_BANDS.map((b, i) => ({ ...b, order: i })) },
+      },
+    });
+  }
+  console.log(`  ✓ default grade scheme (${GRADE_BANDS.length} bands)`);
 
   console.log('✅ Seed complete.');
 }

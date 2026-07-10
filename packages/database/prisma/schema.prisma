@@ -241,6 +241,9 @@ model University {
   calendarEntries CalendarEntry[]
   studentNotes    StudentNote[]
   reports         Report[]
+  rubrics         Rubric[]
+  evaluations     Evaluation[]
+  gradeSchemes    GradeScheme[]
 
   @@index([isActive])
   @@map("universities")
@@ -482,6 +485,7 @@ model Section {
   classSessions   ClassSession[]
   enrollments     Enrollment[]
   attendanceRules AttendanceRule[]
+  evaluations     Evaluation[]
 
   @@unique([subjectId, semesterId, sectionNo])
   @@index([universityId])
@@ -698,6 +702,7 @@ model Student {
   enrollments  Enrollment[]
   attendance   AttendanceRecord[]
   studentNotes StudentNote[]
+  evaluations  Evaluation[]
 
   @@unique([universityId, studentCode])
   @@index([universityId])
@@ -1296,4 +1301,149 @@ model Report {
 
   @@index([universityId, createdAt])
   @@map("reports")
+}
+
+// =============================================================================
+//  ASSESSMENT / GRADEBOOK — weighted rubrics (2-level: section% → item%),
+//  per-student × per-section evaluations rated 1–5, and an editable grade
+//  scheme (score bands → A–F) for cutting the combined grade.
+// =============================================================================
+
+enum EvaluationStatus {
+  DRAFT
+  SUBMITTED
+}
+
+/// A rubric template (e.g. "Clinical Evaluation 70%"). weightPercent is its
+/// share of the final grade; the set of a course's rubrics is meant to total 100.
+model Rubric {
+  id            String    @id @default(cuid())
+  universityId  String
+  code          String?
+  name          String
+  description   String?
+  /// Overall weight toward the final grade (e.g. 70).
+  weightPercent Float     @default(0)
+  order         Int       @default(0)
+  isActive      Boolean   @default(true)
+  metadata      Json?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  deletedAt     DateTime?
+
+  university  University      @relation(fields: [universityId], references: [id])
+  sections    RubricSection[]
+  evaluations Evaluation[]
+
+  @@index([universityId])
+  @@map("rubrics")
+}
+
+/// A weighted group of items within a rubric (e.g. "I. Nursing Performance 40%").
+/// Rubrics without natural groups use one section at 100%.
+model RubricSection {
+  id            String @id @default(cuid())
+  rubricId      String
+  name          String
+  /// Weight of this section within the rubric (sections sum ≤ 100).
+  weightPercent Float  @default(0)
+  order         Int    @default(0)
+
+  rubric Rubric       @relation(fields: [rubricId], references: [id], onDelete: Cascade)
+  items  RubricItem[]
+
+  @@index([rubricId])
+  @@map("rubric_sections")
+}
+
+/// A scoreable sub-item, rated 1..maxRating.
+model RubricItem {
+  id            String @id @default(cuid())
+  sectionId     String
+  text          String
+  /// Weight of this item within its section (items sum ≤ 100). Editable.
+  weightPercent Float  @default(0)
+  maxRating     Int    @default(5)
+  order         Int    @default(0)
+
+  section RubricSection     @relation(fields: [sectionId], references: [id], onDelete: Cascade)
+  scores  EvaluationScore[]
+
+  @@index([sectionId])
+  @@map("rubric_items")
+}
+
+/// One filled-in rubric for a student (optionally within a class section).
+model Evaluation {
+  id            String           @id @default(cuid())
+  universityId  String
+  rubricId      String
+  studentId     String
+  sectionId     String?
+  evaluatorId   String?
+  evaluatorName String?
+  status        EvaluationStatus @default(DRAFT)
+  /// Computed 0–100 weighted score for this rubric.
+  scorePercent  Float?
+  note          String?
+  createdAt     DateTime         @default(now())
+  updatedAt     DateTime         @updatedAt
+
+  university University        @relation(fields: [universityId], references: [id])
+  rubric     Rubric            @relation(fields: [rubricId], references: [id])
+  student    Student           @relation(fields: [studentId], references: [id])
+  section    Section?          @relation(fields: [sectionId], references: [id])
+  scores     EvaluationScore[]
+
+  @@unique([rubricId, studentId, sectionId])
+  @@index([universityId])
+  @@index([studentId])
+  @@index([sectionId])
+  @@map("evaluations")
+}
+
+model EvaluationScore {
+  id           String @id @default(cuid())
+  evaluationId String
+  rubricItemId String
+  rating       Int
+
+  evaluation Evaluation @relation(fields: [evaluationId], references: [id], onDelete: Cascade)
+  rubricItem RubricItem @relation(fields: [rubricItemId], references: [id])
+
+  @@unique([evaluationId, rubricItemId])
+  @@index([rubricItemId])
+  @@map("evaluation_scores")
+}
+
+/// Editable grade scheme: score bands → letter grade + GPA.
+model GradeScheme {
+  id           String   @id @default(cuid())
+  universityId String
+  name         String   @default("Default")
+  isDefault    Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  university University  @relation(fields: [universityId], references: [id])
+  bands      GradeBand[]
+
+  @@index([universityId])
+  @@map("grade_schemes")
+}
+
+model GradeBand {
+  id       String @id @default(cuid())
+  schemeId String
+  grade    String // "A", "A-", ...
+  gpa      Float
+  label    String // "Excellent", ...
+  /// Minimum combined score (0–100) to earn this grade. Editable per use.
+  minScore Float
+  order    Int    @default(0)
+
+  scheme GradeScheme @relation(fields: [schemeId], references: [id], onDelete: Cascade)
+
+  @@index([schemeId])
+  @@map("grade_bands")
 }

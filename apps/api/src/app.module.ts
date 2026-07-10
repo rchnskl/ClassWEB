@@ -10,6 +10,7 @@ import { UsersModule } from './users/users.module';
 import { DashboardModule } from './dashboard/dashboard.module';
 import { AnalyticsModule } from './analytics/analytics.module';
 import { ReportsModule } from './reports/reports.module';
+import { AssessmentModule } from './assessment/assessment.module';
 import { AcademicModule } from './academic/academic.module';
 import { StudentsModule } from './students/students.module';
 import { StudentNotesModule } from './student-notes/student-notes.module';
@@ -43,6 +44,7 @@ import { AllExceptionsFilter } from './common/filters/all-exceptions.filter';
     DashboardModule,
     AnalyticsModule,
     ReportsModule,
+    AssessmentModule,
     AcademicModule,
     StudentsModule,
     StudentNotesModule,

@@ -6,7 +6,7 @@ import { useI18n } from '@/lib/i18n';
 import { useUI } from '@/lib/ui';
 import {
   IconGrid, IconStudents, IconTeacher, IconBook, IconCalendar,
-  IconCheck, IconReport, IconSettings,
+  IconCheck, IconReport, IconSettings, IconGrade,
 } from './icons';
 
 const NAV = [
@@ -16,6 +16,7 @@ const NAV = [
   { key: 'nav.sections', icon: IconBook, href: '/sections', id: 'Sections' },
   { key: 'nav.timetable', icon: IconCalendar, href: '/timetable', id: 'Timetable' },
   { key: 'nav.attendance', icon: IconCheck, href: '/attendance', id: 'Attendance' },
+  { key: 'nav.assessment', icon: IconGrade, href: '/assessment', id: 'Assessment' },
   { key: 'nav.reports', icon: IconReport, href: '/reports', id: 'Reports' },
   { key: 'nav.settings', icon: IconSettings, href: '/settings', id: 'Settings' },
 ];
