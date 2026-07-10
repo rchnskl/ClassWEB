@@ -61,12 +61,19 @@ function GeneralTab() {
   const [rows, setRows] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
-    const data = await apiFetch<SettingRow[]>('/settings');
-    const map: Record<string, string> = {};
-    for (const r of data) map[r.key] = String(r.value ?? '');
-    setRows(map);
+    setLoadError(null);
+    try {
+      const data = await apiFetch<SettingRow[]>('/settings');
+      const map: Record<string, string> = {};
+      for (const r of data) map[r.key] = String(r.value ?? '');
+      setRows(map);
+    } catch (err) {
+      setLoadError(err instanceof Error ? err.message : 'Failed to load settings');
+    }
   }, []);
 
   useEffect(() => { void load(); }, [load]);
@@ -78,6 +85,7 @@ function GeneralTab() {
 
   async function save() {
     setSaving(true);
+    setError(null);
     try {
       await apiFetch('/settings', {
         method: 'PATCH',
@@ -88,7 +96,18 @@ function GeneralTab() {
         }),
       });
       setSaved(true);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to save settings');
     } finally { setSaving(false); }
+  }
+
+  if (loadError) {
+    return (
+      <div className="glass rise" style={{ padding: 24 }}>
+        <div className="chip chip-danger" style={{ display: 'block', marginBottom: 12 }}>{loadError}</div>
+        <button onClick={load} className="glass hairline" style={{ padding: '9px 16px', borderRadius: 12, fontSize: 13.5, fontWeight: 600 }}>{t('common.retry')}</button>
+      </div>
+    );
   }
 
   return (
@@ -120,6 +139,7 @@ function GeneralTab() {
       <button className="btn-primary" onClick={save} disabled={saving} style={{ padding: '11px 22px', fontSize: 14.5, marginTop: 6 }}>
         {saving ? t('set.saving') : saved ? `✓ ${t('set.saved')}` : t('set.save')}
       </button>
+      {error && <div className="chip chip-danger" style={{ display: 'block', marginTop: 12 }}>{error}</div>}
     </div>
   );
 }
@@ -164,8 +184,15 @@ function AttendanceTab() {
   const [rule, setRule] = useState<AttendanceRule | null>(null);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
-  useEffect(() => { apiFetch<AttendanceRule>('/settings/attendance-rule').then(setRule).catch(() => {}); }, []);
+  const load = useCallback(() => {
+    setLoadError(null);
+    apiFetch<AttendanceRule>('/settings/attendance-rule').then(setRule)
+      .catch((err) => setLoadError(err instanceof Error ? err.message : 'Failed to load'));
+  }, []);
+  useEffect(() => { load(); }, [load]);
 
   function set<K extends keyof AttendanceRule>(key: K, value: AttendanceRule[K]) {
     setRule((prev) => (prev ? { ...prev, [key]: value } : prev));
@@ -175,14 +202,25 @@ function AttendanceTab() {
   async function save() {
     if (!rule) return;
     setSaving(true);
+    setError(null);
     try {
       const { id, ...dto } = rule;
       void id;
       await apiFetch('/settings/attendance-rule', { method: 'PATCH', body: JSON.stringify(dto) });
       setSaved(true);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to save attendance rule');
     } finally { setSaving(false); }
   }
 
+  if (loadError) {
+    return (
+      <div className="glass rise" style={{ padding: 24 }}>
+        <div className="chip chip-danger" style={{ display: 'block', marginBottom: 12 }}>{loadError}</div>
+        <button onClick={load} className="glass hairline" style={{ padding: '9px 16px', borderRadius: 12, fontSize: 13.5, fontWeight: 600 }}>{t('common.retry')}</button>
+      </div>
+    );
+  }
   if (!rule) return <div className="glass rise muted" style={{ padding: 24 }}>{t('common.loading')}</div>;
 
   return (
@@ -223,6 +261,7 @@ function AttendanceTab() {
       <button className="btn-primary" onClick={save} disabled={saving} style={{ padding: '11px 22px', fontSize: 14.5, marginTop: 6 }}>
         {saving ? t('set.saving') : saved ? `✓ ${t('set.saved')}` : t('set.save')}
       </button>
+      {error && <div className="chip chip-danger" style={{ display: 'block', marginTop: 12 }}>{error}</div>}
     </div>
   );
 }
@@ -249,6 +288,8 @@ function UsersTab() {
   const [linkableLecturers, setLinkableLecturers] = useState<LinkableRef[]>([]);
   const [linkableStudents, setLinkableStudents] = useState<LinkableRef[]>([]);
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
 
   const [showCreate, setShowCreate] = useState(false);
   const [form, setForm] = useState({ email: '', roleCode: 'LECTURER', linkType: 'none', linkId: '' });
@@ -258,16 +299,21 @@ function UsersTab() {
   const [copied, setCopied] = useState(false);
 
   const load = useCallback(async () => {
-    const [u, r, ll, ls] = await Promise.all([
-      apiFetch<{ items: UserRow[] }>('/users'),
-      apiFetch<RoleRef[]>('/users/roles'),
-      apiFetch<LinkableRef[]>('/users/linkable-lecturers'),
-      apiFetch<LinkableRef[]>('/users/linkable-students'),
-    ]);
-    setUsers(u.items);
-    setRoles(r);
-    setLinkableLecturers(ll);
-    setLinkableStudents(ls);
+    setLoadError(null);
+    try {
+      const [u, r, ll, ls] = await Promise.all([
+        apiFetch<{ items: UserRow[] }>('/users'),
+        apiFetch<RoleRef[]>('/users/roles'),
+        apiFetch<LinkableRef[]>('/users/linkable-lecturers'),
+        apiFetch<LinkableRef[]>('/users/linkable-students'),
+      ]);
+      setUsers(u.items);
+      setRoles(r);
+      setLinkableLecturers(ll);
+      setLinkableStudents(ls);
+    } catch (err) {
+      setLoadError(err instanceof Error ? err.message : 'Failed to load users');
+    }
   }, []);
   useEffect(() => { void load(); }, [load]);
 
@@ -303,9 +349,12 @@ function UsersTab() {
   async function resetPassword(u: UserRow) {
     if (!window.confirm(t('users.confirmReset'))) return;
     setBusyId(u.id);
+    setActionError(null);
     try {
       const res = await apiFetch<{ tempPassword: string }>(`/users/${u.id}/reset-password`, { method: 'POST' });
       window.alert(`${t('users.tempPassword')}: ${res.tempPassword}`);
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : 'Failed to reset password');
     } finally { setBusyId(null); }
   }
 
@@ -313,14 +362,26 @@ function UsersTab() {
     const suspending = u.status !== 'SUSPENDED';
     if (suspending && !window.confirm(t('users.confirmSuspend'))) return;
     setBusyId(u.id);
+    setActionError(null);
     try {
       await apiFetch(`/users/${u.id}`, { method: 'PATCH', body: JSON.stringify({ status: suspending ? 'SUSPENDED' : 'ACTIVE' }) });
       await load();
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : 'Failed to update user');
     } finally { setBusyId(null); }
   }
 
   const fmt = (iso: string) => new Date(iso).toLocaleString(lang === 'th' ? 'th-TH' : 'en-US', { dateStyle: 'medium', timeStyle: 'short' });
   const linkOptions = form.linkType === 'lecturer' ? linkableLecturers : form.linkType === 'student' ? linkableStudents : [];
+
+  if (loadError) {
+    return (
+      <div className="glass rise" style={{ padding: 24 }}>
+        <div className="chip chip-danger" style={{ display: 'block', marginBottom: 12 }}>{loadError}</div>
+        <button onClick={load} className="glass hairline" style={{ padding: '9px 16px', borderRadius: 12, fontSize: 13.5, fontWeight: 600 }}>{t('common.retry')}</button>
+      </div>
+    );
+  }
 
   return (
     <div>
@@ -328,6 +389,8 @@ function UsersTab() {
         <p className="muted" style={{ fontSize: 13, margin: 0, maxWidth: 520 }}>{t('users.hint')}</p>
         <button className="btn-primary" onClick={openCreate} style={{ padding: '10px 18px', fontSize: 14, whiteSpace: 'nowrap' }}>{t('users.add')}</button>
       </div>
+
+      {actionError && <div className="chip chip-danger" style={{ display: 'block', marginBottom: 16 }}>{actionError}</div>}
 
       <div className="glass rise" style={{ padding: 8, overflow: 'hidden' }}>
         <div style={{ overflowX: 'auto' }}>
@@ -452,13 +515,19 @@ function AuditTab() {
 
   useEffect(() => { apiFetch<AuditFacets>('/audit/facets').then(setFacets).catch(() => {}); }, []);
 
+  const [loadError, setLoadError] = useState<string | null>(null);
   const load = useCallback(async () => {
-    const qs = new URLSearchParams({ take: String(take), skip: String(skip) });
-    if (action) qs.set('action', action);
-    if (entityType) qs.set('entityType', entityType);
-    const data = await apiFetch<{ total: number; items: AuditItem[] }>(`/audit?${qs}`);
-    setItems(data.items);
-    setTotal(data.total);
+    setLoadError(null);
+    try {
+      const qs = new URLSearchParams({ take: String(take), skip: String(skip) });
+      if (action) qs.set('action', action);
+      if (entityType) qs.set('entityType', entityType);
+      const data = await apiFetch<{ total: number; items: AuditItem[] }>(`/audit?${qs}`);
+      setItems(data.items);
+      setTotal(data.total);
+    } catch (err) {
+      setLoadError(err instanceof Error ? err.message : 'Failed to load audit log');
+    }
   }, [action, entityType, skip]);
 
   useEffect(() => { void load(); }, [load]);
@@ -478,6 +547,13 @@ function AuditTab() {
         </select>
         <span className="muted" style={{ alignSelf: 'center', fontSize: 12.5 }}>{total} {t('set.audit.total')}</span>
       </div>
+
+      {loadError && (
+        <div className="glass rise" style={{ padding: 20, marginBottom: 14 }}>
+          <div className="chip chip-danger" style={{ display: 'block', marginBottom: 12 }}>{loadError}</div>
+          <button onClick={load} className="glass hairline" style={{ padding: '9px 16px', borderRadius: 12, fontSize: 13.5, fontWeight: 600 }}>{t('common.retry')}</button>
+        </div>
+      )}
 
       <div className="glass rise" style={{ padding: 8, overflow: 'hidden' }}>
         <div style={{ overflowX: 'auto' }}>
@@ -530,8 +606,14 @@ function BackupTab() {
   const [backups, setBackups] = useState<Backup[]>([]);
   const [creating, setCreating] = useState(false);
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
 
-  const load = useCallback(async () => { setBackups(await apiFetch<Backup[]>('/backups')); }, []);
+  const load = useCallback(async () => {
+    setLoadError(null);
+    try { setBackups(await apiFetch<Backup[]>('/backups')); }
+    catch (err) { setLoadError(err instanceof Error ? err.message : 'Failed to load backups'); }
+  }, []);
   useEffect(() => { void load(); }, [load]);
 
   const fmt = (iso: string) => new Date(iso).toLocaleString(lang === 'th' ? 'th-TH' : 'en-US', { dateStyle: 'medium', timeStyle: 'short' });
@@ -539,22 +621,38 @@ function BackupTab() {
 
   async function create() {
     setCreating(true);
+    setActionError(null);
     try { await apiFetch('/backups', { method: 'POST', body: JSON.stringify({}) }); await load(); }
+    catch (err) { setActionError(err instanceof Error ? err.message : 'Failed to create backup'); }
     finally { setCreating(false); }
   }
   async function remove(id: string) {
     if (!window.confirm(t('set.backup.confirmDelete'))) return;
     setBusyId(id);
+    setActionError(null);
     try { await apiFetch(`/backups/${id}`, { method: 'DELETE' }); await load(); }
+    catch (err) { setActionError(err instanceof Error ? err.message : 'Failed to delete backup'); }
     finally { setBusyId(null); }
   }
   async function restore(id: string) {
     if (!window.confirm(t('set.backup.confirmRestore'))) return;
     setBusyId(id);
+    setActionError(null);
     try {
       const res = await apiFetch<{ totalRows: number }>(`/backups/${id}/restore`, { method: 'POST' });
       window.alert(`${res.totalRows} ${t('set.backup.restoredRows')}`);
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : 'Failed to restore backup');
     } finally { setBusyId(null); }
+  }
+
+  if (loadError) {
+    return (
+      <div className="glass rise" style={{ padding: 24 }}>
+        <div className="chip chip-danger" style={{ display: 'block', marginBottom: 12 }}>{loadError}</div>
+        <button onClick={load} className="glass hairline" style={{ padding: '9px 16px', borderRadius: 12, fontSize: 13.5, fontWeight: 600 }}>{t('common.retry')}</button>
+      </div>
+    );
   }
 
   return (
@@ -565,6 +663,8 @@ function BackupTab() {
           {creating ? t('set.backup.creating') : t('set.backup.create')}
         </button>
       </div>
+
+      {actionError && <div className="chip chip-danger" style={{ display: 'block', marginBottom: 16 }}>{actionError}</div>}
 
       <div className="glass rise" style={{ padding: 8, overflow: 'hidden' }}>
         <div style={{ overflowX: 'auto' }}>

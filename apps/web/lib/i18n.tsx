@@ -463,6 +463,7 @@ const EN: Dict = {
   'common.of': 'of',
   'common.previous': 'Previous',
   'common.next': 'Next',
+  'common.retry': 'Retry',
 
   'set.title': 'System Settings',
   'set.subtitle': 'General · attendance policy · audit log · backup & restore',
@@ -974,6 +975,7 @@ const TH: Dict = {
   'common.of': 'จาก',
   'common.previous': 'ก่อนหน้า',
   'common.next': 'ถัดไป',
+  'common.retry': 'ลองใหม่',
 
   'set.title': 'ตั้งค่าระบบ',
   'set.subtitle': 'ตั้งค่าทั่วไป · นโยบายการเข้าเรียน · บันทึกการใช้งาน · สำรอง/กู้คืนข้อมูล',
