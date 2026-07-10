@@ -51,3 +51,6 @@ export const IconBell = (p: SVGProps<SVGSVGElement>) => (
 export const IconLogout = (p: SVGProps<SVGSVGElement>) => (
   <svg {...base(p)}><path d="M15 4h3.5A1.5 1.5 0 0 1 20 5.5v13a1.5 1.5 0 0 1-1.5 1.5H15" /><path d="M10 12h10M17 9l3 3-3 3" /></svg>
 );
+export const IconMenu = (p: SVGProps<SVGSVGElement>) => (
+  <svg {...base(p)}><path d="M3 6h18M3 12h18M3 18h18" /></svg>
+);

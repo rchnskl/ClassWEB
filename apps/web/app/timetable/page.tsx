@@ -136,9 +136,9 @@ export default function TimetablePage() {
   const todayDow = DAYS[(new Date().getDay() + 6) % 7];
 
   return (
-    <div style={{ display: 'flex', gap: 16, padding: 16, maxWidth: 1440, margin: '0 auto' }}>
+    <div className="app-shell">
       <Sidebar active="Timetable" />
-      <div style={{ flex: 1, minWidth: 0 }}>
+      <div className="app-main">
         <Topbar email={email} />
 
         <div className="rise" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', gap: 12, flexWrap: 'wrap', marginBottom: 16 }}>
@@ -159,7 +159,7 @@ export default function TimetablePage() {
         {showForm && (
           <form onSubmit={submitEvent} className="glass rise" style={{ padding: 18, marginBottom: 16, display: 'flex', flexDirection: 'column', gap: 12 }}>
             {/* Row 1: what */}
-            <div style={{ display: 'grid', gridTemplateColumns: '160px 1fr 200px', gap: 12 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 12 }}>
               <Field label={t('tt.eventType')}>
                 <select className="input" value={form.type} onChange={(e) => setForm({ ...form, type: e.target.value })}>
                   <option value="PERSONAL">{t('tt.type.PERSONAL')}</option>
@@ -172,7 +172,7 @@ export default function TimetablePage() {
               <Field label={t('tt.location')}><input className="input" value={form.location} onChange={(e) => setForm({ ...form, location: e.target.value })} placeholder="—" /></Field>
             </div>
             {/* Row 2: when (start date/time → end date/time) */}
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr) auto', gap: 12, alignItems: 'end' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 12, alignItems: 'end' }}>
               <Field label={t('tt.startDate')}><input className="input" type="date" required value={form.startDate} onChange={(e) => setForm({ ...form, startDate: e.target.value, endDate: e.target.value > form.endDate ? e.target.value : form.endDate })} /></Field>
               <Field label={t('tt.startTime')}><input className="input" type="time" required value={form.startTime} onChange={(e) => setForm({ ...form, startTime: e.target.value })} /></Field>
               <Field label={t('tt.endDate')}><input className="input" type="date" required value={form.endDate} min={form.startDate} onChange={(e) => setForm({ ...form, endDate: e.target.value })} /></Field>

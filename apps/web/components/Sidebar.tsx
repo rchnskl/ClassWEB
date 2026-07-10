@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import Logo from './Logo';
 import { useI18n } from '@/lib/i18n';
+import { useUI } from '@/lib/ui';
 import {
   IconGrid, IconStudents, IconTeacher, IconBook, IconCalendar,
   IconCheck, IconReport, IconSettings,
@@ -21,9 +22,13 @@ const NAV = [
 
 export default function Sidebar({ active = 'Dashboard' }: { active?: string }) {
   const { t } = useI18n();
+  const { sidebarOpen, setSidebarOpen } = useUI();
+  const close = () => setSidebarOpen(false);
   return (
+    <>
+    <div className={`sidebar-backdrop${sidebarOpen ? ' open' : ''}`} onClick={close} />
     <aside
-      className="glass"
+      className={`glass app-sidebar${sidebarOpen ? ' open' : ''}`}
       style={{
         width: 250, padding: 18, display: 'flex', flexDirection: 'column', gap: 6,
         position: 'sticky', top: 16, height: 'calc(100vh - 32px)',
@@ -43,7 +48,7 @@ export default function Sidebar({ active = 'Dashboard' }: { active?: string }) {
         {NAV.map((item) => {
           const Icon = item.icon;
           return (
-            <Link key={item.id} href={item.href} className={`nav-item${item.id === active ? ' active' : ''}`}>
+            <Link key={item.id} href={item.href} onClick={close} className={`nav-item${item.id === active ? ' active' : ''}`}>
               <Icon />
               <span>{t(item.key)}</span>
             </Link>
@@ -56,5 +61,6 @@ export default function Sidebar({ active = 'Dashboard' }: { active?: string }) {
         <div className="muted" style={{ fontSize: 11.5, marginTop: 2 }}>{t('nav.semester')}</div>
       </div>
     </aside>
+    </>
   );
 }

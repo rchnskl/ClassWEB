@@ -77,9 +77,9 @@ export default function AttendancePage() {
   function pickSession(id: string) { setSelected(id); void loadState(id); }
 
   return (
-    <div style={{ display: 'flex', gap: 16, padding: 16, maxWidth: 1440, margin: '0 auto' }}>
+    <div className="app-shell">
       <Sidebar active="Attendance" />
-      <div style={{ flex: 1, minWidth: 0 }}>
+      <div className="app-main">
         <Topbar email={email} />
 
         <div className="rise" style={{ marginBottom: 16 }}>
@@ -106,7 +106,7 @@ export default function AttendancePage() {
             </div>
 
             {state && (
-              <div style={{ display: 'grid', gridTemplateColumns: '320px 1fr', gap: 16, alignItems: 'start' }}>
+              <div className="grid-sidebar">
                 {/* QR / open panel */}
                 <div className="glass rise" style={{ padding: 22, textAlign: 'center', position: 'sticky', top: 16 }}>
                   {state.open ? (

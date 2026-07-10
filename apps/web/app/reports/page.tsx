@@ -54,9 +54,9 @@ export default function ReportsPage() {
   const denom = tot ? Math.max(1, tot.records) : 1;
 
   return (
-    <div style={{ display: 'flex', gap: 16, padding: 16, maxWidth: 1440, margin: '0 auto' }}>
+    <div className="app-shell">
       <Sidebar active="Reports" />
-      <div style={{ flex: 1, minWidth: 0 }}>
+      <div className="app-main">
         <Topbar email={email} />
 
         <div className="rise" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', gap: 12, flexWrap: 'wrap', marginBottom: 18 }}>
@@ -79,7 +79,7 @@ export default function ReportsPage() {
         ) : (
           <>
             {/* Top: overall rate + breakdown + risk tiers */}
-            <div style={{ display: 'grid', gridTemplateColumns: '260px 1fr', gap: 16, marginBottom: 16 }}>
+            <div className="grid-sidebar" style={{ marginBottom: 16 }}>
               <div className="glass rise" style={{ padding: 22, textAlign: 'center' }}>
                 <div className="muted" style={{ fontSize: 12.5, fontWeight: 600 }}>{t('rep.overallRate')}</div>
                 <div style={{ fontSize: 46, fontWeight: 800, letterSpacing: -1.5, margin: '6px 0', color: 'var(--brand)' }}>{data.overallRate ?? '—'}%</div>
@@ -105,7 +105,7 @@ export default function ReportsPage() {
               </div>
             </div>
 
-            <div style={{ display: 'grid', gridTemplateColumns: '1.5fr 1fr', gap: 16 }}>
+            <div className="grid-2">
               {/* At-risk list */}
               <div className="glass rise" style={{ padding: 20 }}>
                 <h2 style={{ fontSize: 16.5, fontWeight: 700, margin: '0 0 14px' }}>⚠️ {t('rep.atRisk')}</h2>

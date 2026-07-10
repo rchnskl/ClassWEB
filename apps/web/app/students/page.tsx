@@ -109,10 +109,10 @@ export default function StudentsPage() {
   const pages = Math.max(1, Math.ceil(total / PAGE));
 
   return (
-    <div style={{ display: 'flex', gap: 16, padding: 16, maxWidth: 1440, margin: '0 auto' }}>
+    <div className="app-shell">
       <Sidebar active="Students" />
 
-      <div style={{ flex: 1, minWidth: 0 }}>
+      <div className="app-main">
         <Topbar email={email} />
 
         <div className="rise" style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', marginBottom: 18, gap: 12, flexWrap: 'wrap' }}>

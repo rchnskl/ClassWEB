@@ -4,22 +4,33 @@ import { useRouter } from 'next/navigation';
 import ThemeToggle from './ThemeToggle';
 import LanguageToggle from './LanguageToggle';
 import NotificationBell from './NotificationBell';
-import { IconSearch, IconLogout } from './icons';
+import { IconSearch, IconLogout, IconMenu } from './icons';
 import { clearSession } from '@/lib/api';
 import { useI18n } from '@/lib/i18n';
+import { useUI } from '@/lib/ui';
 
 export default function Topbar({ email }: { email: string }) {
   const router = useRouter();
   const { t } = useI18n();
+  const { setSidebarOpen } = useUI();
   const initials = email.slice(0, 2).toUpperCase();
 
   return (
     <header
       className="glass"
-      style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '12px 16px', marginBottom: 20 }}
+      style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 16px', marginBottom: 20, position: 'relative', zIndex: 50 }}
     >
+      <button
+        className="glass hairline icon-btn menu-btn"
+        style={{ width: 40, height: 40, flexShrink: 0, color: 'var(--text-1)' }}
+        aria-label="Menu"
+        onClick={() => setSidebarOpen(true)}
+      >
+        <IconMenu />
+      </button>
+
       <div
-        className="glass hairline"
+        className="glass hairline hide-mobile"
         style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '9px 14px', borderRadius: 14, flex: 1, maxWidth: 420, color: 'var(--text-2)' }}
       >
         <IconSearch />
@@ -38,7 +49,7 @@ export default function Topbar({ email }: { email: string }) {
         <div className="brand-gradient" style={{ width: 38, height: 38, borderRadius: 12, display: 'grid', placeItems: 'center', color: '#fff', fontWeight: 700, fontSize: 13.5 }}>
           {initials}
         </div>
-        <div style={{ lineHeight: 1.2 }}>
+        <div className="hide-mobile" style={{ lineHeight: 1.2 }}>
           <div style={{ fontSize: 13.5, fontWeight: 600 }}>{email}</div>
           <div className="muted" style={{ fontSize: 11.5 }}>{t('top.role')}</div>
         </div>

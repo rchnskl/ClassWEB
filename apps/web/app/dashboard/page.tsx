@@ -71,10 +71,10 @@ export default function DashboardPage() {
     summary?.attendanceRate != null ? `${summary.attendanceRate.toFixed(1)}%` : '—';
 
   return (
-    <div style={{ display: 'flex', gap: 16, padding: 16, maxWidth: 1440, margin: '0 auto' }}>
+    <div className="app-shell">
       <Sidebar active="Dashboard" />
 
-      <div style={{ flex: 1, minWidth: 0 }}>
+      <div className="app-main">
         <Topbar email={email} />
 
         <div className="rise" style={{ marginBottom: 20 }}>
@@ -106,7 +106,7 @@ export default function DashboardPage() {
           <StatCard label={t('dash.atRisk')} value={loading ? '…' : summary?.atRiskStudents ?? 0} icon={<IconReport />} hint={t('dash.below80')} tone="danger" delay={240} />
         </div>
 
-        <div style={{ display: 'grid', gridTemplateColumns: '1.6fr 1fr', gap: 16 }}>
+        <div className="grid-2">
           {/* Today's agenda — a to-do list pulled from the timetable + calendar */}
           <div className="glass rise" style={{ padding: 22, animationDelay: '160ms' }}>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
@@ -121,7 +121,7 @@ export default function DashboardPage() {
                   <div key={it.key} className="glass hairline" style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 14px', borderRadius: 12 }}>
                     <div style={{ fontFamily: 'ui-monospace, monospace', fontSize: 12.5, fontWeight: 700, color: 'var(--brand)', minWidth: 82 }}>{it.time}–{it.end}</div>
                     <div style={{ fontSize: 18 }}>{EVENT_ICON[it.kind] ?? '📌'}</div>
-                    <div style={{ flex: 1, minWidth: 0 }}>
+                    <div className="app-main">
                       <div style={{ fontWeight: 600, fontSize: 13.5, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{it.title}</div>
                       {it.sub && <div className="muted" style={{ fontSize: 11.5 }}>{it.sub}</div>}
                     </div>

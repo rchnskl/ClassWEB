@@ -29,6 +29,9 @@
   --glass-border: rgba(255, 255, 255, 0.75);
   --glass-hairline: rgba(38, 48, 63, 0.08);
   --glass-sheen: rgba(255, 255, 255, 0.55);
+  /* Opaque surface for popovers/dropdowns so page content never bleeds through */
+  --popover-bg: #ffffff;
+  --popover-hover: #f4f7fb;
   --shadow: 0 12px 34px -14px rgba(63, 78, 110, 0.28), 0 3px 10px -6px rgba(63, 78, 110, 0.16);
   --shadow-lg: 0 30px 70px -22px rgba(63, 78, 110, 0.4);
 
@@ -56,6 +59,8 @@
   --glass-border: rgba(255, 255, 255, 0.12);
   --glass-hairline: rgba(255, 255, 255, 0.09);
   --glass-sheen: rgba(255, 255, 255, 0.14);
+  --popover-bg: #1a2133;
+  --popover-hover: #232c42;
   --shadow: 0 14px 40px -16px rgba(0, 0, 0, 0.72), 0 3px 12px -6px rgba(0, 0, 0, 0.6);
   --shadow-lg: 0 34px 80px -24px rgba(0, 0, 0, 0.85);
 
@@ -76,6 +81,8 @@
     --glass-border: rgba(255, 255, 255, 0.12);
     --glass-hairline: rgba(255, 255, 255, 0.09);
     --glass-sheen: rgba(255, 255, 255, 0.14);
+    --popover-bg: #1a2133;
+    --popover-hover: #232c42;
     --shadow: 0 14px 40px -16px rgba(0, 0, 0, 0.72), 0 3px 12px -6px rgba(0, 0, 0, 0.6);
     --shadow-lg: 0 34px 80px -24px rgba(0, 0, 0, 0.85);
     --blob-1: rgba(255, 138, 76, 0.34);
@@ -249,3 +256,38 @@ body {
   .aurora .blob, .nav-item.active svg, .floaty { animation: none !important; }
   .rise { animation: none; }
 }
+
+/* --------------------------------------------------------------------- */
+/* Responsive shell — off-canvas sidebar on small screens                */
+/* --------------------------------------------------------------------- */
+.app-shell { display: flex; gap: 16px; padding: 16px; max-width: 1440px; margin: 0 auto; }
+.app-main { flex: 1; min-width: 0; }
+.menu-btn { display: none; }
+.sidebar-backdrop { display: none; }
+
+@media (max-width: 900px) {
+  .app-shell { padding: 10px; gap: 0; }
+  .app-sidebar {
+    position: fixed !important;
+    left: 0; top: 0; bottom: 0;
+    height: 100vh !important;
+    width: 260px !important;
+    z-index: 1200 !important;
+    transform: translateX(-104%);
+    transition: transform 0.26s cubic-bezier(0.22, 1, 0.36, 1);
+    border-radius: 0 22px 22px 0 !important;
+  }
+  .app-sidebar.open { transform: translateX(0); }
+  .sidebar-backdrop.open {
+    display: block; position: fixed; inset: 0;
+    background: rgba(6, 10, 20, 0.5); backdrop-filter: blur(2px); z-index: 1150;
+  }
+  .menu-btn { display: grid; }
+  .hide-mobile { display: none !important; }
+  .grid-2, .grid-sidebar { grid-template-columns: 1fr !important; }
+  .app-main h1 { font-size: 22px !important; }
+}
+
+/* Two-column content grids that collapse to one column on mobile */
+.grid-2 { display: grid; grid-template-columns: 1.6fr 1fr; gap: 16px; }
+.grid-sidebar { display: grid; grid-template-columns: 300px 1fr; gap: 16px; align-items: start; }
