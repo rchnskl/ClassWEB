@@ -9,6 +9,14 @@ import { PrismaService } from '../prisma/prisma.service';
 export class AcademicService {
   constructor(private readonly prisma: PrismaService) {}
 
+  departments(universityId: string) {
+    return this.prisma.department.findMany({
+      where: { deletedAt: null, faculty: { universityId } },
+      select: { id: true, code: true, nameEn: true, nameTh: true, faculty: { select: { code: true, nameEn: true } } },
+      orderBy: { code: 'asc' },
+    });
+  }
+
   programs(universityId: string) {
     return this.prisma.program.findMany({
       where: { deletedAt: null, faculty: { universityId } },

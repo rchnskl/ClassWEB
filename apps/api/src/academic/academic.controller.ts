@@ -11,6 +11,13 @@ import { AuthenticatedUser } from '../common/authenticated-user';
 export class AcademicController {
   constructor(private readonly academic: AcademicService) {}
 
+  @Get('departments')
+  @Permissions('faculty:read')
+  @ApiOperation({ summary: 'List departments in the tenant' })
+  departments(@CurrentUser() user: AuthenticatedUser) {
+    return this.academic.departments(user.universityId);
+  }
+
   @Get('programs')
   @Permissions('program:read')
   @ApiOperation({ summary: 'List programs in the tenant' })

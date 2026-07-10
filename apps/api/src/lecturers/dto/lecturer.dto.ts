@@ -1,5 +1,5 @@
-import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { IsEmail, IsOptional, IsString, MinLength } from 'class-validator';
+import { ApiProperty, ApiPropertyOptional, PartialType } from '@nestjs/swagger';
+import { IsBoolean, IsEmail, IsOptional, IsString, MinLength } from 'class-validator';
 import { PaginationQueryDto } from '../../common/dto/pagination.dto';
 
 export class CreateLecturerDto {
@@ -45,3 +45,11 @@ export class CreateLecturerDto {
 }
 
 export class QueryLecturerDto extends PaginationQueryDto {}
+
+// All fields optional for PATCH; employeeCode can be updated too.
+export class UpdateLecturerDto extends PartialType(CreateLecturerDto) {
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsBoolean()
+  isActive?: boolean;
+}

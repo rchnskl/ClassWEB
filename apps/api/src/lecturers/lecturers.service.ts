@@ -1,7 +1,7 @@
 import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
-import { CreateLecturerDto, QueryLecturerDto } from './dto/lecturer.dto';
+import { CreateLecturerDto, QueryLecturerDto, UpdateLecturerDto } from './dto/lecturer.dto';
 import { Paginated } from '../common/dto/pagination.dto';
 
 @Injectable()
@@ -70,5 +70,48 @@ export class LecturersService {
       },
       select: this.select,
     });
+  }
+
+  async update(universityId: string, id: string, dto: UpdateLecturerDto) {
+    await this.get(universityId, id); // ensures existence + tenant ownership
+
+    if (dto.departmentId) {
+      const dept = await this.prisma.department.findFirst({
+        where: { id: dto.departmentId, faculty: { universityId } },
+        select: { id: true },
+      });
+      if (!dept) throw new BadRequestException('Department does not exist in this tenant');
+    }
+    if (dto.employeeCode) {
+      const clash = await this.prisma.lecturer.findFirst({
+        where: { universityId, employeeCode: dto.employeeCode, deletedAt: null, NOT: { id } },
+        select: { id: true },
+      });
+      if (clash) throw new ConflictException(`Employee code ${dto.employeeCode} already exists`);
+    }
+
+    return this.prisma.lecturer.update({
+      where: { id },
+      data: {
+        ...(dto.employeeCode !== undefined && { employeeCode: dto.employeeCode }),
+        ...(dto.nameEn !== undefined && { nameEn: dto.nameEn }),
+        ...(dto.nameTh !== undefined && { nameTh: dto.nameTh }),
+        ...(dto.position !== undefined && { position: dto.position }),
+        ...(dto.email !== undefined && { email: dto.email }),
+        ...(dto.phone !== undefined && { phone: dto.phone }),
+        ...(dto.office !== undefined && { office: dto.office }),
+        ...(dto.isActive !== undefined && { isActive: dto.isActive }),
+        ...(dto.departmentId !== undefined && {
+          department: dto.departmentId ? { connect: { id: dto.departmentId } } : { disconnect: true },
+        }),
+      },
+      select: this.select,
+    });
+  }
+
+  async remove(universityId: string, id: string) {
+    await this.get(universityId, id);
+    await this.prisma.lecturer.update({ where: { id }, data: { deletedAt: new Date(), isActive: false } });
+    return { id, deleted: true };
   }
 }
