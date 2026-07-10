@@ -1,0 +1,64 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+env:
+  DATABASE_URL: postgresql://classweb:classweb@localhost:5432/classweb?schema=public
+  JWT_ACCESS_SECRET: ci-access-secret-0123456789abcdef
+  JWT_REFRESH_SECRET: ci-refresh-secret-0123456789abcdef
+
+jobs:
+  api:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: classweb
+          POSTGRES_PASSWORD: classweb
+          POSTGRES_DB: classweb
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U classweb"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - name: Generate Prisma client
+        run: npm run db:generate
+      - name: Apply all migrations to a real Postgres instance
+        run: npm run migrate:deploy -w @classweb/database
+      - name: Seed (proves seed.ts runs cleanly against a fresh schema)
+        run: npm run db:seed
+      - name: Lint
+        run: npm run lint -w @classweb/api
+      - name: Build
+        run: npm run build -w @classweb/api
+      - name: Unit tests
+        run: npm test -w @classweb/api
+
+  web:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - name: Lint
+        run: npm run lint -w @classweb/web
+      - name: Type-check
+        run: npx tsc --noEmit -p apps/web/tsconfig.json
+      - name: Build
+        run: npm run build -w @classweb/web
