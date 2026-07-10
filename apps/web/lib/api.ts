@@ -105,6 +105,7 @@ export interface MeResponse {
   id: string;
   email: string;
   status: string;
+  lineUserId?: string | null;
   roles: { role: { code: string; nameEn: string; nameTh?: string | null } }[];
   lecturer?: { nameEn: string; nameTh?: string | null } | null;
   student?: { nameEn: string; nameTh?: string | null } | null;

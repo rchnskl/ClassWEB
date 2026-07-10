@@ -2,6 +2,9 @@ import { Injectable } from '@nestjs/common';
 import { NotificationChannel, Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { EmailSender } from './email.sender';
+import { LineSender } from './line.sender';
+import { PushSender } from './push.sender';
+import { SubscribePushDto } from './dto/push-subscription.dto';
 
 interface NotifyInput {
   universityId: string;
@@ -20,6 +23,8 @@ export class NotificationsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly email: EmailSender,
+    private readonly line: LineSender,
+    private readonly push: PushSender,
   ) {}
 
   /**
@@ -50,7 +55,49 @@ export class NotificationsService {
         data: { status: res.sent ? 'SENT' : 'FAILED', sentAt: res.sent ? new Date() : null, payload: { reason: res.reason } },
       });
     }
+
+    if (channel === 'LINE' && input.userId) {
+      const user = await this.prisma.user.findUnique({ where: { id: input.userId }, select: { lineUserId: true } });
+      if (user?.lineUserId) {
+        const res = await this.line.send(user.lineUserId, `${input.title}\n${input.body ?? ''}`.trim());
+        await this.prisma.notification.update({
+          where: { id: record.id },
+          data: { status: res.sent ? 'SENT' : 'FAILED', sentAt: res.sent ? new Date() : null, payload: { reason: res.reason } },
+        });
+      } else {
+        await this.prisma.notification.update({ where: { id: record.id }, data: { status: 'FAILED', payload: { reason: 'no_line_user_id' } } });
+      }
+    }
+
+    if (channel === 'PUSH' && input.userId) {
+      const res = await this.push.send(input.userId, input.title, input.body ?? input.title);
+      await this.prisma.notification.update({
+        where: { id: record.id },
+        data: { status: res.sent ? 'SENT' : 'FAILED', sentAt: res.sent ? new Date() : null, payload: { reason: res.reason } },
+      });
+    }
+
     return record;
+  }
+
+  // ---- Web Push subscription management ---------------------------------
+
+  vapidPublicKey() {
+    return { publicKey: this.push.publicKey, configured: this.push.configured };
+  }
+
+  async subscribePush(userId: string, dto: SubscribePushDto) {
+    await this.prisma.pushSubscription.upsert({
+      where: { endpoint: dto.endpoint },
+      update: { userId, p256dh: dto.keys.p256dh, auth: dto.keys.auth },
+      create: { userId, endpoint: dto.endpoint, p256dh: dto.keys.p256dh, auth: dto.keys.auth },
+    });
+    return { subscribed: true };
+  }
+
+  async unsubscribePush(userId: string, endpoint: string) {
+    await this.prisma.pushSubscription.deleteMany({ where: { userId, endpoint } });
+    return { subscribed: false };
   }
 
   private scope(universityId: string, userId: string): Prisma.NotificationWhereInput {

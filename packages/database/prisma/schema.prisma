@@ -642,6 +642,8 @@ model User {
   passwordHash String?
   status       UserStatus @default(ACTIVE)
   lastLoginAt  DateTime?
+  /// LINE Messaging API user id (obtained once the user links their LINE account); enables the LINE notification channel for this user.
+  lineUserId   String?
   metadata     Json?
   createdAt    DateTime   @default(now())
   updatedAt    DateTime   @updatedAt
@@ -655,6 +657,7 @@ model User {
   auditLogs                AuditLog[]
   notifications            Notification[]
   googleCalendarConnection GoogleCalendarConnection?
+  pushSubscriptions        PushSubscription[]
 
   @@unique([universityId, email])
   @@index([universityId])
@@ -1166,6 +1169,23 @@ model GoogleCalendarConnection {
   user User @relation(fields: [userId], references: [id])
 
   @@map("google_calendar_connections")
+}
+
+/// Web Push subscription (browser Push API). One row per browser/device the
+/// user has enabled notifications on; a user may have several.
+model PushSubscription {
+  id        String   @id @default(cuid())
+  userId    String
+  endpoint  String   @unique
+  p256dh    String
+  auth      String
+  userAgent String?
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@index([userId])
+  @@map("push_subscriptions")
 }
 
 // =============================================================================

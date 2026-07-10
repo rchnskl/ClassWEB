@@ -1,6 +1,7 @@
-import { Controller, Get, Param, Patch, Query } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Patch, Post, Query } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { NotificationsService } from './notifications.service';
+import { SubscribePushDto, UnsubscribePushDto } from './dto/push-subscription.dto';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { AuthenticatedUser } from '../common/authenticated-user';
 
@@ -33,5 +34,23 @@ export class NotificationsController {
   @ApiOperation({ summary: 'Mark all notifications read' })
   readAll(@CurrentUser() user: AuthenticatedUser) {
     return this.notifications.markAllRead(user.universityId, user.id);
+  }
+
+  @Get('push/vapid-public-key')
+  @ApiOperation({ summary: 'VAPID public key for Web Push subscription (and whether the channel is configured)' })
+  vapidPublicKey() {
+    return this.notifications.vapidPublicKey();
+  }
+
+  @Post('push/subscribe')
+  @ApiOperation({ summary: 'Register this browser/device for Web Push notifications' })
+  subscribePush(@CurrentUser() user: AuthenticatedUser, @Body() dto: SubscribePushDto) {
+    return this.notifications.subscribePush(user.id, dto);
+  }
+
+  @Delete('push/subscribe')
+  @ApiOperation({ summary: 'Unregister this browser/device from Web Push notifications' })
+  unsubscribePush(@CurrentUser() user: AuthenticatedUser, @Body() dto: UnsubscribePushDto) {
+    return this.notifications.unsubscribePush(user.id, dto.endpoint);
   }
 }

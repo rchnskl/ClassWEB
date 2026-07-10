@@ -1,6 +1,7 @@
-import { Controller, Get, Query } from '@nestjs/common';
+import { Body, Controller, Get, Patch, Query } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { UsersService } from './users.service';
+import { UpdateProfileDto } from './dto/update-profile.dto';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { Permissions } from '../common/decorators/permissions.decorator';
 import { AuthenticatedUser } from '../common/authenticated-user';
@@ -15,6 +16,12 @@ export class UsersController {
   @ApiOperation({ summary: 'Get the authenticated user profile' })
   me(@CurrentUser() user: AuthenticatedUser) {
     return this.usersService.findProfile(user.id);
+  }
+
+  @Patch('me')
+  @ApiOperation({ summary: 'Update self-editable profile fields (currently: lineUserId)' })
+  updateMe(@CurrentUser() user: AuthenticatedUser, @Body() dto: UpdateProfileDto) {
+    return this.usersService.updateProfile(user.id, dto);
   }
 
   @Get()

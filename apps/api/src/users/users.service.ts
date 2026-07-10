@@ -5,22 +5,33 @@ import { PrismaService } from '../prisma/prisma.service';
 export class UsersService {
   constructor(private readonly prisma: PrismaService) {}
 
+  private profileSelect = {
+    id: true,
+    email: true,
+    universityId: true,
+    status: true,
+    lastLoginAt: true,
+    lineUserId: true,
+    roles: { select: { role: { select: { code: true, nameEn: true, nameTh: true } } } },
+    lecturer: { select: { id: true, nameEn: true, nameTh: true, employeeCode: true } },
+    student: { select: { id: true, nameEn: true, nameTh: true, studentCode: true } },
+  } as const;
+
   async findProfile(userId: string) {
     const user = await this.prisma.user.findFirst({
       where: { id: userId, deletedAt: null },
-      select: {
-        id: true,
-        email: true,
-        universityId: true,
-        status: true,
-        lastLoginAt: true,
-        roles: { select: { role: { select: { code: true, nameEn: true, nameTh: true } } } },
-        lecturer: { select: { id: true, nameEn: true, nameTh: true, employeeCode: true } },
-        student: { select: { id: true, nameEn: true, nameTh: true, studentCode: true } },
-      },
+      select: this.profileSelect,
     });
     if (!user) throw new NotFoundException('User not found');
     return user;
+  }
+
+  async updateProfile(userId: string, dto: { lineUserId?: string }) {
+    return this.prisma.user.update({
+      where: { id: userId },
+      data: { ...(dto.lineUserId !== undefined && { lineUserId: dto.lineUserId || null }) },
+      select: this.profileSelect,
+    });
   }
 
   /**

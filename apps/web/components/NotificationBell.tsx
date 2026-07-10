@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { IconBell } from './icons';
+import NotificationChannelsModal from './NotificationChannelsModal';
 import { apiFetch, type NotificationItem } from '@/lib/api';
 import { useI18n } from '@/lib/i18n';
 
@@ -17,6 +18,7 @@ export default function NotificationBell() {
   const [items, setItems] = useState<NotificationItem[]>([]);
   const [unread, setUnread] = useState(0);
   const [pos, setPos] = useState<{ top: number; right: number; width: number } | null>(null);
+  const [showChannels, setShowChannels] = useState(false);
   const btnRef = useRef<HTMLButtonElement>(null);
 
   const load = useCallback(async () => {
@@ -122,8 +124,20 @@ export default function NotificationBell() {
                 ))}
               </div>
             )}
+            <button
+              onClick={() => { setOpen(false); setShowChannels(true); }}
+              className="glass hairline"
+              style={{ width: '100%', marginTop: 10, padding: '9px 12px', borderRadius: 12, fontSize: 12.5, fontWeight: 600, color: 'var(--text-1)', cursor: 'pointer' }}
+            >
+              ⚙️ {t('notif.settings')}
+            </button>
           </div>
         </>,
+        document.body,
+      )}
+
+      {showChannels && typeof document !== 'undefined' && createPortal(
+        <NotificationChannelsModal onClose={() => setShowChannels(false)} />,
         document.body,
       )}
     </>
