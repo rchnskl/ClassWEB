@@ -122,4 +122,12 @@ export class TokenService {
       data: { revokedAt: new Date() },
     });
   }
+
+  /** Revokes every active session for a user — used on password change/reset. */
+  async revokeAllForUser(userId: string): Promise<void> {
+    await this.prisma.refreshToken.updateMany({
+      where: { userId, revokedAt: null },
+      data: { revokedAt: new Date() },
+    });
+  }
 }

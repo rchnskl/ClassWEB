@@ -7,7 +7,7 @@ import Topbar from '@/components/Topbar';
 import { apiFetch, downloadFile } from '@/lib/api';
 import { useI18n } from '@/lib/i18n';
 
-type Tab = 'general' | 'attendance' | 'audit' | 'backup';
+type Tab = 'general' | 'attendance' | 'users' | 'audit' | 'backup';
 
 export default function SettingsPage() {
   const router = useRouter();
@@ -35,12 +35,14 @@ export default function SettingsPage() {
         <div className="tabbar rise" style={{ marginBottom: 16 }}>
           <button className={`tab ${tab === 'general' ? 'active' : ''}`} onClick={() => setTab('general')}>{t('set.tab.general')}</button>
           <button className={`tab ${tab === 'attendance' ? 'active' : ''}`} onClick={() => setTab('attendance')}>{t('set.tab.attendance')}</button>
+          <button className={`tab ${tab === 'users' ? 'active' : ''}`} onClick={() => setTab('users')}>{t('users.tab')}</button>
           <button className={`tab ${tab === 'audit' ? 'active' : ''}`} onClick={() => setTab('audit')}>{t('set.tab.audit')}</button>
           <button className={`tab ${tab === 'backup' ? 'active' : ''}`} onClick={() => setTab('backup')}>{t('set.tab.backup')}</button>
         </div>
 
         {tab === 'general' && <GeneralTab />}
         {tab === 'attendance' && <AttendanceTab />}
+        {tab === 'users' && <UsersTab />}
         {tab === 'audit' && <AuditTab />}
         {tab === 'backup' && <BackupTab />}
       </div>
@@ -221,6 +223,205 @@ function AttendanceTab() {
       <button className="btn-primary" onClick={save} disabled={saving} style={{ padding: '11px 22px', fontSize: 14.5, marginTop: 6 }}>
         {saving ? t('set.saving') : saved ? `✓ ${t('set.saved')}` : t('set.save')}
       </button>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// User accounts
+// ---------------------------------------------------------------------------
+
+interface UserRow {
+  id: string; email: string; status: 'ACTIVE' | 'INACTIVE' | 'SUSPENDED'; lastLoginAt: string | null;
+  roles: { role: { code: string; nameEn: string; nameTh: string | null } }[];
+  lecturer: { nameEn: string; nameTh: string | null; employeeCode: string } | null;
+  student: { nameEn: string; nameTh: string | null; studentCode: string } | null;
+}
+interface RoleRef { code: string; nameEn: string; nameTh: string | null }
+interface LinkableRef { id: string; nameEn: string; nameTh: string | null; employeeCode?: string; studentCode?: string }
+
+function UsersTab() {
+  const { t, lang } = useI18n();
+  const name = (en: string, th: string | null) => (lang === 'th' && th ? th : en);
+
+  const [users, setUsers] = useState<UserRow[]>([]);
+  const [roles, setRoles] = useState<RoleRef[]>([]);
+  const [linkableLecturers, setLinkableLecturers] = useState<LinkableRef[]>([]);
+  const [linkableStudents, setLinkableStudents] = useState<LinkableRef[]>([]);
+  const [busyId, setBusyId] = useState<string | null>(null);
+
+  const [showCreate, setShowCreate] = useState(false);
+  const [form, setForm] = useState({ email: '', roleCode: 'LECTURER', linkType: 'none', linkId: '' });
+  const [creating, setCreating] = useState(false);
+  const [createError, setCreateError] = useState<string | null>(null);
+  const [createdResult, setCreatedResult] = useState<{ email: string; tempPassword: string } | null>(null);
+  const [copied, setCopied] = useState(false);
+
+  const load = useCallback(async () => {
+    const [u, r, ll, ls] = await Promise.all([
+      apiFetch<{ items: UserRow[] }>('/users'),
+      apiFetch<RoleRef[]>('/users/roles'),
+      apiFetch<LinkableRef[]>('/users/linkable-lecturers'),
+      apiFetch<LinkableRef[]>('/users/linkable-students'),
+    ]);
+    setUsers(u.items);
+    setRoles(r);
+    setLinkableLecturers(ll);
+    setLinkableStudents(ls);
+  }, []);
+  useEffect(() => { void load(); }, [load]);
+
+  function openCreate() {
+    setForm({ email: '', roleCode: roles[0]?.code ?? 'LECTURER', linkType: 'none', linkId: '' });
+    setCreateError(null);
+    setCreatedResult(null);
+    setCopied(false);
+    setShowCreate(true);
+  }
+
+  async function submitCreate(e: React.FormEvent) {
+    e.preventDefault();
+    setCreating(true);
+    setCreateError(null);
+    try {
+      const body: Record<string, string> = { email: form.email, roleCode: form.roleCode };
+      if (form.linkType === 'lecturer' && form.linkId) body.lecturerId = form.linkId;
+      if (form.linkType === 'student' && form.linkId) body.studentId = form.linkId;
+      const res = await apiFetch<{ email: string; tempPassword: string }>('/users', { method: 'POST', body: JSON.stringify(body) });
+      setCreatedResult(res);
+      await load();
+    } catch (err) {
+      setCreateError(err instanceof Error ? err.message : 'Failed to create user');
+    } finally { setCreating(false); }
+  }
+
+  async function copyPassword() {
+    if (!createdResult) return;
+    try { await navigator.clipboard.writeText(createdResult.tempPassword); setCopied(true); } catch { /* ignore */ }
+  }
+
+  async function resetPassword(u: UserRow) {
+    if (!window.confirm(t('users.confirmReset'))) return;
+    setBusyId(u.id);
+    try {
+      const res = await apiFetch<{ tempPassword: string }>(`/users/${u.id}/reset-password`, { method: 'POST' });
+      window.alert(`${t('users.tempPassword')}: ${res.tempPassword}`);
+    } finally { setBusyId(null); }
+  }
+
+  async function toggleSuspend(u: UserRow) {
+    const suspending = u.status !== 'SUSPENDED';
+    if (suspending && !window.confirm(t('users.confirmSuspend'))) return;
+    setBusyId(u.id);
+    try {
+      await apiFetch(`/users/${u.id}`, { method: 'PATCH', body: JSON.stringify({ status: suspending ? 'SUSPENDED' : 'ACTIVE' }) });
+      await load();
+    } finally { setBusyId(null); }
+  }
+
+  const fmt = (iso: string) => new Date(iso).toLocaleString(lang === 'th' ? 'th-TH' : 'en-US', { dateStyle: 'medium', timeStyle: 'short' });
+  const linkOptions = form.linkType === 'lecturer' ? linkableLecturers : form.linkType === 'student' ? linkableStudents : [];
+
+  return (
+    <div>
+      <div className="glass rise" style={{ padding: '16px 20px', marginBottom: 16, display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 14, flexWrap: 'wrap' }}>
+        <p className="muted" style={{ fontSize: 13, margin: 0, maxWidth: 520 }}>{t('users.hint')}</p>
+        <button className="btn-primary" onClick={openCreate} style={{ padding: '10px 18px', fontSize: 14, whiteSpace: 'nowrap' }}>{t('users.add')}</button>
+      </div>
+
+      <div className="glass rise" style={{ padding: 8, overflow: 'hidden' }}>
+        <div style={{ overflowX: 'auto' }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 14 }}>
+            <thead>
+              <tr style={{ textAlign: 'left', color: 'var(--text-2)' }}>
+                <Th>{t('users.email')}</Th><Th>{t('users.name')}</Th><Th>{t('users.role')}</Th><Th>{t('users.status')}</Th><Th>{t('users.lastLogin')}</Th><Th> </Th>
+              </tr>
+            </thead>
+            <tbody>
+              {users.length === 0 ? (
+                <tr><td colSpan={6} style={{ padding: 40, textAlign: 'center' }} className="muted">{t('users.none')}</td></tr>
+              ) : users.map((u) => (
+                <tr key={u.id} style={{ borderTop: '1px solid var(--glass-hairline)' }}>
+                  <Td><span style={{ fontFamily: 'ui-monospace, monospace', fontSize: 13 }}>{u.email}</span></Td>
+                  <Td>
+                    {u.lecturer ? <span>{name(u.lecturer.nameEn, u.lecturer.nameTh)} <span className="muted" style={{ fontSize: 12 }}>({u.lecturer.employeeCode})</span></span>
+                      : u.student ? <span>{name(u.student.nameEn, u.student.nameTh)} <span className="muted" style={{ fontSize: 12 }}>({u.student.studentCode})</span></span>
+                      : <span className="muted">{t('users.unlinked')}</span>}
+                  </Td>
+                  <Td>{u.roles.map((r) => name(r.role.nameEn, r.role.nameTh)).join(', ') || '—'}</Td>
+                  <Td><span className={`chip ${u.status === 'ACTIVE' ? 'chip-success' : u.status === 'SUSPENDED' ? 'chip-danger' : 'chip-warning'}`}>{t(`users.status.${u.status}`)}</span></Td>
+                  <Td><span className="muted" style={{ fontSize: 12.5 }}>{u.lastLoginAt ? fmt(u.lastLoginAt) : t('users.never')}</span></Td>
+                  <Td>
+                    <div style={{ display: 'inline-flex', gap: 6 }}>
+                      <button onClick={() => resetPassword(u)} disabled={busyId === u.id} className="glass hairline" style={{ padding: '6px 12px', borderRadius: 10, fontSize: 12, fontWeight: 600 }}>
+                        {busyId === u.id ? '…' : t('users.resetPassword')}
+                      </button>
+                      <button onClick={() => toggleSuspend(u)} disabled={busyId === u.id} className={u.status === 'SUSPENDED' ? 'glass hairline' : 'btn-danger'} style={{ padding: '6px 12px', borderRadius: 10, fontSize: 12, fontWeight: 600 }}>
+                        {busyId === u.id ? '…' : u.status === 'SUSPENDED' ? t('users.reactivate') : t('users.suspend')}
+                      </button>
+                    </div>
+                  </Td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {showCreate && (
+        <div onClick={() => setShowCreate(false)} style={{ position: 'fixed', inset: 0, background: 'rgba(6,10,20,0.5)', backdropFilter: 'blur(3px)', zIndex: 1200, display: 'grid', placeItems: 'center', padding: 16 }}>
+          <div onClick={(e) => e.stopPropagation()} className="rise" style={{ width: 'min(440px, 100%)', maxHeight: '86vh', overflowY: 'auto', background: 'var(--popover-bg)', border: '1px solid var(--glass-hairline)', borderRadius: 18, boxShadow: 'var(--shadow-lg)', padding: 22 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
+              <h2 style={{ fontSize: 17, fontWeight: 700, margin: 0 }}>{createdResult ? t('users.createdTitle') : t('users.add')}</h2>
+              <button onClick={() => setShowCreate(false)} className="glass hairline icon-btn" style={{ width: 32, height: 32, fontSize: 17 }}>×</button>
+            </div>
+
+            {createdResult ? (
+              <div>
+                <p className="muted" style={{ fontSize: 13, margin: '0 0 14px' }}>{t('users.createdHint')}</p>
+                <div style={{ marginBottom: 4 }}>
+                  <span className="subtle" style={{ fontSize: 12.5, fontWeight: 600 }}>{createdResult.email}</span>
+                </div>
+                <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 16 }}>
+                  <code style={{ flex: 1, padding: '10px 12px', borderRadius: 10, background: 'var(--popover-hover)', fontSize: 15, fontWeight: 700, letterSpacing: 0.5 }}>{createdResult.tempPassword}</code>
+                  <button onClick={copyPassword} className="glass hairline" style={{ padding: '9px 14px', borderRadius: 10, fontSize: 12.5, fontWeight: 600 }}>{copied ? `✓ ${t('users.copied')}` : t('users.copy')}</button>
+                </div>
+                <button onClick={() => setShowCreate(false)} className="btn-primary" style={{ width: '100%', padding: 12, fontSize: 14.5 }}>{t('users.done')}</button>
+              </div>
+            ) : (
+              <form onSubmit={submitCreate}>
+                <Field label={`${t('users.email')} *`}>
+                  <input className="input" type="email" required value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} />
+                </Field>
+                <Field label={t('users.role')}>
+                  <select className="input" value={form.roleCode} onChange={(e) => setForm({ ...form, roleCode: e.target.value })}>
+                    {roles.map((r) => <option key={r.code} value={r.code}>{name(r.nameEn, r.nameTh)}</option>)}
+                  </select>
+                </Field>
+                <Field label={t('users.linkTo')}>
+                  <select className="input" value={form.linkType} onChange={(e) => setForm({ ...form, linkType: e.target.value, linkId: '' })}>
+                    <option value="none">{t('users.linkNone')}</option>
+                    <option value="lecturer">{t('users.linkLecturer')}</option>
+                    <option value="student">{t('users.linkStudent')}</option>
+                  </select>
+                </Field>
+                {form.linkType !== 'none' && (
+                  <Field label=" ">
+                    <select className="input" required value={form.linkId} onChange={(e) => setForm({ ...form, linkId: e.target.value })}>
+                      <option value="" disabled>—</option>
+                      {linkOptions.map((o) => <option key={o.id} value={o.id}>{name(o.nameEn, o.nameTh)} ({o.employeeCode ?? o.studentCode})</option>)}
+                    </select>
+                  </Field>
+                )}
+                {createError && <div className="chip chip-danger" style={{ display: 'block', marginBottom: 12 }}>{createError}</div>}
+                <button type="submit" disabled={creating} className="btn-primary" style={{ width: '100%', padding: 12, fontSize: 14.5, marginTop: 4 }}>
+                  {creating ? t('users.creating') : t('users.create')}
+                </button>
+              </form>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

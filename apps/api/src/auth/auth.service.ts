@@ -1,9 +1,10 @@
-import { Injectable, UnauthorizedException } from '@nestjs/common';
+import { BadRequestException, Injectable, UnauthorizedException } from '@nestjs/common';
 import * as bcrypt from 'bcryptjs';
 import { AuditAction } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { IssuedTokens, TokenService } from './token.service';
 import { LoginDto } from './dto/login.dto';
+import { ChangePasswordDto } from './dto/change-password.dto';
 
 interface RequestContext {
   ipAddress?: string | null;
@@ -73,6 +74,21 @@ export class AuthService {
 
   async refresh(refreshToken: string, ctx: RequestContext = {}): Promise<IssuedTokens> {
     return this.tokenService.rotate(refreshToken, ctx);
+  }
+
+  async changePassword(userId: string, dto: ChangePasswordDto): Promise<void> {
+    const user = await this.prisma.user.findFirst({ where: { id: userId, deletedAt: null } });
+    if (!user?.passwordHash) throw new UnauthorizedException('Account not found');
+
+    const ok = await bcrypt.compare(dto.currentPassword, user.passwordHash);
+    if (!ok) throw new BadRequestException('Current password is incorrect');
+
+    const passwordHash = await bcrypt.hash(dto.newPassword, 12);
+    await this.prisma.user.update({ where: { id: userId }, data: { passwordHash } });
+    await this.tokenService.revokeAllForUser(userId);
+    await this.prisma.auditLog.create({
+      data: { universityId: user.universityId, userId, action: AuditAction.UPDATE, entityType: 'User', entityId: userId, metadata: { action: 'password_change' } },
+    });
   }
 
   async logout(refreshToken: string, userId?: string, ctx: RequestContext = {}): Promise<void> {
