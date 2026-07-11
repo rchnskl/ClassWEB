@@ -5,6 +5,7 @@ import { CreateDepartmentDto, UpdateDepartmentDto } from './dto/department.dto';
 import { CreateCourseDto, UpdateCourseDto } from './dto/course.dto';
 import { CreateAcademicYearDto, UpdateAcademicYearDto } from './dto/academic-year.dto';
 import { CreateSemesterDto, UpdateSemesterDto } from './dto/semester.dto';
+import { CreateProgramDto, UpdateProgramDto } from './dto/program.dto';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { Permissions } from '../common/decorators/permissions.decorator';
 import { AuthenticatedUser } from '../common/authenticated-user';
@@ -76,6 +77,27 @@ export class AcademicController {
   @ApiOperation({ summary: 'List programs in the tenant' })
   programs(@CurrentUser() user: AuthenticatedUser) {
     return this.academic.programs(user.universityId);
+  }
+
+  @Post('programs')
+  @Permissions('program:create')
+  @ApiOperation({ summary: 'Create a program' })
+  createProgram(@CurrentUser() user: AuthenticatedUser, @Body() dto: CreateProgramDto) {
+    return this.academic.createProgram(user.universityId, dto);
+  }
+
+  @Patch('programs/:id')
+  @Permissions('program:update')
+  @ApiOperation({ summary: 'Update a program' })
+  updateProgram(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string, @Body() dto: UpdateProgramDto) {
+    return this.academic.updateProgram(user.universityId, id, dto);
+  }
+
+  @Delete('programs/:id')
+  @Permissions('program:delete')
+  @ApiOperation({ summary: 'Delete a program (blocked if courses/subjects/students are assigned)' })
+  removeProgram(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string) {
+    return this.academic.removeProgram(user.universityId, id);
   }
 
   @Get('academic-years')

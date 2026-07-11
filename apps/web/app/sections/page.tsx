@@ -8,7 +8,7 @@ import SectionDetailDrawer from '@/components/SectionDetailDrawer';
 import { apiFetch, type Paginated } from '@/lib/api';
 import { useI18n } from '@/lib/i18n';
 
-type Tab = 'subjects' | 'sections' | 'departments';
+type Tab = 'subjects' | 'sections' | 'departments' | 'programs';
 
 export default function SectionsPage() {
   const router = useRouter();
@@ -46,11 +46,13 @@ export default function SectionsPage() {
           <button className={`tab ${tab === 'sections' ? 'active' : ''}`} onClick={() => setTab('sections')}>{t('sec.tab.sections')}</button>
           <button className={`tab ${tab === 'subjects' ? 'active' : ''}`} onClick={() => setTab('subjects')}>{t('sec.tab.subjects')}</button>
           <button className={`tab ${tab === 'departments' ? 'active' : ''}`} onClick={() => setTab('departments')}>{t('dept.title')}</button>
+          <button className={`tab ${tab === 'programs' ? 'active' : ''}`} onClick={() => setTab('programs')}>{t('prog.title')}</button>
         </div>
 
         {tab === 'sections' && <SectionsTab isAdmin={isAdmin} userId={userId} />}
         {tab === 'subjects' && <SubjectsTab isAdmin={isAdmin} />}
         {tab === 'departments' && <DepartmentsTab isAdmin={isAdmin} />}
+        {tab === 'programs' && <ProgramsTab isAdmin={isAdmin} />}
       </div>
     </div>
   );
@@ -622,6 +624,156 @@ function DepartmentsTab({ isAdmin }: { isAdmin: boolean }) {
                         <button onClick={() => openEdit(d)} className="glass hairline" style={{ padding: '6px 12px', borderRadius: 10, fontSize: 12, fontWeight: 600 }}>✏️</button>
                         <button onClick={() => removeDept(d.id)} disabled={busyId === d.id} className="btn-danger" style={{ padding: '6px 12px', fontSize: 12 }}>
                           {busyId === d.id ? '…' : t('dept.delete')}
+                        </button>
+                      </div>
+                    )}
+                  </Td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Programs tab
+// ---------------------------------------------------------------------------
+
+interface ProgramRow {
+  id: string; code: string; nameEn: string; nameTh: string | null;
+  degreeType: string | null; durationYrs: number | null; totalCredits: number | null;
+  faculty: { id: string; code: string; nameEn: string };
+  _count: { courses: number; subjects: number; students: number };
+}
+
+const EMPTY_PROGRAM_FORM = { facultyId: '', code: '', nameEn: '', nameTh: '', degreeType: '', durationYrs: '', totalCredits: '' };
+
+function ProgramsTab({ isAdmin }: { isAdmin: boolean }) {
+  const { t, lang } = useI18n();
+  const name = (en: string, th: string | null) => (lang === 'th' && th ? th : en);
+
+  const [rows, setRows] = useState<ProgramRow[]>([]);
+  const [faculties, setFaculties] = useState<FacultyRef[]>([]);
+  const [showForm, setShowForm] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [form, setForm] = useState(EMPTY_PROGRAM_FORM);
+  const [saving, setSaving] = useState(false);
+  const [formError, setFormError] = useState<string | null>(null);
+  const [busyId, setBusyId] = useState<string | null>(null);
+
+  const load = useCallback(async () => { setRows(await apiFetch<ProgramRow[]>('/programs')); }, []);
+  useEffect(() => { void load(); }, [load]);
+
+  useEffect(() => {
+    if (rows.length && faculties.length === 0) {
+      const uniq = new Map(rows.map((r) => [r.faculty.id, r.faculty]));
+      setFaculties([...uniq.values()]);
+    }
+  }, [rows, faculties.length]);
+
+  function openCreate() {
+    setEditingId(null);
+    setForm(EMPTY_PROGRAM_FORM);
+    setFormError(null);
+    setShowForm(true);
+  }
+  function openEdit(row: ProgramRow) {
+    setEditingId(row.id);
+    setForm({
+      facultyId: row.faculty.id, code: row.code, nameEn: row.nameEn, nameTh: row.nameTh ?? '',
+      degreeType: row.degreeType ?? '', durationYrs: row.durationYrs != null ? String(row.durationYrs) : '',
+      totalCredits: row.totalCredits != null ? String(row.totalCredits) : '',
+    });
+    setFormError(null);
+    setShowForm(true);
+  }
+
+  async function submitForm(e: React.FormEvent) {
+    e.preventDefault();
+    setSaving(true);
+    setFormError(null);
+    try {
+      const body = {
+        ...form,
+        nameTh: form.nameTh || undefined,
+        degreeType: form.degreeType || undefined,
+        durationYrs: form.durationYrs ? Number(form.durationYrs) : undefined,
+        totalCredits: form.totalCredits ? Number(form.totalCredits) : undefined,
+      };
+      if (editingId) await apiFetch(`/programs/${editingId}`, { method: 'PATCH', body: JSON.stringify(body) });
+      else await apiFetch('/programs', { method: 'POST', body: JSON.stringify(body) });
+      setShowForm(false);
+      await load();
+    } catch (err) {
+      setFormError(err instanceof Error ? err.message : 'Failed to save program');
+    } finally { setSaving(false); }
+  }
+
+  async function removeProgram(id: string) {
+    if (!window.confirm(t('prog.confirmDelete'))) return;
+    setBusyId(id);
+    try { await apiFetch(`/programs/${id}`, { method: 'DELETE' }); await load(); }
+    catch (err) { window.alert(err instanceof Error ? err.message : 'Failed'); }
+    finally { setBusyId(null); }
+  }
+
+  return (
+    <div>
+      {isAdmin && (
+        <div className="rise" style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 14 }}>
+          <button className="btn-primary" onClick={() => (showForm ? setShowForm(false) : openCreate())} style={{ padding: '11px 18px', fontSize: 14 }}>
+            {showForm ? t('subj.close') : t('prog.add')}
+          </button>
+        </div>
+      )}
+
+      {showForm && isAdmin && (
+        <form onSubmit={submitForm} className="glass rise" style={{ padding: 20, marginBottom: 16, display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 12, alignItems: 'end' }}>
+          <F label={`${t('prog.code')} *`}><input className="input" required value={form.code} onChange={(e) => setForm({ ...form, code: e.target.value })} placeholder="BNS" /></F>
+          <F label={`${t('subj.nameEn')} *`}><input className="input" required value={form.nameEn} onChange={(e) => setForm({ ...form, nameEn: e.target.value })} placeholder="Bachelor of Nursing Science" /></F>
+          <F label={t('subj.nameTh')}><input className="input" value={form.nameTh} onChange={(e) => setForm({ ...form, nameTh: e.target.value })} /></F>
+          <F label={t('prog.degreeType')}><input className="input" value={form.degreeType} onChange={(e) => setForm({ ...form, degreeType: e.target.value })} placeholder="Bachelor" /></F>
+          <F label={t('prog.durationYrs')}><input type="number" min={1} max={10} className="input" value={form.durationYrs} onChange={(e) => setForm({ ...form, durationYrs: e.target.value })} /></F>
+          <F label={t('prog.totalCredits')}><input type="number" min={1} className="input" value={form.totalCredits} onChange={(e) => setForm({ ...form, totalCredits: e.target.value })} /></F>
+          {!editingId && faculties.length > 0 && (
+            <F label="Faculty *">
+              <select className="input" required value={form.facultyId} onChange={(e) => setForm({ ...form, facultyId: e.target.value })}>
+                <option value="" disabled>{t('subj.select')}</option>
+                {faculties.map((f) => <option key={f.id} value={f.id}>{f.code} — {f.nameEn}</option>)}
+              </select>
+            </F>
+          )}
+          <button className="btn-primary" type="submit" disabled={saving} style={{ padding: 12, fontSize: 14.5 }}>{saving ? t('subj.saving') : editingId ? t('subj.save') : t('subj.create')}</button>
+          {formError && <div className="chip chip-danger" style={{ gridColumn: '1 / -1', borderRadius: 12, padding: '9px 12px' }}>{formError}</div>}
+        </form>
+      )}
+
+      <div className="glass rise" style={{ padding: 8, overflow: 'hidden' }}>
+        <div style={{ overflowX: 'auto' }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 14 }}>
+            <thead>
+              <tr style={{ textAlign: 'left', color: 'var(--text-2)' }}>
+                <Th>{t('prog.code')}</Th><Th>{t('subj.nameEn')}</Th><Th>{t('prog.durationYrs')}</Th><Th>{t('subj.sections')}</Th><Th> </Th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.length === 0 ? (
+                <tr><td colSpan={5} style={{ padding: 40, textAlign: 'center' }} className="muted">{t('prog.none')}</td></tr>
+              ) : rows.map((p) => (
+                <tr key={p.id} style={{ borderTop: '1px solid var(--glass-hairline)' }}>
+                  <Td><span style={{ fontFamily: 'ui-monospace, monospace', fontWeight: 600 }}>{p.code}</span></Td>
+                  <Td>{name(p.nameEn, p.nameTh)}</Td>
+                  <Td>{p.durationYrs ?? <span className="muted">—</span>}</Td>
+                  <Td>{p._count.courses} {t('prog.courses')} · {p._count.subjects} {t('subj.sections')}</Td>
+                  <Td>
+                    {isAdmin && (
+                      <div style={{ display: 'inline-flex', gap: 6 }}>
+                        <button onClick={() => openEdit(p)} className="glass hairline" style={{ padding: '6px 12px', borderRadius: 10, fontSize: 12, fontWeight: 600 }}>✏️</button>
+                        <button onClick={() => removeProgram(p.id)} disabled={busyId === p.id} className="btn-danger" style={{ padding: '6px 12px', fontSize: 12 }}>
+                          {busyId === p.id ? '…' : t('subj.delete')}
                         </button>
                       </div>
                     )}

@@ -4,6 +4,7 @@ import { CreateDepartmentDto, UpdateDepartmentDto } from './dto/department.dto';
 import { CreateCourseDto, UpdateCourseDto } from './dto/course.dto';
 import { CreateAcademicYearDto, UpdateAcademicYearDto } from './dto/academic-year.dto';
 import { CreateSemesterDto, UpdateSemesterDto } from './dto/semester.dto';
+import { CreateProgramDto, UpdateProgramDto } from './dto/program.dto';
 
 /**
  * Read access to the academic hierarchy needed to populate selectors
@@ -161,12 +162,78 @@ export class AcademicService {
     return { id, deleted: true };
   }
 
+  private programSelect = {
+    id: true, code: true, nameEn: true, nameTh: true, degreeType: true, durationYrs: true, totalCredits: true,
+    faculty: { select: { id: true, code: true, nameEn: true } },
+    _count: { select: { courses: true, subjects: true, students: true } },
+  } as const;
+
   programs(universityId: string) {
     return this.prisma.program.findMany({
       where: { deletedAt: null, faculty: { universityId } },
-      select: { id: true, code: true, nameEn: true, nameTh: true, faculty: { select: { code: true, nameEn: true } } },
+      select: this.programSelect,
       orderBy: { code: 'asc' },
     });
+  }
+
+  async createProgram(universityId: string, dto: CreateProgramDto) {
+    const faculty = await this.prisma.faculty.findFirst({ where: { id: dto.facultyId, universityId }, select: { id: true } });
+    if (!faculty) throw new BadRequestException('Faculty does not exist in this tenant');
+
+    const clash = await this.prisma.program.findFirst({ where: { facultyId: dto.facultyId, code: dto.code, deletedAt: null } });
+    if (clash) throw new ConflictException(`Program code ${dto.code} already exists in this faculty`);
+
+    return this.prisma.program.create({
+      data: {
+        faculty: { connect: { id: dto.facultyId } },
+        code: dto.code,
+        nameEn: dto.nameEn,
+        nameTh: dto.nameTh,
+        degreeType: dto.degreeType,
+        durationYrs: dto.durationYrs,
+        totalCredits: dto.totalCredits,
+      },
+      select: this.programSelect,
+    });
+  }
+
+  async updateProgram(universityId: string, id: string, dto: UpdateProgramDto) {
+    const program = await this.prisma.program.findFirst({ where: { id, deletedAt: null, faculty: { universityId } } });
+    if (!program) throw new NotFoundException('Program not found');
+
+    if (dto.code) {
+      const clash = await this.prisma.program.findFirst({
+        where: { facultyId: program.facultyId, code: dto.code, deletedAt: null, NOT: { id } },
+      });
+      if (clash) throw new ConflictException(`Program code ${dto.code} already exists in this faculty`);
+    }
+
+    return this.prisma.program.update({
+      where: { id },
+      data: {
+        ...(dto.code !== undefined && { code: dto.code }),
+        ...(dto.nameEn !== undefined && { nameEn: dto.nameEn }),
+        ...(dto.nameTh !== undefined && { nameTh: dto.nameTh }),
+        ...(dto.degreeType !== undefined && { degreeType: dto.degreeType }),
+        ...(dto.durationYrs !== undefined && { durationYrs: dto.durationYrs }),
+        ...(dto.totalCredits !== undefined && { totalCredits: dto.totalCredits }),
+      },
+      select: this.programSelect,
+    });
+  }
+
+  async removeProgram(universityId: string, id: string) {
+    const program = await this.prisma.program.findFirst({
+      where: { id, deletedAt: null, faculty: { universityId } },
+      select: { id: true, _count: { select: { courses: true, subjects: true, students: true } } },
+    });
+    if (!program) throw new NotFoundException('Program not found');
+    const { courses, subjects, students } = program._count;
+    if (courses > 0 || subjects > 0 || students > 0) {
+      throw new ConflictException(`This program has ${courses} course(s), ${subjects} subject(s) and ${students} student(s) and cannot be deleted`);
+    }
+    await this.prisma.program.update({ where: { id }, data: { deletedAt: new Date(), isActive: false } });
+    return { id, deleted: true };
   }
 
   private academicYearSelect = {
