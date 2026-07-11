@@ -14,12 +14,22 @@ export default function SettingsPage() {
   const { t } = useI18n();
   const [email, setEmail] = useState('admin@nursing.au.edu');
   const [tab, setTab] = useState<Tab>('general');
+  const [checked, setChecked] = useState(false);
 
   useEffect(() => {
     if (!localStorage.getItem('accessToken')) { router.replace('/login'); return; }
     const u = localStorage.getItem('user');
-    if (u) { try { setEmail(JSON.parse(u).email); } catch {} }
+    if (u) {
+      try {
+        const parsed = JSON.parse(u);
+        setEmail(parsed.email);
+        if (!(parsed.roleCodes ?? []).includes('ADMIN')) { router.replace('/dashboard'); return; }
+      } catch {}
+    }
+    setChecked(true);
   }, [router]);
+
+  if (!checked) return null;
 
   return (
     <div className="app-shell">

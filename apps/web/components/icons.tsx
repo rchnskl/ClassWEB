@@ -57,3 +57,6 @@ export const IconMenu = (p: SVGProps<SVGSVGElement>) => (
 export const IconGrade = (p: SVGProps<SVGSVGElement>) => (
   <svg {...base(p)}><path d="M9 3H6.5A1.5 1.5 0 0 0 5 4.5v15A1.5 1.5 0 0 0 6.5 21h11a1.5 1.5 0 0 0 1.5-1.5V4.5A1.5 1.5 0 0 0 17.5 3H15" /><rect x="9" y="2" width="6" height="3.5" rx="1" /><path d="M8.5 12l2 2 4-4.5" /></svg>
 );
+export const IconChevronLeft = (p: SVGProps<SVGSVGElement>) => (
+  <svg {...base(p)}><path d="M15 5l-7 7 7 7" /></svg>
+);
