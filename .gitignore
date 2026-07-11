@@ -48,3 +48,4 @@ storage/uploads/*
 
 # TS incremental build info
 *.tsbuildinfo
+apps/api/test/.pgdata-e2e/

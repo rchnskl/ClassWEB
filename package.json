@@ -22,5 +22,8 @@
     "api:build": "npm run build -w @classweb/api",
     "api:start": "npm run start:prod -w @classweb/api"
   },
-  "license": "UNLICENSED"
+  "license": "UNLICENSED",
+  "allowScripts": {
+    "@embedded-postgres/darwin-arm64@18.4.0-beta.17": true
+  }
 }

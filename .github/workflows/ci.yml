@@ -46,6 +46,8 @@ jobs:
         run: npm run build -w @classweb/api
       - name: Unit tests
         run: npm test -w @classweb/api
+      - name: Integration tests (boots its own embedded Postgres)
+        run: npm run test:e2e -w @classweb/api
 
   web:
     runs-on: ubuntu-latest

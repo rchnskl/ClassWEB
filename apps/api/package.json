@@ -10,7 +10,8 @@
     "start:prod": "node dist/main.js",
     "lint": "eslint \"src/**/*.ts\"",
     "test": "jest",
-    "test:watch": "jest --watch"
+    "test:watch": "jest --watch",
+    "test:e2e": "jest --config ./test/jest-e2e.json --runInBand"
   },
   "jest": {
     "moduleFileExtensions": [
@@ -56,6 +57,7 @@
     "@eslint/js": "^10.0.1",
     "@nestjs/cli": "^11.0.0",
     "@nestjs/schematics": "^11.0.0",
+    "@nestjs/testing": "^11.1.28",
     "@types/bcryptjs": "^2.4.6",
     "@types/express": "^5.0.0",
     "@types/jest": "^30.0.0",
@@ -63,10 +65,15 @@
     "@types/nodemailer": "^8.0.1",
     "@types/passport-jwt": "^4.0.1",
     "@types/pdfkit": "^0.17.6",
+    "@types/pg": "^8.20.0",
     "@types/qrcode": "^1.5.6",
+    "@types/supertest": "^7.2.0",
     "@types/web-push": "^3.6.4",
+    "embedded-postgres": "^18.4.0-beta.17",
     "eslint": "^10.6.0",
     "jest": "^30.4.2",
+    "pg": "^8.22.0",
+    "supertest": "^7.2.2",
     "ts-jest": "^29.4.11",
     "typescript": "^5.7.2",
     "typescript-eslint": "^8.63.0"
