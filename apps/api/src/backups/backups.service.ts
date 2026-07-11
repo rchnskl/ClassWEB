@@ -1,9 +1,8 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
-import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
 import { gunzipSync, gzipSync } from 'node:zlib';
 import { createHash } from 'node:crypto';
 import { PrismaService } from '../prisma/prisma.service';
+import { getBackupStorage } from './backup-storage';
 
 /**
  * Application-level backup: pg_dump/psql are not available to this app in
@@ -239,12 +238,6 @@ function reviveDates(value: any): any {
   return value;
 }
 
-function storageDir(): string {
-  const dir = join(__dirname, '..', '..', '..', '..', 'storage', 'backups');
-  mkdirSync(dir, { recursive: true });
-  return dir;
-}
-
 @Injectable()
 export class BackupsService {
   constructor(private readonly prisma: PrismaService) {}
@@ -283,7 +276,7 @@ export class BackupsService {
       const gz = gzipSync(Buffer.from(json, 'utf8'));
       const checksum = createHash('sha256').update(gz).digest('hex');
       const fileName = `${backup.id}.json.gz`;
-      writeFileSync(join(storageDir(), fileName), gz);
+      await getBackupStorage().put(fileName, gz);
 
       return this.prisma.backup.update({
         where: { id: backup.id },
@@ -307,6 +300,7 @@ export class BackupsService {
   async remove(universityId: string, id: string) {
     const backup = await this.prisma.backup.findFirst({ where: { id, universityId } });
     if (!backup) throw new NotFoundException('Backup not found');
+    if (backup.storageKey) { try { await getBackupStorage().delete(backup.storageKey); } catch { /* blob already gone */ } }
     await this.prisma.backup.delete({ where: { id } });
     return { ok: true };
   }
@@ -320,10 +314,7 @@ export class BackupsService {
       select: { id: true, storageKey: true },
     });
     for (const b of old) {
-      if (b.storageKey) {
-        const path = join(storageDir(), b.storageKey);
-        if (existsSync(path)) unlinkSync(path);
-      }
+      if (b.storageKey) await getBackupStorage().delete(b.storageKey);
     }
     if (old.length > 0) await this.prisma.backup.deleteMany({ where: { id: { in: old.map((b) => b.id) } } });
     return { pruned: old.length };
@@ -333,7 +324,7 @@ export class BackupsService {
   async fileFor(universityId: string, id: string): Promise<{ backup: any; gz: Buffer }> {
     const backup = await this.prisma.backup.findFirst({ where: { id, universityId } });
     if (!backup || backup.status !== 'COMPLETED' || !backup.storageKey) throw new NotFoundException('Backup not found or not completed');
-    const gz = readFileSync(join(storageDir(), backup.storageKey));
+    const gz = await getBackupStorage().get(backup.storageKey);
     return { backup, gz };
   }
 
