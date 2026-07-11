@@ -3,6 +3,8 @@ import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { AcademicService } from './academic.service';
 import { CreateDepartmentDto, UpdateDepartmentDto } from './dto/department.dto';
 import { CreateCourseDto, UpdateCourseDto } from './dto/course.dto';
+import { CreateAcademicYearDto, UpdateAcademicYearDto } from './dto/academic-year.dto';
+import { CreateSemesterDto, UpdateSemesterDto } from './dto/semester.dto';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { Permissions } from '../common/decorators/permissions.decorator';
 import { AuthenticatedUser } from '../common/authenticated-user';
@@ -83,10 +85,52 @@ export class AcademicController {
     return this.academic.academicYears(user.universityId);
   }
 
+  @Post('academic-years')
+  @Permissions('academicYear:create')
+  @ApiOperation({ summary: 'Create an academic year' })
+  createAcademicYear(@CurrentUser() user: AuthenticatedUser, @Body() dto: CreateAcademicYearDto) {
+    return this.academic.createAcademicYear(user.universityId, dto);
+  }
+
+  @Patch('academic-years/:id')
+  @Permissions('academicYear:update')
+  @ApiOperation({ summary: 'Update an academic year (set isCurrent to make it active)' })
+  updateAcademicYear(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string, @Body() dto: UpdateAcademicYearDto) {
+    return this.academic.updateAcademicYear(user.universityId, id, dto);
+  }
+
+  @Delete('academic-years/:id')
+  @Permissions('academicYear:delete')
+  @ApiOperation({ summary: 'Delete an academic year (blocked if semesters exist)' })
+  removeAcademicYear(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string) {
+    return this.academic.removeAcademicYear(user.universityId, id);
+  }
+
   @Get('semesters')
   @Permissions('semester:read')
   @ApiOperation({ summary: 'List semesters' })
   semesters(@CurrentUser() user: AuthenticatedUser) {
     return this.academic.semesters(user.universityId);
+  }
+
+  @Post('semesters')
+  @Permissions('semester:create')
+  @ApiOperation({ summary: 'Create a semester' })
+  createSemester(@CurrentUser() user: AuthenticatedUser, @Body() dto: CreateSemesterDto) {
+    return this.academic.createSemester(user.universityId, dto);
+  }
+
+  @Patch('semesters/:id')
+  @Permissions('semester:update')
+  @ApiOperation({ summary: 'Update a semester (set isCurrent to make it active)' })
+  updateSemester(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string, @Body() dto: UpdateSemesterDto) {
+    return this.academic.updateSemester(user.universityId, id, dto);
+  }
+
+  @Delete('semesters/:id')
+  @Permissions('semester:delete')
+  @ApiOperation({ summary: 'Delete a semester (blocked if sections exist)' })
+  removeSemester(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string) {
+    return this.academic.removeSemester(user.universityId, id);
   }
 }

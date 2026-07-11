@@ -7,7 +7,7 @@ import Topbar from '@/components/Topbar';
 import { apiFetch, downloadFile } from '@/lib/api';
 import { useI18n } from '@/lib/i18n';
 
-type Tab = 'general' | 'attendance' | 'users' | 'audit' | 'backup';
+type Tab = 'general' | 'academic' | 'attendance' | 'users' | 'audit' | 'backup';
 
 export default function SettingsPage() {
   const router = useRouter();
@@ -34,6 +34,7 @@ export default function SettingsPage() {
 
         <div className="tabbar rise" style={{ marginBottom: 16 }}>
           <button className={`tab ${tab === 'general' ? 'active' : ''}`} onClick={() => setTab('general')}>{t('set.tab.general')}</button>
+          <button className={`tab ${tab === 'academic' ? 'active' : ''}`} onClick={() => setTab('academic')}>{t('set.tab.academic')}</button>
           <button className={`tab ${tab === 'attendance' ? 'active' : ''}`} onClick={() => setTab('attendance')}>{t('set.tab.attendance')}</button>
           <button className={`tab ${tab === 'users' ? 'active' : ''}`} onClick={() => setTab('users')}>{t('users.tab')}</button>
           <button className={`tab ${tab === 'audit' ? 'active' : ''}`} onClick={() => setTab('audit')}>{t('set.tab.audit')}</button>
@@ -41,6 +42,7 @@ export default function SettingsPage() {
         </div>
 
         {tab === 'general' && <GeneralTab />}
+        {tab === 'academic' && <AcademicTab />}
         {tab === 'attendance' && <AttendanceTab />}
         {tab === 'users' && <UsersTab />}
         {tab === 'audit' && <AuditTab />}
@@ -159,6 +161,216 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
     <div style={{ marginBottom: 16 }}>
       <div className="muted" style={{ fontSize: 12.5, fontWeight: 650, marginBottom: 6, textTransform: 'uppercase', letterSpacing: 0.4 }}>{label}</div>
       {children}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Academic years & semesters
+// ---------------------------------------------------------------------------
+
+interface YearRow { id: string; code: string; nameEn: string; nameTh: string | null; startDate: string; endDate: string; isCurrent: boolean; isActive: boolean }
+interface SemesterRow {
+  id: string; type: string; nameEn: string; nameTh: string | null; startDate: string; endDate: string;
+  addDropDeadline: string | null; isCurrent: boolean; isActive: boolean; academicYear: { id: string; code: string };
+}
+
+const EMPTY_YEAR_FORM = { code: '', nameEn: '', nameTh: '', startDate: '', endDate: '' };
+const EMPTY_SEMESTER_FORM = { academicYearId: '', type: 'FIRST', nameEn: '', nameTh: '', startDate: '', endDate: '', addDropDeadline: '' };
+
+function AcademicTab() {
+  const { t } = useI18n();
+  const [years, setYears] = useState<YearRow[]>([]);
+  const [semesters, setSemesters] = useState<SemesterRow[]>([]);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
+
+  const [showYearForm, setShowYearForm] = useState(false);
+  const [yearForm, setYearForm] = useState(EMPTY_YEAR_FORM);
+  const [savingYear, setSavingYear] = useState(false);
+
+  const [showSemForm, setShowSemForm] = useState(false);
+  const [semForm, setSemForm] = useState(EMPTY_SEMESTER_FORM);
+  const [savingSem, setSavingSem] = useState(false);
+
+  const [busyId, setBusyId] = useState<string | null>(null);
+
+  const load = useCallback(async () => {
+    setLoadError(null);
+    try {
+      const [y, s] = await Promise.all([apiFetch<YearRow[]>('/academic-years'), apiFetch<SemesterRow[]>('/semesters')]);
+      setYears(y);
+      setSemesters(s);
+    } catch (err) {
+      setLoadError(err instanceof Error ? err.message : 'Failed to load academic years/semesters');
+    }
+  }, []);
+  useEffect(() => { void load(); }, [load]);
+
+  async function submitYear(e: React.FormEvent) {
+    e.preventDefault();
+    setSavingYear(true);
+    setActionError(null);
+    try {
+      await apiFetch('/academic-years', {
+        method: 'POST',
+        body: JSON.stringify({ ...yearForm, nameTh: yearForm.nameTh || undefined }),
+      });
+      setShowYearForm(false);
+      setYearForm(EMPTY_YEAR_FORM);
+      await load();
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : 'Failed to create academic year');
+    } finally { setSavingYear(false); }
+  }
+
+  async function setCurrentYear(id: string) {
+    setBusyId(id);
+    setActionError(null);
+    try { await apiFetch(`/academic-years/${id}`, { method: 'PATCH', body: JSON.stringify({ isCurrent: true }) }); await load(); }
+    catch (err) { setActionError(err instanceof Error ? err.message : 'Failed'); }
+    finally { setBusyId(null); }
+  }
+
+  async function submitSemester(e: React.FormEvent) {
+    e.preventDefault();
+    setSavingSem(true);
+    setActionError(null);
+    try {
+      await apiFetch('/semesters', {
+        method: 'POST',
+        body: JSON.stringify({ ...semForm, nameTh: semForm.nameTh || undefined, addDropDeadline: semForm.addDropDeadline || undefined }),
+      });
+      setShowSemForm(false);
+      setSemForm(EMPTY_SEMESTER_FORM);
+      await load();
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : 'Failed to create semester');
+    } finally { setSavingSem(false); }
+  }
+
+  async function setCurrentSemester(id: string) {
+    setBusyId(id);
+    setActionError(null);
+    try { await apiFetch(`/semesters/${id}`, { method: 'PATCH', body: JSON.stringify({ isCurrent: true }) }); await load(); }
+    catch (err) { setActionError(err instanceof Error ? err.message : 'Failed'); }
+    finally { setBusyId(null); }
+  }
+
+  if (loadError) {
+    return (
+      <div className="glass rise" style={{ padding: 24 }}>
+        <div className="chip chip-danger" style={{ display: 'block', marginBottom: 12 }}>{loadError}</div>
+        <button onClick={load} className="glass hairline" style={{ padding: '9px 16px', borderRadius: 12, fontSize: 13.5, fontWeight: 600 }}>{t('common.retry')}</button>
+      </div>
+    );
+  }
+
+  return (
+    <div>
+      {actionError && <div className="chip chip-danger rise" style={{ display: 'block', marginBottom: 14, padding: '9px 12px' }}>{actionError}</div>}
+
+      <div className="glass rise" style={{ padding: 20, marginBottom: 16 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
+          <div style={{ fontWeight: 700, fontSize: 15.5 }}>{t('set.academic.years')}</div>
+          <button className="btn-primary" onClick={() => setShowYearForm((v) => !v)} style={{ padding: '8px 16px', fontSize: 13.5 }}>
+            {showYearForm ? t('subj.close') : t('set.academic.addYear')}
+          </button>
+        </div>
+
+        {showYearForm && (
+          <form onSubmit={submitYear} className="glass hairline" style={{ padding: 16, marginBottom: 14, display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 12, alignItems: 'end' }}>
+            <Field label={`${t('set.academic.code')} *`}><input className="input" required value={yearForm.code} onChange={(e) => setYearForm({ ...yearForm, code: e.target.value })} placeholder="2026" /></Field>
+            <Field label={`${t('subj.nameEn')} *`}><input className="input" required value={yearForm.nameEn} onChange={(e) => setYearForm({ ...yearForm, nameEn: e.target.value })} placeholder="Academic Year 2026" /></Field>
+            <Field label={t('subj.nameTh')}><input className="input" value={yearForm.nameTh} onChange={(e) => setYearForm({ ...yearForm, nameTh: e.target.value })} /></Field>
+            <Field label={`${t('set.academic.startDate')} *`}><input type="date" className="input" required value={yearForm.startDate} onChange={(e) => setYearForm({ ...yearForm, startDate: e.target.value })} /></Field>
+            <Field label={`${t('set.academic.endDate')} *`}><input type="date" className="input" required value={yearForm.endDate} onChange={(e) => setYearForm({ ...yearForm, endDate: e.target.value })} /></Field>
+            <button className="btn-primary" type="submit" disabled={savingYear} style={{ padding: 11, fontSize: 14 }}>{savingYear ? t('subj.saving') : t('subj.create')}</button>
+          </form>
+        )}
+
+        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 14 }}>
+          <thead><tr style={{ textAlign: 'left', color: 'var(--text-2)' }}><Th>{t('set.academic.code')}</Th><Th>{t('subj.nameEn')}</Th><Th> </Th></tr></thead>
+          <tbody>
+            {years.length === 0 ? (
+              <tr><td colSpan={3} style={{ padding: 24, textAlign: 'center' }} className="muted">{t('set.academic.noYears')}</td></tr>
+            ) : years.map((y) => (
+              <tr key={y.id} style={{ borderTop: '1px solid var(--glass-hairline)' }}>
+                <Td><span style={{ fontFamily: 'ui-monospace, monospace', fontWeight: 600 }}>{y.code}</span></Td>
+                <Td>{y.nameEn}</Td>
+                <Td>
+                  {y.isCurrent ? (
+                    <span className="chip" style={{ background: 'var(--success)22', color: 'var(--success)', fontWeight: 700 }}>✓ {t('set.academic.current')}</span>
+                  ) : (
+                    <button onClick={() => setCurrentYear(y.id)} disabled={busyId === y.id} className="glass hairline" style={{ padding: '6px 12px', borderRadius: 10, fontSize: 12, fontWeight: 600 }}>
+                      {busyId === y.id ? '…' : t('set.academic.setCurrent')}
+                    </button>
+                  )}
+                </Td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      <div className="glass rise" style={{ padding: 20 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
+          <div style={{ fontWeight: 700, fontSize: 15.5 }}>{t('set.academic.semesters')}</div>
+          <button className="btn-primary" onClick={() => setShowSemForm((v) => !v)} disabled={years.length === 0} style={{ padding: '8px 16px', fontSize: 13.5 }}>
+            {showSemForm ? t('subj.close') : t('set.academic.addSemester')}
+          </button>
+        </div>
+        {years.length === 0 && <div className="muted" style={{ fontSize: 12.5, marginBottom: 12 }}>{t('set.academic.needYearFirst')}</div>}
+
+        {showSemForm && (
+          <form onSubmit={submitSemester} className="glass hairline" style={{ padding: 16, marginBottom: 14, display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 12, alignItems: 'end' }}>
+            <Field label={`${t('set.academic.year')} *`}>
+              <select className="input" required value={semForm.academicYearId} onChange={(e) => setSemForm({ ...semForm, academicYearId: e.target.value })}>
+                <option value="" disabled>{t('subj.select')}</option>
+                {years.map((y) => <option key={y.id} value={y.id}>{y.code}</option>)}
+              </select>
+            </Field>
+            <Field label={`${t('set.academic.type')} *`}>
+              <select className="input" required value={semForm.type} onChange={(e) => setSemForm({ ...semForm, type: e.target.value })}>
+                <option value="FIRST">{t('set.academic.first')}</option>
+                <option value="SECOND">{t('set.academic.second')}</option>
+                <option value="SUMMER">{t('set.academic.summer')}</option>
+                <option value="SPECIAL">{t('set.academic.special')}</option>
+              </select>
+            </Field>
+            <Field label={`${t('subj.nameEn')} *`}><input className="input" required value={semForm.nameEn} onChange={(e) => setSemForm({ ...semForm, nameEn: e.target.value })} placeholder="First Semester" /></Field>
+            <Field label={t('subj.nameTh')}><input className="input" value={semForm.nameTh} onChange={(e) => setSemForm({ ...semForm, nameTh: e.target.value })} /></Field>
+            <Field label={`${t('set.academic.startDate')} *`}><input type="date" className="input" required value={semForm.startDate} onChange={(e) => setSemForm({ ...semForm, startDate: e.target.value })} /></Field>
+            <Field label={`${t('set.academic.endDate')} *`}><input type="date" className="input" required value={semForm.endDate} onChange={(e) => setSemForm({ ...semForm, endDate: e.target.value })} /></Field>
+            <Field label={t('set.academic.addDropDeadline')}><input type="date" className="input" value={semForm.addDropDeadline} onChange={(e) => setSemForm({ ...semForm, addDropDeadline: e.target.value })} /></Field>
+            <button className="btn-primary" type="submit" disabled={savingSem} style={{ padding: 11, fontSize: 14 }}>{savingSem ? t('subj.saving') : t('subj.create')}</button>
+          </form>
+        )}
+
+        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 14 }}>
+          <thead><tr style={{ textAlign: 'left', color: 'var(--text-2)' }}><Th>{t('set.academic.year')}</Th><Th>{t('set.academic.type')}</Th><Th>{t('subj.nameEn')}</Th><Th> </Th></tr></thead>
+          <tbody>
+            {semesters.length === 0 ? (
+              <tr><td colSpan={4} style={{ padding: 24, textAlign: 'center' }} className="muted">{t('set.academic.noSemesters')}</td></tr>
+            ) : semesters.map((s) => (
+              <tr key={s.id} style={{ borderTop: '1px solid var(--glass-hairline)' }}>
+                <Td><span style={{ fontFamily: 'ui-monospace, monospace', fontWeight: 600 }}>{s.academicYear.code}</span></Td>
+                <Td>{s.type}</Td>
+                <Td>{s.nameEn}</Td>
+                <Td>
+                  {s.isCurrent ? (
+                    <span className="chip" style={{ background: 'var(--success)22', color: 'var(--success)', fontWeight: 700 }}>✓ {t('set.academic.current')}</span>
+                  ) : (
+                    <button onClick={() => setCurrentSemester(s.id)} disabled={busyId === s.id} className="glass hairline" style={{ padding: '6px 12px', borderRadius: 10, fontSize: 12, fontWeight: 600 }}>
+                      {busyId === s.id ? '…' : t('set.academic.setCurrent')}
+                    </button>
+                  )}
+                </Td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }

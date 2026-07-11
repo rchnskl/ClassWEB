@@ -2,6 +2,8 @@ import { BadRequestException, ConflictException, Injectable, NotFoundException }
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateDepartmentDto, UpdateDepartmentDto } from './dto/department.dto';
 import { CreateCourseDto, UpdateCourseDto } from './dto/course.dto';
+import { CreateAcademicYearDto, UpdateAcademicYearDto } from './dto/academic-year.dto';
+import { CreateSemesterDto, UpdateSemesterDto } from './dto/semester.dto';
 
 /**
  * Read access to the academic hierarchy needed to populate selectors
@@ -167,22 +169,155 @@ export class AcademicService {
     });
   }
 
+  private academicYearSelect = {
+    id: true, code: true, nameEn: true, nameTh: true, startDate: true, endDate: true, isCurrent: true, isActive: true,
+  } as const;
+
   academicYears(universityId: string) {
     return this.prisma.academicYear.findMany({
       where: { universityId, deletedAt: null },
-      select: { id: true, code: true, nameEn: true, isCurrent: true },
+      select: this.academicYearSelect,
       orderBy: { code: 'desc' },
     });
   }
 
+  async createAcademicYear(universityId: string, dto: CreateAcademicYearDto) {
+    const clash = await this.prisma.academicYear.findFirst({ where: { universityId, code: dto.code, deletedAt: null } });
+    if (clash) throw new ConflictException(`Academic year ${dto.code} already exists`);
+
+    return this.prisma.$transaction(async (tx) => {
+      if (dto.isCurrent) await tx.academicYear.updateMany({ where: { universityId, isCurrent: true }, data: { isCurrent: false } });
+      return tx.academicYear.create({
+        data: {
+          university: { connect: { id: universityId } },
+          code: dto.code,
+          nameEn: dto.nameEn,
+          nameTh: dto.nameTh,
+          startDate: new Date(dto.startDate),
+          endDate: new Date(dto.endDate),
+          isCurrent: dto.isCurrent ?? false,
+        },
+        select: this.academicYearSelect,
+      });
+    });
+  }
+
+  async updateAcademicYear(universityId: string, id: string, dto: UpdateAcademicYearDto) {
+    const year = await this.prisma.academicYear.findFirst({ where: { id, universityId, deletedAt: null } });
+    if (!year) throw new NotFoundException('Academic year not found');
+
+    if (dto.code) {
+      const clash = await this.prisma.academicYear.findFirst({ where: { universityId, code: dto.code, deletedAt: null, NOT: { id } } });
+      if (clash) throw new ConflictException(`Academic year ${dto.code} already exists`);
+    }
+
+    return this.prisma.$transaction(async (tx) => {
+      if (dto.isCurrent) await tx.academicYear.updateMany({ where: { universityId, isCurrent: true, NOT: { id } }, data: { isCurrent: false } });
+      return tx.academicYear.update({
+        where: { id },
+        data: {
+          ...(dto.code !== undefined && { code: dto.code }),
+          ...(dto.nameEn !== undefined && { nameEn: dto.nameEn }),
+          ...(dto.nameTh !== undefined && { nameTh: dto.nameTh }),
+          ...(dto.startDate !== undefined && { startDate: new Date(dto.startDate) }),
+          ...(dto.endDate !== undefined && { endDate: new Date(dto.endDate) }),
+          ...(dto.isCurrent !== undefined && { isCurrent: dto.isCurrent }),
+        },
+        select: this.academicYearSelect,
+      });
+    });
+  }
+
+  async removeAcademicYear(universityId: string, id: string) {
+    const year = await this.prisma.academicYear.findFirst({
+      where: { id, universityId, deletedAt: null },
+      select: { id: true, _count: { select: { semesters: true } } },
+    });
+    if (!year) throw new NotFoundException('Academic year not found');
+    if (year._count.semesters > 0) {
+      throw new ConflictException(`This academic year has ${year._count.semesters} semester(s) and cannot be deleted`);
+    }
+    await this.prisma.academicYear.update({ where: { id }, data: { deletedAt: new Date(), isActive: false } });
+    return { id, deleted: true };
+  }
+
+  private semesterSelect = {
+    id: true, type: true, nameEn: true, nameTh: true, startDate: true, endDate: true, addDropDeadline: true, isCurrent: true, isActive: true,
+    academicYear: { select: { id: true, code: true } },
+  } as const;
+
   semesters(universityId: string) {
     return this.prisma.semester.findMany({
       where: { deletedAt: null, academicYear: { universityId } },
-      select: {
-        id: true, type: true, nameEn: true, isCurrent: true,
-        academicYear: { select: { id: true, code: true } },
-      },
+      select: this.semesterSelect,
       orderBy: { startDate: 'desc' },
     });
+  }
+
+  async createSemester(universityId: string, dto: CreateSemesterDto) {
+    const year = await this.prisma.academicYear.findFirst({ where: { id: dto.academicYearId, universityId, deletedAt: null }, select: { id: true } });
+    if (!year) throw new BadRequestException('Academic year does not exist in this tenant');
+
+    const clash = await this.prisma.semester.findFirst({ where: { academicYearId: dto.academicYearId, type: dto.type, deletedAt: null } });
+    if (clash) throw new ConflictException(`A ${dto.type} semester already exists for this academic year`);
+
+    return this.prisma.$transaction(async (tx) => {
+      if (dto.isCurrent) await tx.semester.updateMany({ where: { academicYear: { universityId }, isCurrent: true }, data: { isCurrent: false } });
+      return tx.semester.create({
+        data: {
+          academicYear: { connect: { id: dto.academicYearId } },
+          type: dto.type,
+          nameEn: dto.nameEn,
+          nameTh: dto.nameTh,
+          startDate: new Date(dto.startDate),
+          endDate: new Date(dto.endDate),
+          addDropDeadline: dto.addDropDeadline ? new Date(dto.addDropDeadline) : undefined,
+          isCurrent: dto.isCurrent ?? false,
+        },
+        select: this.semesterSelect,
+      });
+    });
+  }
+
+  async updateSemester(universityId: string, id: string, dto: UpdateSemesterDto) {
+    const semester = await this.prisma.semester.findFirst({ where: { id, deletedAt: null, academicYear: { universityId } } });
+    if (!semester) throw new NotFoundException('Semester not found');
+
+    if (dto.type) {
+      const clash = await this.prisma.semester.findFirst({
+        where: { academicYearId: semester.academicYearId, type: dto.type, deletedAt: null, NOT: { id } },
+      });
+      if (clash) throw new ConflictException(`A ${dto.type} semester already exists for this academic year`);
+    }
+
+    return this.prisma.$transaction(async (tx) => {
+      if (dto.isCurrent) await tx.semester.updateMany({ where: { academicYear: { universityId }, isCurrent: true, NOT: { id } }, data: { isCurrent: false } });
+      return tx.semester.update({
+        where: { id },
+        data: {
+          ...(dto.type !== undefined && { type: dto.type }),
+          ...(dto.nameEn !== undefined && { nameEn: dto.nameEn }),
+          ...(dto.nameTh !== undefined && { nameTh: dto.nameTh }),
+          ...(dto.startDate !== undefined && { startDate: new Date(dto.startDate) }),
+          ...(dto.endDate !== undefined && { endDate: new Date(dto.endDate) }),
+          ...(dto.addDropDeadline !== undefined && { addDropDeadline: dto.addDropDeadline ? new Date(dto.addDropDeadline) : null }),
+          ...(dto.isCurrent !== undefined && { isCurrent: dto.isCurrent }),
+        },
+        select: this.semesterSelect,
+      });
+    });
+  }
+
+  async removeSemester(universityId: string, id: string) {
+    const semester = await this.prisma.semester.findFirst({
+      where: { id, deletedAt: null, academicYear: { universityId } },
+      select: { id: true, _count: { select: { sections: true } } },
+    });
+    if (!semester) throw new NotFoundException('Semester not found');
+    if (semester._count.sections > 0) {
+      throw new ConflictException(`This semester has ${semester._count.sections} section(s) and cannot be deleted`);
+    }
+    await this.prisma.semester.update({ where: { id }, data: { deletedAt: new Date(), isActive: false } });
+    return { id, deleted: true };
   }
 }
