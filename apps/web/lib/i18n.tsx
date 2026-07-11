@@ -485,6 +485,7 @@ const EN: Dict = {
 
   'common.loading': 'Loading…',
   'common.previewPdf': 'Preview PDF',
+  'common.openInNewTab': 'Open in new tab',
   'common.error': 'Error',
   'common.page': 'Page',
   'common.of': 'of',
@@ -1044,6 +1045,7 @@ const TH: Dict = {
 
   'common.loading': 'กำลังโหลด…',
   'common.previewPdf': 'ดูตัวอย่าง PDF',
+  'common.openInNewTab': 'เปิดในแท็บใหม่',
   'common.error': 'ข้อผิดพลาด',
   'common.page': 'หน้า',
   'common.of': 'จาก',
