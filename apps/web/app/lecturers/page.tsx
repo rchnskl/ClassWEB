@@ -221,14 +221,14 @@ export default function LecturersPage() {
             <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 14 }}>
               <thead>
                 <tr style={{ textAlign: 'left', color: 'var(--text-2)' }}>
-                  <Th>{t('lecturers.employeeCode')}</Th><Th>{t('lecturers.name')}</Th><Th>{t('lecturers.department')}</Th><Th>{t('lecturers.sections')}</Th><Th>{t('lecturers.status')}</Th><Th> </Th>
+                  <Th>{t('lecturers.employeeCode')}</Th><Th>{t('lecturers.name')}</Th><Th>{t('lecturers.department')}</Th><Th>{t('lecturers.account')}</Th><Th>{t('lecturers.sections')}</Th><Th>{t('lecturers.status')}</Th><Th> </Th>
                 </tr>
               </thead>
               <tbody>
                 {loading ? (
-                  <tr><td colSpan={6} style={{ padding: 40, textAlign: 'center' }} className="muted">{t('common.loading')}</td></tr>
+                  <tr><td colSpan={7} style={{ padding: 40, textAlign: 'center' }} className="muted">{t('common.loading')}</td></tr>
                 ) : rows.length === 0 ? (
-                  <tr><td colSpan={6} style={{ padding: 48, textAlign: 'center' }}>
+                  <tr><td colSpan={7} style={{ padding: 48, textAlign: 'center' }}>
                     <div className="brand-gradient floaty" style={{ width: 46, height: 46, borderRadius: 14, margin: '0 auto 12px', display: 'grid', placeItems: 'center' }}><IconTeacher width={22} height={22} /></div>
                     <div style={{ fontWeight: 650 }}>{t('lecturers.none')}</div>
                     <div className="muted" style={{ fontSize: 13, marginTop: 4 }}>{t('lecturers.noneHint')}</div>
@@ -242,10 +242,16 @@ export default function LecturersPage() {
                       {l.position && <div className="muted" style={{ fontSize: 12 }}>{l.position}</div>}
                     </Td>
                     <Td>{l.department ? <span className="chip" style={{ background: 'var(--glass-hairline)', color: 'var(--text-1)' }}>{l.department.code}</span> : <span className="muted">—</span>}</Td>
+                    <Td>
+                      {l.userId ? (
+                        <span title={t('lecturers.hasAccount')} style={{ fontFamily: 'ui-monospace, monospace', fontSize: 12.5 }}>🔗 {l.email}</span>
+                      ) : (
+                        <span className="chip chip-warning">{t('lecturers.noAccount')}</span>
+                      )}
+                    </Td>
                     <Td>{l._count.primarySections}</Td>
                     <Td>
                       <span className={`chip ${l.isActive ? 'chip-success' : 'chip-danger'}`}>{l.isActive ? t('lecturers.active') : t('lecturers.inactive')}</span>
-                      {!l.userId && <div className="chip chip-warning" style={{ marginTop: 4 }}>{t('lecturers.noAccount')}</div>}
                     </Td>
                     <Td>
                       <div style={{ display: 'inline-flex', gap: 6 }}>

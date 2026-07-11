@@ -244,6 +244,8 @@ const EN: Dict = {
   'lecturers.createdTitle': 'Lecturer & account created',
   'lecturers.createdHint': 'Share this temporary password with the lecturer securely — it will not be shown again. They can change it after signing in.',
   'lecturers.noAccount': 'No login yet',
+  'lecturers.account': 'Login account',
+  'lecturers.hasAccount': 'Linked to a user account — used to sign in',
 
   'sec.title': 'Subjects & Sections',
   'sec.subtitle': 'Curriculum catalogue and class sections',
@@ -787,6 +789,8 @@ const TH: Dict = {
   'lecturers.createdTitle': 'สร้างอาจารย์และบัญชีสำเร็จ',
   'lecturers.createdHint': 'นำรหัสผ่านชั่วคราวนี้ไปแจ้งอาจารย์อย่างปลอดภัย — จะไม่แสดงซ้ำอีก อาจารย์สามารถเปลี่ยนรหัสผ่านได้เองหลัง login',
   'lecturers.noAccount': 'ยังไม่มีบัญชี',
+  'lecturers.account': 'บัญชีผู้ใช้งาน',
+  'lecturers.hasAccount': 'เชื่อมกับบัญชีผู้ใช้งาน — ใช้สำหรับเข้าสู่ระบบ',
 
   'sec.title': 'รายวิชาและกลุ่มเรียน',
   'sec.subtitle': 'หลักสูตรรายวิชาและกลุ่มเรียน (Section)',
