@@ -213,6 +213,8 @@ const EN: Dict = {
   'students.other': 'Other',
   'students.notes': 'Notes',
   'students.report': 'Report',
+  'students.delete': 'Delete',
+  'students.confirmDelete': 'Delete this student? This cannot be undone.',
 
   'lecturers.title': 'Lecturers',
   'lecturers.count': 'lecturer(s) · Faculty of Nursing',
@@ -482,6 +484,7 @@ const EN: Dict = {
   'ci.confirmYes': 'Yes, check in',
 
   'common.loading': 'Loading…',
+  'common.previewPdf': 'Preview PDF',
   'common.error': 'Error',
   'common.page': 'Page',
   'common.of': 'of',
@@ -769,6 +772,8 @@ const TH: Dict = {
   'students.other': 'อื่น ๆ',
   'students.notes': 'บันทึก',
   'students.report': 'รายงาน',
+  'students.delete': 'ลบ',
+  'students.confirmDelete': 'ต้องการลบนักศึกษาคนนี้หรือไม่? ไม่สามารถย้อนกลับได้',
 
   'lecturers.title': 'อาจารย์',
   'lecturers.count': 'คน · คณะพยาบาลศาสตร์',
@@ -1038,6 +1043,7 @@ const TH: Dict = {
   'ci.confirmYes': 'ยืนยันเช็คชื่อ',
 
   'common.loading': 'กำลังโหลด…',
+  'common.previewPdf': 'ดูตัวอย่าง PDF',
   'common.error': 'ข้อผิดพลาด',
   'common.page': 'หน้า',
   'common.of': 'จาก',

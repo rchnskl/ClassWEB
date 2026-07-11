@@ -4,7 +4,8 @@ import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Sidebar from '@/components/Sidebar';
 import Topbar from '@/components/Topbar';
-import { apiFetch, downloadFile } from '@/lib/api';
+import PdfPreviewModal from '@/components/PdfPreviewModal';
+import { apiFetch, downloadFile, fetchPreviewUrl } from '@/lib/api';
 import { useI18n } from '@/lib/i18n';
 
 interface StudentRow {
@@ -32,6 +33,8 @@ export default function ReportsPage() {
   const [data, setData] = useState<Overview | null>(null);
   const [loading, setLoading] = useState(true);
   const [exporting, setExporting] = useState<string | null>(null);
+  const [previewing, setPreviewing] = useState(false);
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
 
   async function exportAs(fmt: 'pdf' | 'xlsx' | 'csv') {
     setExporting(fmt);
@@ -39,6 +42,15 @@ export default function ReportsPage() {
       await downloadFile(`/reports/attendance.${fmt}`, `attendance.${fmt}`);
     } catch { /* ignore */ } finally {
       setExporting(null);
+    }
+  }
+
+  async function previewPdf() {
+    setPreviewing(true);
+    try {
+      setPreviewUrl(await fetchPreviewUrl('/reports/attendance.pdf'));
+    } catch { /* ignore */ } finally {
+      setPreviewing(false);
     }
   }
 
@@ -66,6 +78,7 @@ export default function ReportsPage() {
           </div>
           <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
             <span className="muted" style={{ fontSize: 12.5, fontWeight: 600 }}>{t('rep.export')}:</span>
+            <ExportBtn label={`👁 ${t('common.previewPdf')}`} busy={previewing} onClick={previewPdf} />
             <ExportBtn label={`📄 ${t('rep.exportPdf')}`} busy={exporting === 'pdf'} onClick={() => exportAs('pdf')} primary />
             <ExportBtn label={`📊 ${t('rep.exportExcel')}`} busy={exporting === 'xlsx'} onClick={() => exportAs('xlsx')} />
             <ExportBtn label={`📁 ${t('rep.exportCsv')}`} busy={exporting === 'csv'} onClick={() => exportAs('csv')} />
@@ -153,6 +166,8 @@ export default function ReportsPage() {
           </>
         )}
       </div>
+
+      {previewUrl && <PdfPreviewModal url={previewUrl} onClose={() => setPreviewUrl(null)} />}
     </div>
   );
 }

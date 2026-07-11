@@ -6,7 +6,8 @@ import Sidebar from '@/components/Sidebar';
 import Topbar from '@/components/Topbar';
 import { IconSearch, IconStudents } from '@/components/icons';
 import StudentNotesDrawer from '@/components/StudentNotesDrawer';
-import { apiFetch, downloadFile, type MeResponse, type Paginated } from '@/lib/api';
+import PdfPreviewModal from '@/components/PdfPreviewModal';
+import { apiFetch, downloadFile, fetchPreviewUrl, type MeResponse, type Paginated } from '@/lib/api';
 import { useI18n } from '@/lib/i18n';
 
 interface StudentRow {
@@ -18,7 +19,7 @@ interface StudentRow {
   gender: string;
   status: string;
   admissionYear?: number | null;
-  program: { code: string; nameEn: string };
+  program: { id: string; code: string; nameEn: string };
 }
 interface ProgramRef { id: string; code: string; nameEn: string }
 
@@ -37,11 +38,15 @@ export default function StudentsPage() {
 
   const [showForm, setShowForm] = useState(false);
   const [programs, setPrograms] = useState<ProgramRef[]>([]);
-  const [form, setForm] = useState({ studentCode: '', nameEn: '', nameTh: '', nickname: '', programId: '', gender: 'FEMALE' });
+  const [form, setForm] = useState({ studentCode: '', nameEn: '', nameTh: '', nickname: '', programId: '', gender: 'FEMALE', status: 'STUDYING' });
+  const [editingId, setEditingId] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
   const [notesFor, setNotesFor] = useState<StudentRow | null>(null);
   const [reporting, setReporting] = useState<string | null>(null);
+  const [previewing, setPreviewing] = useState<string | null>(null);
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [busyId, setBusyId] = useState<string | null>(null);
 
   async function downloadReport(s: StudentRow) {
     setReporting(s.id);
@@ -49,6 +54,15 @@ export default function StudentsPage() {
       await downloadFile(`/reports/student/${s.id}/pdf`, `${s.studentCode}.pdf`);
     } catch { /* ignore */ } finally {
       setReporting(null);
+    }
+  }
+
+  async function previewReport(s: StudentRow) {
+    setPreviewing(s.id);
+    try {
+      setPreviewUrl(await fetchPreviewUrl(`/reports/student/${s.id}/pdf`));
+    } catch { /* ignore */ } finally {
+      setPreviewing(null);
     }
   }
 
@@ -88,20 +102,53 @@ export default function StudentsPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [search]);
 
+  function openCreate() {
+    setEditingId(null);
+    setForm({ studentCode: '', nameEn: '', nameTh: '', nickname: '', programId: '', gender: 'FEMALE', status: 'STUDYING' });
+    setFormError(null);
+    setShowForm(true);
+  }
+  function openEdit(row: StudentRow) {
+    setEditingId(row.id);
+    setForm({
+      studentCode: row.studentCode, nameEn: row.nameEn, nameTh: row.nameTh ?? '', nickname: row.nickname ?? '',
+      programId: row.program.id ?? '', gender: row.gender, status: row.status,
+    });
+    setFormError(null);
+    setShowForm(true);
+  }
+
   async function submitForm(e: React.FormEvent) {
     e.preventDefault();
     setSaving(true);
     setFormError(null);
     try {
-      await apiFetch('/students', { method: 'POST', body: JSON.stringify(form) });
+      if (editingId) {
+        await apiFetch(`/students/${editingId}`, { method: 'PATCH', body: JSON.stringify(form) });
+      } else {
+        await apiFetch('/students', { method: 'POST', body: JSON.stringify(form) });
+      }
       setShowForm(false);
-      setForm({ studentCode: '', nameEn: '', nameTh: '', nickname: '', programId: '', gender: 'FEMALE' });
-      await load(0, '');
-      setSearch('');
+      setEditingId(null);
+      setForm({ studentCode: '', nameEn: '', nameTh: '', nickname: '', programId: '', gender: 'FEMALE', status: 'STUDYING' });
+      await load(skip, search);
     } catch (err) {
-      setFormError(err instanceof Error ? err.message : 'Failed to create student');
+      setFormError(err instanceof Error ? err.message : 'Failed to save student');
     } finally {
       setSaving(false);
+    }
+  }
+
+  async function removeStudent(row: StudentRow) {
+    if (!window.confirm(t('students.confirmDelete'))) return;
+    setBusyId(row.id);
+    try {
+      await apiFetch(`/students/${row.id}`, { method: 'DELETE' });
+      await load(skip, search);
+    } catch (err) {
+      window.alert(err instanceof Error ? err.message : 'Failed to delete student');
+    } finally {
+      setBusyId(null);
     }
   }
 
@@ -122,7 +169,7 @@ export default function StudentsPage() {
               {total} {t('students.count')}
             </p>
           </div>
-          <button className="btn-primary" style={{ padding: '11px 18px', fontSize: 14.5 }} onClick={() => setShowForm((s) => !s)}>
+          <button className="btn-primary" style={{ padding: '11px 18px', fontSize: 14.5 }} onClick={() => (showForm ? setShowForm(false) : openCreate())}>
             {showForm ? t('students.close') : t('students.add')}
           </button>
         </div>
@@ -143,7 +190,19 @@ export default function StudentsPage() {
                 <option value="FEMALE">{t('students.female')}</option><option value="MALE">{t('students.male')}</option><option value="OTHER">{t('students.other')}</option>
               </select>
             </Field>
-            <button className="btn-primary" type="submit" disabled={saving} style={{ padding: '12px', fontSize: 14.5 }}>{saving ? t('students.saving') : t('students.create')}</button>
+            {editingId && (
+              <Field label={t('students.status')}>
+                <select className="input" value={form.status} onChange={(e) => setForm({ ...form, status: e.target.value })}>
+                  <option value="STUDYING">STUDYING</option>
+                  <option value="ON_LEAVE">ON_LEAVE</option>
+                  <option value="SUSPENDED">SUSPENDED</option>
+                  <option value="GRADUATED">GRADUATED</option>
+                  <option value="WITHDRAWN">WITHDRAWN</option>
+                  <option value="DISMISSED">DISMISSED</option>
+                </select>
+              </Field>
+            )}
+            <button className="btn-primary" type="submit" disabled={saving} style={{ padding: '12px', fontSize: 14.5 }}>{saving ? t('students.saving') : editingId ? t('subj.save') : t('students.create')}</button>
             {formError && <div className="chip chip-danger" style={{ gridColumn: '1 / -1', borderRadius: 12, padding: '9px 12px' }}>{formError}</div>}
           </form>
         )}
@@ -189,7 +248,7 @@ export default function StudentsPage() {
                     <Td>{s.admissionYear ?? <span className="muted">—</span>}</Td>
                     <Td><StatusChip status={s.status} /></Td>
                     <Td>
-                      <div style={{ display: 'inline-flex', gap: 6 }}>
+                      <div style={{ display: 'inline-flex', gap: 6, flexWrap: 'wrap' }}>
                         <button
                           onClick={() => setNotesFor(s)}
                           className="glass hairline icon-btn"
@@ -198,12 +257,36 @@ export default function StudentsPage() {
                           📝 {t('students.notes')}
                         </button>
                         <button
+                          onClick={() => previewReport(s)}
+                          disabled={previewing === s.id}
+                          className="glass hairline icon-btn"
+                          style={{ padding: '6px 12px', borderRadius: 10, fontSize: 12.5, fontWeight: 600, color: 'var(--text-1)', cursor: previewing === s.id ? 'wait' : 'pointer' }}
+                          title={t('common.previewPdf')}
+                        >
+                          {previewing === s.id ? '…' : '👁'}
+                        </button>
+                        <button
                           onClick={() => downloadReport(s)}
                           disabled={reporting === s.id}
                           className="glass hairline icon-btn"
                           style={{ padding: '6px 12px', borderRadius: 10, fontSize: 12.5, fontWeight: 600, color: 'var(--text-1)', cursor: reporting === s.id ? 'wait' : 'pointer' }}
                         >
                           {reporting === s.id ? '…' : `📄 ${t('students.report')}`}
+                        </button>
+                        <button
+                          onClick={() => openEdit(s)}
+                          className="glass hairline icon-btn"
+                          style={{ padding: '6px 12px', borderRadius: 10, fontSize: 12.5, fontWeight: 600, color: 'var(--text-1)' }}
+                        >
+                          ✏️
+                        </button>
+                        <button
+                          onClick={() => removeStudent(s)}
+                          disabled={busyId === s.id}
+                          className="btn-danger"
+                          style={{ padding: '6px 12px', borderRadius: 10, fontSize: 12.5, fontWeight: 600, cursor: busyId === s.id ? 'wait' : 'pointer' }}
+                        >
+                          {busyId === s.id ? '…' : t('students.delete')}
                         </button>
                       </div>
                     </Td>
@@ -231,6 +314,8 @@ export default function StudentsPage() {
           onClose={() => setNotesFor(null)}
         />
       )}
+
+      {previewUrl && <PdfPreviewModal url={previewUrl} onClose={() => setPreviewUrl(null)} />}
     </div>
   );
 }

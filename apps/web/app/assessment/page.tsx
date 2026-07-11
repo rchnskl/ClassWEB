@@ -6,7 +6,8 @@ import Sidebar from '@/components/Sidebar';
 import Topbar from '@/components/Topbar';
 import GradingDrawer, { type Rubric } from '@/components/GradingDrawer';
 import RubricBuilderDrawer from '@/components/RubricBuilderDrawer';
-import { apiFetch, downloadFile } from '@/lib/api';
+import PdfPreviewModal from '@/components/PdfPreviewModal';
+import { apiFetch, downloadFile, fetchPreviewUrl } from '@/lib/api';
 import { useI18n } from '@/lib/i18n';
 
 interface SectionRef { id: string; sectionNo: string; subject: { id: string; code: string; nameEn: string } }
@@ -36,6 +37,8 @@ export default function AssessmentPage() {
   const [showConfig, setShowConfig] = useState(false);
   const [savingConfig, setSavingConfig] = useState(false);
   const [exporting, setExporting] = useState<string | null>(null);
+  const [previewing, setPreviewing] = useState<string | null>(null);
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [showBuilder, setShowBuilder] = useState(false);
 
   async function exportSection(fmt: 'pdf' | 'xlsx' | 'csv') {
@@ -44,10 +47,21 @@ export default function AssessmentPage() {
     try { await downloadFile(`/reports/grades/section/${sectionId}/${fmt}`, `section-grades.${fmt}`); }
     catch { /* ignore */ } finally { setExporting(null); }
   }
+  async function previewSectionPdf() {
+    if (!sectionId) return;
+    setPreviewing('section');
+    try { setPreviewUrl(await fetchPreviewUrl(`/reports/grades/section/${sectionId}/pdf`)); }
+    catch { /* ignore */ } finally { setPreviewing(null); }
+  }
   async function exportStudent(studentId: string) {
     setExporting(`student-${studentId}`);
     try { await downloadFile(`/reports/grades/student/${studentId}/pdf?sectionId=${sectionId}`, `grade-report.pdf`); }
     catch { /* ignore */ } finally { setExporting(null); }
+  }
+  async function previewStudentPdf(studentId: string) {
+    setPreviewing(`student-${studentId}`);
+    try { setPreviewUrl(await fetchPreviewUrl(`/reports/grades/student/${studentId}/pdf?sectionId=${sectionId}`)); }
+    catch { /* ignore */ } finally { setPreviewing(null); }
   }
 
   const currentSubjectId = sections.find((s) => s.id === sectionId)?.subject.id ?? '';
@@ -142,6 +156,7 @@ export default function AssessmentPage() {
 
         <div className="rise" style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 16 }}>
           <span className="muted" style={{ fontSize: 12.5, fontWeight: 600 }}>{t('as.export')}:</span>
+          <ExportBtn label={`👁 ${t('common.previewPdf')}`} busy={previewing === 'section'} onClick={previewSectionPdf} />
           <ExportBtn label="📄 PDF" busy={exporting === 'section-pdf'} onClick={() => exportSection('pdf')} primary />
           <ExportBtn label="📊 Excel" busy={exporting === 'section-xlsx'} onClick={() => exportSection('xlsx')} />
           <ExportBtn label="📁 CSV" busy={exporting === 'section-csv'} onClick={() => exportSection('csv')} />
@@ -173,6 +188,11 @@ export default function AssessmentPage() {
                     <Td>
                       <div style={{ display: 'inline-flex', gap: 6 }}>
                         <button onClick={() => setGrading(s)} className="btn-primary" style={{ padding: '6px 14px', fontSize: 12.5 }}>{t('as.grade_btn')}</button>
+                        <button onClick={() => previewStudentPdf(s.studentId)} disabled={previewing === `student-${s.studentId}`}
+                          className="glass hairline icon-btn" style={{ padding: '6px 12px', borderRadius: 10, fontSize: 12.5, fontWeight: 600, color: 'var(--text-1)', cursor: previewing === `student-${s.studentId}` ? 'wait' : 'pointer' }}
+                          title={t('common.previewPdf')}>
+                          {previewing === `student-${s.studentId}` ? '…' : '👁'}
+                        </button>
                         <button onClick={() => exportStudent(s.studentId)} disabled={exporting === `student-${s.studentId}`}
                           className="glass hairline icon-btn" style={{ padding: '6px 12px', borderRadius: 10, fontSize: 12.5, fontWeight: 600, color: 'var(--text-1)', cursor: exporting === `student-${s.studentId}` ? 'wait' : 'pointer' }}
                           title={t('as.exportStudent')}>
@@ -194,6 +214,8 @@ export default function AssessmentPage() {
           onChanged={() => { void loadSummary(sectionId); if (currentSubjectId) void loadRubrics(currentSubjectId); }}
         />
       )}
+
+      {previewUrl && <PdfPreviewModal url={previewUrl} onClose={() => setPreviewUrl(null)} />}
 
       {grading && sectionId && (
         <GradingDrawer

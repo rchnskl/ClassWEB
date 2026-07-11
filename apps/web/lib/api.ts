@@ -53,6 +53,22 @@ export async function downloadFile(path: string, fallbackName: string): Promise<
   URL.revokeObjectURL(url);
 }
 
+/**
+ * Fetch a protected file endpoint with auth and return an object URL for in-page preview
+ * (e.g. in an <iframe>). Avoids window.open(), which popup blockers frequently kill —
+ * especially once a fetch/await breaks the click's user-activation window.
+ * Caller must URL.revokeObjectURL() the result when done (PdfPreviewModal does this).
+ */
+export async function fetchPreviewUrl(path: string): Promise<string> {
+  const token = typeof window !== 'undefined' ? localStorage.getItem('accessToken') : null;
+  const res = await fetch(`${API_BASE}${path}`, {
+    headers: token ? { authorization: `Bearer ${token}` } : {},
+  });
+  if (!res.ok) throw new ApiError(res.status, 'Preview failed');
+  const blob = await res.blob();
+  return URL.createObjectURL(blob);
+}
+
 export interface Paginated<T> {
   total: number;
   take: number;
