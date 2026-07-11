@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation';
 import Logo from '@/components/Logo';
 import ThemeToggle from '@/components/ThemeToggle';
 import LanguageToggle from '@/components/LanguageToggle';
-import { apiFetch, saveSession, ApiError, type LoginResponse } from '@/lib/api';
+import { apiFetch, saveSession, takeRestoreRoute, ApiError, type LoginResponse } from '@/lib/api';
 import { useI18n } from '@/lib/i18n';
 
 export default function LoginPage() {
@@ -26,7 +26,9 @@ export default function LoginPage() {
         body: JSON.stringify({ email, password }),
       });
       saveSession(res);
-      router.push('/dashboard');
+      // Restore the route the user was on when an absolute-timeout logout occurred.
+      const restore = takeRestoreRoute();
+      router.push(restore && restore.startsWith('/') && !restore.startsWith('/login') ? restore : '/dashboard');
     } catch (err) {
       setError(err instanceof ApiError ? err.message : t('login.apiError'));
     } finally {

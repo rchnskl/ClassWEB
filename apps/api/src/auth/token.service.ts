@@ -16,7 +16,13 @@ export interface AccessTokenPayload {
 interface RefreshTokenPayload {
   sub: string;
   jti: string;
+  /** Session-anchor time (epoch seconds): when this login session first began.
+   *  Carried unchanged through every rotation so the absolute cap can be enforced. */
+  sat: number;
 }
+
+/** Absolute session lifetime: a session may not be refreshed past this, regardless of activity. */
+const ABSOLUTE_SESSION_MS = 3 * 60 * 60 * 1000;
 
 export interface IssuedTokens {
   accessToken: string;
@@ -49,6 +55,8 @@ export class TokenService {
   async issueTokens(
     user: { id: string; universityId: string; email: string },
     ctx: RequestContext = {},
+    /** Preserve the original session-anchor time across rotations; a fresh login omits it (defaults to now). */
+    sat?: number,
   ): Promise<IssuedTokens> {
     const accessTtl = this.config.get<string>('jwt.accessTtl')!;
     const refreshTtl = this.config.get<string>('jwt.refreshTtl')!;
@@ -59,7 +67,7 @@ export class TokenService {
       email: user.email,
     };
     const jti = randomUUID();
-    const refreshPayload: RefreshTokenPayload = { sub: user.id, jti };
+    const refreshPayload: RefreshTokenPayload = { sub: user.id, jti, sat: sat ?? Math.floor(Date.now() / 1000) };
 
     const accessToken = await this.jwt.signAsync(accessPayload, {
       secret: this.config.get<string>('jwt.accessSecret'),
@@ -102,17 +110,25 @@ export class TokenService {
       throw new UnauthorizedException('Refresh token is no longer valid');
     }
 
+    // Absolute session cap: enforced here on the server so a tampered client clock
+    // cannot extend a session beyond ABSOLUTE_SESSION_MS from its original anchor.
+    const anchorMs = (payload.sat ?? Math.floor(stored.createdAt.getTime() / 1000)) * 1000;
+    if (Date.now() - anchorMs >= ABSOLUTE_SESSION_MS) {
+      await this.prisma.refreshToken.update({ where: { id: stored.id }, data: { revokedAt: new Date() } });
+      throw new UnauthorizedException('Session expired');
+    }
+
     const user = await this.prisma.user.findFirst({
       where: { id: payload.sub, deletedAt: null, status: 'ACTIVE' },
     });
     if (!user) throw new UnauthorizedException('User is not active');
 
-    // Rotate: revoke the presented token, then issue a fresh pair.
+    // Rotate: revoke the presented token, then issue a fresh pair — keeping the original anchor.
     await this.prisma.refreshToken.update({
       where: { id: stored.id },
       data: { revokedAt: new Date() },
     });
-    return this.issueTokens(user, ctx);
+    return this.issueTokens(user, ctx, payload.sat);
   }
 
   /** Revokes a single refresh token (logout). Idempotent. */

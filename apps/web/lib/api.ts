@@ -14,7 +14,43 @@ function token(): string | null {
   return typeof window !== 'undefined' ? localStorage.getItem('accessToken') : null;
 }
 
-export async function apiFetch<T>(path: string, init: RequestInit = {}): Promise<T> {
+/** Single in-flight refresh so concurrent 401s don't stampede /auth/refresh. */
+let refreshInFlight: Promise<string | null> | null = null;
+
+/**
+ * Exchange the stored refresh token for a fresh access token.
+ * Returns the new access token, or null if the session can no longer be refreshed
+ * (invalid/expired refresh token, or the server's absolute 3-hour cap was reached).
+ */
+export async function refreshAccessToken(): Promise<string | null> {
+  if (typeof window === 'undefined') return null;
+  if (refreshInFlight) return refreshInFlight;
+
+  const refreshToken = localStorage.getItem('refreshToken');
+  if (!refreshToken) return null;
+
+  refreshInFlight = (async () => {
+    try {
+      const res = await fetch(`${API_BASE}/auth/refresh`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ refreshToken }),
+      });
+      if (!res.ok) return null;
+      const data = (await res.json()) as { accessToken: string; refreshToken: string };
+      localStorage.setItem('accessToken', data.accessToken);
+      localStorage.setItem('refreshToken', data.refreshToken);
+      return data.accessToken;
+    } catch {
+      return null;
+    } finally {
+      refreshInFlight = null;
+    }
+  })();
+  return refreshInFlight;
+}
+
+export async function apiFetch<T>(path: string, init: RequestInit = {}, _retried = false): Promise<T> {
   const accessToken = token();
   const res = await fetch(`${API_BASE}${path}`, {
     ...init,
@@ -24,6 +60,14 @@ export async function apiFetch<T>(path: string, init: RequestInit = {}): Promise
       ...(init.headers ?? {}),
     },
   });
+
+  // Access token likely expired — try one silent refresh, then replay the request once.
+  // Never do this for the refresh call itself, and never loop.
+  if (res.status === 401 && !_retried && !path.startsWith('/auth/')) {
+    const fresh = await refreshAccessToken();
+    if (fresh) return apiFetch<T>(path, init, true);
+  }
+
   const body = await res.json().catch(() => ({}));
   if (!res.ok) {
     const message = Array.isArray(body?.message) ? body.message.join(', ') : body?.message;
@@ -140,10 +184,31 @@ export function saveSession(res: LoginResponse) {
   localStorage.setItem('accessToken', res.accessToken);
   localStorage.setItem('refreshToken', res.refreshToken);
   localStorage.setItem('user', JSON.stringify(res.user));
+  // Anchor the client-side absolute-timeout clock. The server enforces the same 3h cap
+  // independently on refresh, so this is a UX convenience, not the security boundary.
+  localStorage.setItem('sessionStartAt', String(Date.now()));
+}
+
+export function getSessionStartAt(): number | null {
+  if (typeof window === 'undefined') return null;
+  const v = localStorage.getItem('sessionStartAt');
+  return v ? Number(v) : null;
 }
 
 export function clearSession() {
   localStorage.removeItem('accessToken');
   localStorage.removeItem('refreshToken');
   localStorage.removeItem('user');
+  localStorage.removeItem('sessionStartAt');
+}
+
+/** Persist the working state to restore after the next login (absolute-timeout logout). */
+export function saveRestoreState(route: string) {
+  try { localStorage.setItem('session.restoreRoute', route); } catch { /* ignore */ }
+}
+export function takeRestoreRoute(): string | null {
+  if (typeof window === 'undefined') return null;
+  const r = localStorage.getItem('session.restoreRoute');
+  if (r) localStorage.removeItem('session.restoreRoute');
+  return r;
 }

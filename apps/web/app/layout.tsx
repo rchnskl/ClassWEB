@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from 'next';
 import './globals.css';
 import AuroraBackground from '@/components/AuroraBackground';
+import SessionGuard from '@/components/SessionGuard';
 import { I18nProvider } from '@/lib/i18n';
 import { UIProvider } from '@/lib/ui';
 
@@ -26,7 +27,9 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       <body>
         <AuroraBackground />
         <I18nProvider>
-          <UIProvider>{children}</UIProvider>
+          <UIProvider>
+            <SessionGuard>{children}</SessionGuard>
+          </UIProvider>
         </I18nProvider>
       </body>
     </html>

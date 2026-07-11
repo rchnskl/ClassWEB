@@ -91,6 +91,16 @@ export class AuthService {
     });
   }
 
+  /** Re-verify the current user's password to unlock an idle-locked session. Issues no new tokens. */
+  async verifyPassword(userId: string, password: string): Promise<void> {
+    const user = await this.prisma.user.findFirst({ where: { id: userId, deletedAt: null } });
+    const hash = user?.passwordHash ?? '$2a$12$0000000000000000000000000000000000000000000000000000';
+    const ok = await bcrypt.compare(password, hash);
+    if (!user || !user.passwordHash || !ok || user.status !== 'ACTIVE') {
+      throw new UnauthorizedException('Password is incorrect');
+    }
+  }
+
   async logout(refreshToken: string, userId?: string, ctx: RequestContext = {}): Promise<void> {
     await this.tokenService.revoke(refreshToken);
     if (userId) {

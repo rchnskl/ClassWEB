@@ -1,10 +1,12 @@
 import { Body, Controller, HttpCode, HttpStatus, Patch, Post, Req } from '@nestjs/common';
+import { Throttle } from '@nestjs/throttler';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import type { Request } from 'express';
 import { AuthService } from './auth.service';
 import { LoginDto } from './dto/login.dto';
 import { RefreshDto } from './dto/refresh.dto';
 import { ChangePasswordDto } from './dto/change-password.dto';
+import { VerifyPasswordDto } from './dto/verify-password.dto';
 import { Public } from '../common/decorators/public.decorator';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { AuthenticatedUser } from '../common/authenticated-user';
@@ -19,6 +21,7 @@ export class AuthController {
   constructor(private readonly authService: AuthService) {}
 
   @Public()
+  @Throttle({ default: { limit: 10, ttl: 60_000 } })
   @Post('login')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Authenticate and receive access + refresh tokens' })
@@ -44,6 +47,15 @@ export class AuthController {
     @Req() req: Request,
   ): Promise<void> {
     await this.authService.logout(dto.refreshToken, user.id, context(req));
+  }
+
+  @Throttle({ default: { limit: 10, ttl: 60_000 } })
+  @Post('verify-password')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Re-verify my password to unlock an idle-locked session (no new tokens issued)' })
+  async verifyPassword(@Body() dto: VerifyPasswordDto, @CurrentUser() user: AuthenticatedUser): Promise<void> {
+    await this.authService.verifyPassword(user.id, dto.password);
   }
 
   @Patch('change-password')
