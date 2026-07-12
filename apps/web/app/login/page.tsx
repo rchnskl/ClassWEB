@@ -11,8 +11,8 @@ import { useI18n } from '@/lib/i18n';
 export default function LoginPage() {
   const router = useRouter();
   const { t } = useI18n();
-  const [email, setEmail] = useState('admin@nursing.au.edu');
-  const [password, setPassword] = useState('ChangeMe!2026');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -46,8 +46,8 @@ export default function LoginPage() {
       <div className="glass glass-strong rise" style={{ width: '100%', maxWidth: 420, padding: 36 }}>
         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center', marginBottom: 24 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 14, marginBottom: 14 }}>
-            <Logo size={62} variant="faculty" float />
-            <Logo size={54} variant="university" float />
+            <Logo size={57} variant="faculty" float />
+            <Logo size={60} variant="university" float />
           </div>
           <div style={{ fontSize: 22, fontWeight: 750, letterSpacing: -0.4 }}>
             Class<span className="brand-text">Web</span>
