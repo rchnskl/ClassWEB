@@ -70,7 +70,7 @@ export default function LoginPage() {
             type="email"
             value={email}
             onChange={(e) => setEmail(e.target.value)}
-            placeholder="you@nursing.au.edu"
+            placeholder=""
             autoComplete="username"
             required
           />
@@ -82,7 +82,7 @@ export default function LoginPage() {
             type="password"
             value={password}
             onChange={(e) => setPassword(e.target.value)}
-            placeholder="••••••••"
+            placeholder=""
             autoComplete="current-password"
             required
           />
