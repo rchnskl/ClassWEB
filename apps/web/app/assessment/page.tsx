@@ -236,7 +236,7 @@ export default function AssessmentPage() {
           <div onClick={(e) => e.stopPropagation()} className="rise" style={{ width: 'min(460px, 100%)', maxHeight: '86vh', overflowY: 'auto', background: 'var(--popover-bg)', border: '1px solid var(--glass-hairline)', borderRadius: 18, boxShadow: 'var(--shadow-lg)', padding: 22 }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
               <h2 style={{ fontSize: 17, fontWeight: 700, margin: 0 }}>{t('as.gradeScheme')}</h2>
-              <button onClick={() => setShowScheme(false)} className="glass hairline icon-btn" style={{ width: 32, height: 32, fontSize: 17 }}>×</button>
+              <button onClick={() => setShowScheme(false)} className="glass hairline icon-btn" aria-label={t('common.close')} style={{ width: 32, height: 32, fontSize: 17 }}>×</button>
             </div>
             <p className="muted" style={{ fontSize: 12, margin: '0 0 14px' }}>{t('as.schemeHint')}</p>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
@@ -262,7 +262,7 @@ export default function AssessmentPage() {
           <div onClick={(e) => e.stopPropagation()} className="rise" style={{ width: 'min(480px, 100%)', maxHeight: '86vh', overflowY: 'auto', background: 'var(--popover-bg)', border: '1px solid var(--glass-hairline)', borderRadius: 18, boxShadow: 'var(--shadow-lg)', padding: 22 }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
               <h2 style={{ fontSize: 17, fontWeight: 700, margin: 0 }}>{t('as.configRubrics')} · {sections.find((s) => s.id === sectionId)?.subject.code}</h2>
-              <button onClick={() => setShowConfig(false)} className="glass hairline icon-btn" style={{ width: 32, height: 32, fontSize: 17 }}>×</button>
+              <button onClick={() => setShowConfig(false)} className="glass hairline icon-btn" aria-label={t('common.close')} style={{ width: 32, height: 32, fontSize: 17 }}>×</button>
             </div>
             <p className="muted" style={{ fontSize: 12, margin: '0 0 14px' }}>{t('as.configHint')}</p>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>

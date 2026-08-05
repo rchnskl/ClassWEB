@@ -113,7 +113,7 @@ export default function RubricBuilderDrawer({ onClose, onChanged }: { onClose: (
           <div style={{ fontWeight: 750, fontSize: 18 }}>{mode === 'list' ? t('rubric.manage') : editingId ? t('rubric.edit') : t('rubric.new')}</div>
           <div style={{ display: 'flex', gap: 8 }}>
             {mode === 'form' && <button onClick={() => setMode('list')} className="glass hairline" style={{ padding: '7px 14px', borderRadius: 10, fontSize: 12.5, fontWeight: 600 }}>{t('rubric.backToList')}</button>}
-            <button onClick={onClose} className="glass hairline icon-btn" style={{ width: 34, height: 34, fontSize: 18 }}>×</button>
+            <button onClick={onClose} className="glass hairline icon-btn" aria-label={t('common.close')} style={{ width: 34, height: 34, fontSize: 18 }}>×</button>
           </div>
         </div>
 
@@ -193,7 +193,7 @@ export default function RubricBuilderDrawer({ onClose, onChanged }: { onClose: (
                         <input type="checkbox" checked={it.isCritical} onChange={(e) => updateItem(si, ii, { isCritical: e.target.checked })} style={{ width: 16, height: 16, cursor: 'pointer' }} />
                         <span style={{ fontSize: 16, color: it.isCritical ? 'var(--danger)' : 'var(--text-2)' }}>★</span>
                       </label>
-                      <button onClick={() => removeItem(si, ii)} disabled={s.items.length <= 1} className="glass hairline icon-btn" style={{ padding: '10px 10px', borderRadius: 10, fontSize: 12, opacity: s.items.length <= 1 ? 0.4 : 1 }}>✕</button>
+                      <button onClick={() => removeItem(si, ii)} disabled={s.items.length <= 1} aria-label={t('common.removeItem')} className="glass hairline icon-btn" style={{ padding: '10px 10px', borderRadius: 10, fontSize: 12, opacity: s.items.length <= 1 ? 0.4 : 1 }}>✕</button>
                     </div>
                   ))}
                   <button onClick={() => addItem(si)} className="glass hairline" style={{ padding: '6px 12px', borderRadius: 10, fontSize: 12, fontWeight: 600, marginTop: 4 }}>{t('rubric.addItem')}</button>

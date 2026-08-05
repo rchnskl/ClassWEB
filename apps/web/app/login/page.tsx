@@ -63,8 +63,9 @@ export default function LoginPage() {
         </p>
 
         <form onSubmit={onSubmit}>
-          <label className="subtle" style={{ fontSize: 13, fontWeight: 600 }}>{t('login.email')}</label>
+          <label htmlFor="login-email" className="subtle" style={{ fontSize: 13, fontWeight: 600 }}>{t('login.email')}</label>
           <input
+            id="login-email"
             className="input"
             style={{ margin: '6px 0 16px' }}
             type="email"
@@ -75,8 +76,9 @@ export default function LoginPage() {
             required
           />
 
-          <label className="subtle" style={{ fontSize: 13, fontWeight: 600 }}>{t('login.password')}</label>
+          <label htmlFor="login-password" className="subtle" style={{ fontSize: 13, fontWeight: 600 }}>{t('login.password')}</label>
           <input
+            id="login-password"
             className="input"
             style={{ margin: '6px 0 8px' }}
             type="password"

@@ -658,7 +658,7 @@ function UsersTab() {
           <div onClick={(e) => e.stopPropagation()} className="rise" style={{ width: 'min(440px, 100%)', maxHeight: '86vh', overflowY: 'auto', background: 'var(--popover-bg)', border: '1px solid var(--glass-hairline)', borderRadius: 18, boxShadow: 'var(--shadow-lg)', padding: 22 }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
               <h2 style={{ fontSize: 17, fontWeight: 700, margin: 0 }}>{createdResult ? t('users.createdTitle') : t('users.add')}</h2>
-              <button onClick={() => setShowCreate(false)} className="glass hairline icon-btn" style={{ width: 32, height: 32, fontSize: 17 }}>×</button>
+              <button onClick={() => setShowCreate(false)} className="glass hairline icon-btn" aria-label={t('common.close')} style={{ width: 32, height: 32, fontSize: 17 }}>×</button>
             </div>
 
             {createdResult ? (

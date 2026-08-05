@@ -72,7 +72,7 @@ export default function StudentNotesDrawer({
             <h2 style={{ fontSize: 18, fontWeight: 700, margin: 0 }}>{t('notes.title')}</h2>
             <div className="muted" style={{ fontSize: 13, marginTop: 2 }}>{studentName} · {studentCode}</div>
           </div>
-          <button onClick={onClose} className="glass hairline icon-btn" style={{ width: 34, height: 34, fontSize: 18 }}>×</button>
+          <button onClick={onClose} className="glass hairline icon-btn" aria-label={t('common.close')} style={{ width: 34, height: 34, fontSize: 18 }}>×</button>
         </div>
         <div className="muted" style={{ fontSize: 11.5, marginBottom: 16 }}>🔒 {t('notes.evidence')}</div>
 

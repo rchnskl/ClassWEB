@@ -87,7 +87,7 @@ export default function PdfPreviewModal({ url, onClose }: { url: string; onClose
             <a href={url} target="_blank" rel="noopener noreferrer" className="glass hairline icon-btn" style={{ padding: '6px 14px', borderRadius: 10, fontSize: 13, fontWeight: 600, color: 'var(--text-1)', textDecoration: 'none' }}>
               {t('common.openInNewTab')}
             </a>
-            <button onClick={handleClose} className="glass hairline icon-btn" style={{ padding: '6px 14px', borderRadius: 10, fontSize: 13, fontWeight: 600, color: 'var(--text-1)' }}>
+            <button onClick={handleClose} aria-label={t('common.close')} className="glass hairline icon-btn" style={{ padding: '6px 14px', borderRadius: 10, fontSize: 13, fontWeight: 600, color: 'var(--text-1)' }}>
               ✕
             </button>
           </div>
