@@ -11,7 +11,7 @@ import { apiFetch, downloadFile, fetchPreviewUrl } from '@/lib/api';
 import { useI18n } from '@/lib/i18n';
 
 interface SectionRef { id: string; sectionNo: string; subject: { id: string; code: string; nameEn: string } }
-interface Row { studentId: string; studentCode: string; nameEn: string; nameTh: string | null; total: number; gradedWeight: number; gradedCount: number; grade: string | null; gpa: number | null; hasCriticalFail?: boolean }
+interface Row { studentId: string; studentCode: string; nameEn: string; nameTh: string | null; total: number; gradedWeight: number; gradedCount: number; isComplete?: boolean; grade: string | null; gpa: number | null; hasCriticalFail?: boolean }
 interface SectionSummary { section: { sectionNo: string; subject: { code: string; nameEn: string } }; rubricCount: number; students: Row[] }
 interface Band { id: string; grade: string; gpa: number; label: string; minScore: number }
 interface RubricConfigRow { rubricId: string; code: string; nameEn: string; nameTh: string | null; weightPercent: number; isActive: boolean }
@@ -180,7 +180,11 @@ export default function AssessmentPage() {
                     <Td><span className="muted">{s.gradedCount}/{summary.rubricCount}</span></Td>
                     <Td><b>{s.total}</b><span className="muted">/100</span></Td>
                     <Td>
-                      <span className="chip" style={{ background: `${GRADE_COLOR(s.grade)}22`, color: GRADE_COLOR(s.grade), fontWeight: 700 }}>{s.grade ?? '—'}{s.gpa != null ? ` · ${s.gpa.toFixed(2)}` : ''}</span>
+                      {s.isComplete ? (
+                        <span className="chip" style={{ background: `${GRADE_COLOR(s.grade)}22`, color: GRADE_COLOR(s.grade), fontWeight: 700 }}>{s.grade ?? '—'}{s.gpa != null ? ` · ${s.gpa.toFixed(2)}` : ''}</span>
+                      ) : (
+                        <span className="chip muted" title={t('as.inProgressHint')} style={{ fontWeight: 600 }}>{t('as.inProgress')} · {s.gradedCount}/{summary.rubricCount}</span>
+                      )}
                       {s.hasCriticalFail && (
                         <span className="chip" title={t('as.criticalFail')} style={{ marginLeft: 6, background: 'var(--danger)22', color: 'var(--danger)', fontWeight: 700 }}>✕ {t('as.criticalFail')}</span>
                       )}

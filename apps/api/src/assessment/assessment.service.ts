@@ -403,11 +403,13 @@ export class AssessmentService {
     });
     const total = Math.round(rows.reduce((a, r) => a + r.contribution, 0) * 100) / 100;
     const gradedWeight = rows.filter((r) => r.graded).reduce((a, r) => a + r.weightPercent, 0);
-    const band = this.gradeFor(total, scheme.bands);
+    // Only assign a letter grade once every applicable rubric is graded — see sectionSummary.
+    const isComplete = rows.length > 0 && rows.every((r) => r.graded);
+    const band = isComplete ? this.gradeFor(total, scheme.bands) : null;
 
     return {
       student, sectionId: sectionId ?? null,
-      rubrics: rows, total, gradedWeight,
+      rubrics: rows, total, gradedWeight, isComplete,
       grade: band ? { grade: band.grade, gpa: band.gpa, label: band.label } : null,
     };
   }
@@ -437,11 +439,16 @@ export class AssessmentService {
         if (e.scorePercent != null) { total += (w / 100) * e.scorePercent; gradedWeight += w; }
       }
       total = Math.round(total * 100) / 100;
-      const band = this.gradeFor(total, scheme.bands);
+      // A letter grade is only meaningful once every rubric that applies to this
+      // subject has been evaluated. Until then, `total` is a running score (ungraded
+      // rubrics count as 0), so mapping it to a band would show a misleadingly low
+      // grade (e.g. a strong 2/5-graded student as "F"). Withhold the grade until complete.
+      const isComplete = resolved.length > 0 && evs.length >= resolved.length;
+      const band = isComplete ? this.gradeFor(total, scheme.bands) : null;
       return {
         studentId: en.studentId, studentCode: en.student.studentCode, nameEn: en.student.nameEn, nameTh: en.student.nameTh,
         total, gradedWeight, gradedCount: evs.length, hasCriticalFail: evs.some((e) => e.criticalFailed),
-        grade: band?.grade ?? null, gpa: band?.gpa ?? null,
+        isComplete, grade: band?.grade ?? null, gpa: band?.gpa ?? null,
       };
     });
 
