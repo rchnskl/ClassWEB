@@ -10,6 +10,19 @@ interface RubricForm { code: string; nameEn: string; nameTh: string; description
 
 interface RubricListItem { id: string; code: string | null; nameEn: string; nameTh: string | null; weightPercent: number; sections: { items: unknown[] }[] }
 
+/**
+ * Advisory status for a set of weights that is *meant* to total 100%.
+ * >100 is a hard error (the server rejects it); <100 is a soft warning —
+ * a perfect performance would then max out below 100%, skewing the grade
+ * bands — so we surface it in amber without blocking.
+ */
+function weightStatus(sum: number): { tone: 'ok' | 'over' | 'under' | 'empty'; color: string; bg: string } {
+  if (sum > 100.001) return { tone: 'over', color: 'var(--danger)', bg: 'rgba(226,86,77,0.15)' };
+  if (sum > 0 && sum < 99.999) return { tone: 'under', color: '#c98a1a', bg: 'rgba(201,138,26,0.16)' };
+  if (sum >= 99.999) return { tone: 'ok', color: 'var(--ok, #1f9d55)', bg: 'rgba(31,157,85,0.14)' };
+  return { tone: 'empty', color: 'var(--text-1)', bg: 'var(--glass-hairline)' };
+}
+
 const EMPTY_ITEM = (): ItemForm => ({ textEn: '', textTh: '', weightPercent: 0, maxRating: 5, isCritical: false });
 const EMPTY_SECTION = (): SectionForm => ({ nameEn: '', nameTh: '', weightPercent: 0, items: [EMPTY_ITEM()] });
 const EMPTY_RUBRIC = (): RubricForm => ({ code: '', nameEn: '', nameTh: '', description: '', weightPercent: 0, sections: [EMPTY_SECTION()] });
@@ -140,9 +153,11 @@ export default function RubricBuilderDrawer({ onClose, onChanged }: { onClose: (
 
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', margin: '18px 0 10px' }}>
               <div style={{ fontWeight: 700, fontSize: 13.5 }}>{t('rubric.sections')}</div>
-              <span className="chip" style={{ background: sectionSum > 100 ? 'rgba(226,86,77,0.15)' : 'var(--glass-hairline)', color: sectionSum > 100 ? 'var(--danger)' : 'var(--text-1)' }}>
-                {t('rubric.sumOfWeights')}: {sectionSum.toFixed(1)}%
-              </span>
+              {(() => { const st = weightStatus(sectionSum); return (
+                <span className="chip" title={st.tone === 'under' ? t('rubric.weightUnderHint') : undefined} style={{ background: st.bg, color: st.color }}>
+                  {t('rubric.sumOfWeights')}: {sectionSum.toFixed(1)}%{st.tone === 'under' ? ` · ${t('rubric.weightUnder')}` : ''}
+                </span>
+              ); })()}
             </div>
 
             {form.sections.map((s, si) => {
@@ -158,7 +173,11 @@ export default function RubricBuilderDrawer({ onClose, onChanged }: { onClose: (
                     <button onClick={() => removeSection(si)} className="btn-danger" style={{ padding: '10px 12px', fontSize: 12.5 }}>🗑</button>
                   </div>
 
-                  <div className="muted" style={{ fontSize: 11.5, marginBottom: 6, color: itemSum > 100 ? 'var(--danger)' : undefined }}>{t('rubric.itemWeightSum')}: {itemSum.toFixed(1)}%</div>
+                  {(() => { const st = weightStatus(itemSum); return (
+                    <div className="muted" style={{ fontSize: 11.5, marginBottom: 6, color: st.tone === 'ok' ? undefined : st.color }}>
+                      {t('rubric.itemWeightSum')}: {itemSum.toFixed(1)}%{st.tone === 'under' ? ` · ${t('rubric.weightUnder')}` : ''}
+                    </div>
+                  ); })()}
 
                   {s.items.map((it, ii) => (
                     <div key={ii} style={{ display: 'flex', gap: 8, alignItems: 'flex-end', marginBottom: 8, paddingLeft: 10, borderLeft: '2px solid var(--glass-hairline)' }}>

@@ -281,7 +281,10 @@ export default function AssessmentPage() {
             </div>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 12, padding: '8px 10px', fontSize: 13, fontWeight: 700 }}>
               <span>{t('as.sumActive')}</span>
-              <span style={{ color: activeSum > 100 ? 'var(--danger)' : 'var(--success)' }}>{activeSum}% {activeSum > 100 ? `· ${t('as.overLimit')}` : ''}</span>
+              <span title={activeSum > 0 && activeSum < 99.999 ? t('rubric.weightUnderHint') : undefined}
+                style={{ color: activeSum > 100 ? 'var(--danger)' : activeSum > 0 && activeSum < 99.999 ? '#c98a1a' : 'var(--success)' }}>
+                {activeSum}% {activeSum > 100 ? `· ${t('as.overLimit')}` : activeSum > 0 && activeSum < 99.999 ? `· ${t('rubric.weightUnder')}` : ''}
+              </span>
             </div>
             <button className="btn-primary" onClick={saveConfig} disabled={savingConfig || activeSum > 100} style={{ width: '100%', padding: 12, fontSize: 14.5, marginTop: 10 }}>{savingConfig ? t('as.saving') : t('as.save')}</button>
           </div>
