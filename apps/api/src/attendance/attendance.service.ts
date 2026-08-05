@@ -1,6 +1,6 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { randomBytes } from 'node:crypto';
-import { AttendanceStatus, AuditAction, Prisma } from '@prisma/client';
+import { AttendanceStatus, AuditAction } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { ManualMarkDto, ResolveCheckInDto } from './dto/attendance.dto';
@@ -67,7 +67,8 @@ export class AttendanceService {
   // --- lecturer: open / close / state -----------------------------------
 
   async open(universityId: string, userId: string, classSessionId: string) {
-    const session = await this.loadSession(universityId, classSessionId);
+    // Validates the session exists / belongs to this tenant (throws if not).
+    await this.loadSession(universityId, classSessionId);
     // Reuse an existing open, unexpired window if present.
     const existing = await this.prisma.attendanceSession.findFirst({
       where: { classSessionId, isOpen: true, expiresAt: { gt: new Date() } },

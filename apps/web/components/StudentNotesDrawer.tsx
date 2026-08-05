@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { apiFetch, type Paginated, type StudentNote } from '@/lib/api';
 import { useI18n } from '@/lib/i18n';
 
@@ -20,7 +20,7 @@ export default function StudentNotesDrawer({
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  async function load() {
+  const load = useCallback(async () => {
     setLoading(true);
     try {
       const data = await apiFetch<Paginated<StudentNote>>(`/students/${studentId}/notes`);
@@ -30,8 +30,8 @@ export default function StudentNotesDrawer({
     } finally {
       setLoading(false);
     }
-  }
-  useEffect(() => { void load(); /* eslint-disable-next-line */ }, [studentId]);
+  }, [studentId]);
+  useEffect(() => { void load(); }, [load]);
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
