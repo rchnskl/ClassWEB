@@ -228,6 +228,7 @@ const EN: Dict = {
   'students.other': 'Other',
   'students.notes': 'Notes',
   'students.report': 'Report',
+  'students.edit': 'Edit',
   'students.delete': 'Delete',
   'students.confirmDelete': 'Delete this student? This cannot be undone.',
 
@@ -805,6 +806,7 @@ const TH: Dict = {
   'students.other': 'อื่น ๆ',
   'students.notes': 'บันทึก',
   'students.report': 'รายงาน',
+  'students.edit': 'แก้ไข',
   'students.delete': 'ลบ',
   'students.confirmDelete': 'ต้องการลบนักศึกษาคนนี้หรือไม่? ไม่สามารถย้อนกลับได้',
 

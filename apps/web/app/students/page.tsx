@@ -248,46 +248,15 @@ export default function StudentsPage() {
                     <Td>{s.admissionYear ?? <span className="muted">—</span>}</Td>
                     <Td><StatusChip status={s.status} t={t} /></Td>
                     <Td>
-                      <div style={{ display: 'inline-flex', gap: 6, flexWrap: 'wrap' }}>
-                        <button
-                          onClick={() => setNotesFor(s)}
-                          className="glass hairline icon-btn"
-                          style={{ padding: '6px 12px', borderRadius: 10, fontSize: 12.5, fontWeight: 600, color: 'var(--text-1)' }}
-                        >
-                          📝 {t('students.notes')}
-                        </button>
-                        <button
-                          onClick={() => previewReport(s)}
-                          disabled={previewing === s.id}
-                          className="glass hairline icon-btn"
-                          style={{ padding: '6px 12px', borderRadius: 10, fontSize: 12.5, fontWeight: 600, color: 'var(--text-1)', cursor: previewing === s.id ? 'wait' : 'pointer' }}
-                          title={t('common.previewPdf')}
-                        >
-                          {previewing === s.id ? '…' : '👁'}
-                        </button>
-                        <button
-                          onClick={() => downloadReport(s)}
-                          disabled={reporting === s.id}
-                          className="glass hairline icon-btn"
-                          style={{ padding: '6px 12px', borderRadius: 10, fontSize: 12.5, fontWeight: 600, color: 'var(--text-1)', cursor: reporting === s.id ? 'wait' : 'pointer' }}
-                        >
-                          {reporting === s.id ? '…' : `📄 ${t('students.report')}`}
-                        </button>
-                        <button
-                          onClick={() => openEdit(s)}
-                          className="glass hairline icon-btn"
-                          style={{ padding: '6px 12px', borderRadius: 10, fontSize: 12.5, fontWeight: 600, color: 'var(--text-1)' }}
-                        >
-                          ✏️
-                        </button>
-                        <button
-                          onClick={() => removeStudent(s)}
-                          disabled={busyId === s.id}
-                          className="btn-danger"
-                          style={{ padding: '6px 12px', borderRadius: 10, fontSize: 12.5, fontWeight: 600, cursor: busyId === s.id ? 'wait' : 'pointer' }}
-                        >
-                          {busyId === s.id ? '…' : t('students.delete')}
-                        </button>
+                      {/* Uniform icon buttons on a single line — with five
+                          labelled actions this column wrapped one button per
+                          row once real names widened the name column. */}
+                      <div style={{ display: 'inline-flex', gap: 6, flexWrap: 'nowrap' }}>
+                        <RowAction onClick={() => setNotesFor(s)} title={t('students.notes')}>📝</RowAction>
+                        <RowAction onClick={() => previewReport(s)} busy={previewing === s.id} title={t('common.previewPdf')}>👁</RowAction>
+                        <RowAction onClick={() => downloadReport(s)} busy={reporting === s.id} title={t('students.report')}>📄</RowAction>
+                        <RowAction onClick={() => openEdit(s)} title={t('students.edit')}>✏️</RowAction>
+                        <RowAction onClick={() => removeStudent(s)} busy={busyId === s.id} title={t('students.delete')} danger>🗑</RowAction>
                       </div>
                     </Td>
                   </tr>
@@ -341,6 +310,30 @@ function PagerBtn({ children, disabled, onClick }: { children: React.ReactNode; 
     </button>
   );
 }
+/** Uniform square action button for a table row: icon + tooltip + accessible
+ *  name, disabled with a wait cursor while its own request is in flight. */
+function RowAction({
+  children, onClick, title, busy, danger,
+}: { children: React.ReactNode; onClick: () => void; title: string; busy?: boolean; danger?: boolean }) {
+  return (
+    <button
+      onClick={onClick}
+      disabled={busy}
+      title={title}
+      aria-label={title}
+      className={danger ? 'btn-danger' : 'glass hairline icon-btn'}
+      style={{
+        width: 34, height: 34, flexShrink: 0, display: 'grid', placeItems: 'center',
+        borderRadius: 10, fontSize: 14, fontWeight: 600,
+        color: danger ? undefined : 'var(--text-1)',
+        cursor: busy ? 'wait' : 'pointer', opacity: busy ? 0.6 : 1,
+      }}
+    >
+      {busy ? '…' : children}
+    </button>
+  );
+}
+
 function StatusChip({ status, t }: { status: string; t: (key: string) => string }) {
   const cls = status === 'STUDYING' ? 'chip-success' : status === 'GRADUATED' ? 'chip' : 'chip-warning';
   return <span className={`chip ${cls}`} style={cls === 'chip' ? { background: 'var(--glass-hairline)', color: 'var(--text-1)' } : undefined}>{t(`students.status.${status}`)}</span>;
