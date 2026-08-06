@@ -32,6 +32,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends openssl && rm -
 
 COPY --from=build /app/node_modules ./node_modules
 COPY --from=build /app/apps/api/dist ./apps/api/dist
+COPY --from=build /app/apps/api/assets ./apps/api/assets
 COPY --from=build /app/packages/database ./packages/database
 COPY --from=build /app/apps/api/package.json ./apps/api/package.json
 

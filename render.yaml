@@ -28,3 +28,5 @@ services:
         value: 7d
       - key: CORS_ORIGINS
         sync: false # set to your Cloudflare Pages URL once it exists, e.g. https://classweb.pages.dev
+      - key: WEB_BASE_URL
+        value: https://classweb.rachanonskl-c20.workers.dev # used to build the QR/verify link on generated report PDFs
