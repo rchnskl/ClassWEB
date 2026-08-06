@@ -15,6 +15,6 @@ export class DashboardController {
   @Permissions('report:read')
   @ApiOperation({ summary: 'Tenant-scoped dashboard KPI summary (requires report:read)' })
   summary(@CurrentUser() user: AuthenticatedUser) {
-    return this.dashboardService.summary(user.universityId);
+    return this.dashboardService.summary(user);
   }
 }

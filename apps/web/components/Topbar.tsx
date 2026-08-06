@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import ThemeToggle from './ThemeToggle';
 import LanguageToggle from './LanguageToggle';
@@ -8,16 +8,36 @@ import NotificationBell from './NotificationBell';
 import ChangePasswordModal from './ChangePasswordModal';
 import GlobalSearch from './GlobalSearch';
 import { IconLogout, IconMenu } from './icons';
-import { clearSession } from '@/lib/api';
+import { apiFetch, clearSession, type MeResponse } from '@/lib/api';
 import { useI18n } from '@/lib/i18n';
 import { useUI } from '@/lib/ui';
+
+// Highest-privilege role wins when a user holds more than one (an admin
+// who is also a lecturer is still shown as Administrator).
+const ROLE_RANK = ['ADMIN', 'LECTURER', 'STUDENT'];
 
 export default function Topbar({ email }: { email: string }) {
   const router = useRouter();
   const { t } = useI18n();
   const { setSidebarOpen } = useUI();
   const [showPwd, setShowPwd] = useState(false);
+  const [roleCode, setRoleCode] = useState<string | null>(null);
   const initials = email.slice(0, 2).toUpperCase();
+
+  useEffect(() => {
+    // Previously a hardcoded "Administrator" label shown to every user
+    // regardless of their actual role — a lecturer's own topbar claimed
+    // they were an admin. Resolve the real role once per mount instead.
+    apiFetch<MeResponse>('/users/me')
+      .then((me) => {
+        const codes = me.roles.map((r) => r.role.code);
+        const top = ROLE_RANK.find((r) => codes.includes(r)) ?? codes[0] ?? null;
+        setRoleCode(top);
+      })
+      .catch(() => {});
+  }, []);
+
+  const roleLabel = roleCode ? t(`role.${roleCode}`) : '';
 
   return (
     <header
@@ -53,7 +73,7 @@ export default function Topbar({ email }: { email: string }) {
         </div>
         <div className="hide-mobile" style={{ lineHeight: 1.2, textAlign: 'left' }}>
           <div style={{ fontSize: 13.5, fontWeight: 600, color: 'var(--text-0)' }}>{email}</div>
-          <div className="muted" style={{ fontSize: 11.5 }}>{t('top.role')}</div>
+          <div className="muted" style={{ fontSize: 11.5 }}>{roleLabel}</div>
         </div>
       </button>
 

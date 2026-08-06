@@ -109,7 +109,7 @@ export default function StudentPicker({
         <ul
           id="student-picker-list"
           role="listbox"
-          className="glass"
+          className="glass glass-strong"
           style={{
             position: 'absolute', top: 'calc(100% + 6px)', left: 0, right: 0, zIndex: 40,
             maxHeight: 260, overflowY: 'auto', borderRadius: 12, padding: 6, margin: 0, listStyle: 'none',

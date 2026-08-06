@@ -121,7 +121,7 @@ export default function GlobalSearch() {
         <ul
           id="global-search-list"
           role="listbox"
-          className="glass"
+          className="glass glass-strong"
           style={{
             position: 'absolute', top: 'calc(100% + 6px)', left: 0, right: 0, zIndex: 60,
             maxHeight: 320, overflowY: 'auto', borderRadius: 12, padding: 6, margin: 0, listStyle: 'none',

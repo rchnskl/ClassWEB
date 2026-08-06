@@ -1,5 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { AuthenticatedUser } from '../common/authenticated-user';
+import { LecturerScopeService } from '../common/lecturer-scope.service';
 
 export interface DashboardSummary {
   students: number;
@@ -13,32 +15,58 @@ export interface DashboardSummary {
 }
 
 /**
- * Real, tenant-scoped aggregate queries for the dashboard. No mocked numbers —
- * every figure is computed from the database for the caller's university.
+ * Real, tenant- or lecturer-scoped aggregate queries for the dashboard. No
+ * mocked numbers — every figure is computed from the database.
+ *
+ * ADMIN sees the whole tenant. A LECTURER sees the same numbers the
+ * Students/Sections pages show them — their own sections only — otherwise
+ * the dashboard tiles quote a faculty-wide count while every list page a
+ * click away is correctly scoped to nothing, which reads as the dashboard
+ * lying.
  */
 @Injectable()
 export class DashboardService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly lecturerScope: LecturerScopeService,
+  ) {}
 
-  async summary(universityId: string): Promise<DashboardSummary> {
+  async summary(user: AuthenticatedUser): Promise<DashboardSummary> {
+    const universityId = user.universityId;
     const startOfDay = new Date();
     startOfDay.setHours(0, 0, 0, 0);
     const endOfDay = new Date(startOfDay);
     endOfDay.setDate(endOfDay.getDate() + 1);
 
-    const [students, lecturers, sections, enrollments, todayClasses, atRiskGroups, rateAgg] =
+    const isAdmin = this.lecturerScope.isAdmin(user);
+    let sectionIds: string[] | null = null; // null = no restriction (admin)
+    if (!isAdmin) {
+      const me = await this.lecturerScope.myLecturerId(user);
+      sectionIds = me ? await this.lecturerScope.sectionIdsFor(me) : [];
+    }
+    const sectionWhere = sectionIds ? { universityId, id: { in: sectionIds } } : { universityId };
+    const enrollmentSectionWhere = sectionIds ? { universityId, id: { in: sectionIds } } : { universityId };
+
+    const [studentGroups, lecturerCount, sections, enrollments, todayClasses, atRiskGroups, rateAgg] =
       await this.prisma.$transaction([
-        this.prisma.student.count({
-          where: { universityId, deletedAt: null, status: 'STUDYING' },
+        // Distinct students actually enrolled in the sections in scope —
+        // for a lecturer this is "students I teach", not every STUDYING
+        // student in the faculty.
+        this.prisma.enrollment.groupBy({
+          by: ['studentId'],
+          where: { status: 'ENROLLED', section: enrollmentSectionWhere },
+          orderBy: { studentId: 'asc' },
         }),
-        this.prisma.lecturer.count({ where: { universityId, deletedAt: null, isActive: true } }),
-        this.prisma.section.count({ where: { universityId, deletedAt: null, isActive: true } }),
+        sectionIds
+          ? this.prisma.sectionLecturer.findMany({ where: { sectionId: { in: sectionIds } }, distinct: ['lecturerId'], select: { lecturerId: true } })
+          : this.prisma.lecturer.count({ where: { universityId, deletedAt: null, isActive: true } }),
+        this.prisma.section.count({ where: { ...sectionWhere, deletedAt: null, isActive: true } }),
         this.prisma.enrollment.count({
-          where: { status: 'ENROLLED', section: { universityId } },
+          where: { status: 'ENROLLED', section: enrollmentSectionWhere },
         }),
         this.prisma.classSession.count({
           where: {
-            section: { universityId },
+            section: enrollmentSectionWhere,
             sessionDate: { gte: startOfDay, lt: endOfDay },
             status: { in: ['SCHEDULED', 'IN_PROGRESS', 'COMPLETED', 'MAKEUP'] },
           },
@@ -46,19 +74,19 @@ export class DashboardService {
         // Distinct students at risk (a student is counted once even across sections).
         this.prisma.enrollment.groupBy({
           by: ['studentId'],
-          where: { status: 'ENROLLED', section: { universityId }, attendanceRate: { lt: 80 } },
+          where: { status: 'ENROLLED', section: enrollmentSectionWhere, attendanceRate: { lt: 80 } },
           _count: { _all: true },
           orderBy: { studentId: 'asc' },
         }),
         this.prisma.enrollment.aggregate({
-          where: { status: 'ENROLLED', section: { universityId }, attendanceRate: { not: null } },
+          where: { status: 'ENROLLED', section: enrollmentSectionWhere, attendanceRate: { not: null } },
           _avg: { attendanceRate: true },
         }),
       ]);
 
     return {
-      students,
-      lecturers,
+      students: studentGroups.length,
+      lecturers: typeof lecturerCount === 'number' ? lecturerCount : lecturerCount.length,
       sections,
       enrollments,
       todayClasses,
