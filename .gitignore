@@ -49,3 +49,9 @@ storage/uploads/*
 # TS incremental build info
 *.tsbuildinfo
 apps/api/test/.pgdata-e2e/
+scratchpad/.pgdata-dev/
+
+# Playwright
+apps/web/test-results/
+apps/web/playwright-report/
+apps/web/playwright/.cache/
