@@ -30,11 +30,12 @@ const REASONS = ['MAKEUP_OTHER_SECTION', 'WRONG_CODE', 'LATE_REGISTRATION', 'OTH
 export default function AttendancePage() {
   const router = useRouter();
   const { t } = useI18n();
-  const [email, setEmail] = useState('admin@nursing.au.edu');
+  const [email, setEmail] = useState('');
   const [sessions, setSessions] = useState<SessionItem[]>([]);
   const [selected, setSelected] = useState<string | null>(null);
   const [state, setState] = useState<State | null>(null);
   const [origin, setOrigin] = useState('');
+  const [actionError, setActionError] = useState<string | null>(null);
 
   const today = new Date().toISOString().slice(0, 10);
 
@@ -61,17 +62,33 @@ export default function AttendancePage() {
 
   async function open() {
     if (!selected) return;
-    await apiFetch(`/attendance/sessions/${selected}/open`, { method: 'POST' });
-    await loadState(selected);
+    setActionError(null);
+    try {
+      await apiFetch(`/attendance/sessions/${selected}/open`, { method: 'POST' });
+      await loadState(selected);
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : 'Failed to open the attendance window.');
+    }
   }
   async function mark(studentId: string, status: string) {
     if (!selected) return;
-    await apiFetch('/attendance/records', { method: 'POST', body: JSON.stringify({ classSessionId: selected, studentId, status }) });
-    await loadState(selected);
+    setActionError(null);
+    try {
+      await apiFetch('/attendance/records', { method: 'POST', body: JSON.stringify({ classSessionId: selected, studentId, status }) });
+      await loadState(selected);
+    } catch (err) {
+      // A silently-failed mark makes the teacher think attendance was recorded when it wasn't.
+      setActionError(err instanceof Error ? err.message : 'Failed to record attendance. Please try again.');
+    }
   }
   async function resolve(id: string, action: 'ACCEPT' | 'REJECT', reason: string) {
-    await apiFetch(`/attendance/checkins/${id}/resolve`, { method: 'POST', body: JSON.stringify({ action, reason }) });
-    if (selected) await loadState(selected);
+    setActionError(null);
+    try {
+      await apiFetch(`/attendance/checkins/${id}/resolve`, { method: 'POST', body: JSON.stringify({ action, reason }) });
+      if (selected) await loadState(selected);
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : 'Failed to resolve the check-in.');
+    }
   }
 
   function pickSession(id: string) { setSelected(id); void loadState(id); }
@@ -81,6 +98,13 @@ export default function AttendancePage() {
       <Sidebar active="Attendance" />
       <div className="app-main">
         <Topbar email={email} />
+
+        {actionError && (
+          <div className="chip chip-danger" role="alert" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, width: '100%', marginBottom: 12 }}>
+            <span>{actionError}</span>
+            <button onClick={() => setActionError(null)} aria-label={t('common.close')} className="icon-btn" style={{ background: 'transparent', border: 'none', color: 'inherit', cursor: 'pointer', fontSize: 16 }}>×</button>
+          </div>
+        )}
 
         <div className="rise" style={{ marginBottom: 16 }}>
           <h1 style={{ fontSize: 27, fontWeight: 750, letterSpacing: -0.6, margin: 0 }}>{t('att.title')}</h1>

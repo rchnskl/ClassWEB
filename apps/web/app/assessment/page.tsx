@@ -24,7 +24,7 @@ export default function AssessmentPage() {
   const { t, lang } = useI18n();
   const name = (en: string, th: string | null) => (lang === 'th' && th ? th : en);
 
-  const [email, setEmail] = useState('admin@nursing.au.edu');
+  const [email, setEmail] = useState('');
   const [sections, setSections] = useState<SectionRef[]>([]);
   const [sectionId, setSectionId] = useState('');
   const [rubrics, setRubrics] = useState<Rubric[]>([]);
@@ -40,6 +40,7 @@ export default function AssessmentPage() {
   const [previewing, setPreviewing] = useState<string | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [showBuilder, setShowBuilder] = useState(false);
+  const [actionError, setActionError] = useState<string | null>(null);
 
   async function exportSection(fmt: 'pdf' | 'xlsx' | 'csv') {
     if (!sectionId) return;
@@ -98,30 +99,44 @@ export default function AssessmentPage() {
   }
 
   async function openScheme() {
-    const s = await apiFetch<{ bands: Band[] }>('/assessment/grade-scheme');
-    setScheme(s.bands);
-    setShowScheme(true);
+    setActionError(null);
+    try {
+      const s = await apiFetch<{ bands: Band[] }>('/assessment/grade-scheme');
+      setScheme(s.bands);
+      setShowScheme(true);
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : 'Failed to load the grade scheme.');
+    }
   }
   async function saveScheme() {
     if (!scheme) return;
     setSavingScheme(true);
+    setActionError(null);
     try {
       await apiFetch('/assessment/grade-scheme', { method: 'PATCH', body: JSON.stringify({ bands: scheme.map((b) => ({ id: b.id, minScore: b.minScore })) }) });
       setShowScheme(false);
       await loadSummary(sectionId);
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : 'Failed to save the grade scheme.');
     } finally { setSavingScheme(false); }
   }
 
   async function openConfig() {
     if (!currentSubjectId) return;
-    const rows = await apiFetch<RubricConfigRow[]>(`/assessment/subjects/${currentSubjectId}/rubric-config`);
-    setRubricConfig(rows);
-    setShowConfig(true);
+    setActionError(null);
+    try {
+      const rows = await apiFetch<RubricConfigRow[]>(`/assessment/subjects/${currentSubjectId}/rubric-config`);
+      setRubricConfig(rows);
+      setShowConfig(true);
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : 'Failed to load the rubric configuration.');
+    }
   }
   const activeSum = rubricConfig ? rubricConfig.filter((r) => r.isActive).reduce((a, r) => a + r.weightPercent, 0) : 0;
   async function saveConfig() {
     if (!rubricConfig || !currentSubjectId) return;
     setSavingConfig(true);
+    setActionError(null);
     try {
       await apiFetch(`/assessment/subjects/${currentSubjectId}/rubric-config`, {
         method: 'PATCH',
@@ -130,6 +145,8 @@ export default function AssessmentPage() {
       setShowConfig(false);
       await loadRubrics(currentSubjectId);
       await loadSummary(sectionId);
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : 'Failed to save the rubric configuration.');
     } finally { setSavingConfig(false); }
   }
 
@@ -138,6 +155,13 @@ export default function AssessmentPage() {
       <Sidebar active="Assessment" />
       <div className="app-main">
         <Topbar email={email} />
+
+        {actionError && (
+          <div className="chip chip-danger" role="alert" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, width: '100%', marginBottom: 12 }}>
+            <span>{actionError}</span>
+            <button onClick={() => setActionError(null)} aria-label={t('common.close')} className="icon-btn" style={{ background: 'transparent', border: 'none', color: 'inherit', cursor: 'pointer', fontSize: 16 }}>×</button>
+          </div>
+        )}
 
         <div className="rise" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', gap: 12, flexWrap: 'wrap', marginBottom: 16 }}>
           <div>

@@ -46,12 +46,17 @@ export default function GradingDrawer({
   const [weightsDirty, setWeightsDirty] = useState(false);
   const [saving, setSaving] = useState(false);
   const [savingW, setSavingW] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const active = rubrics.find((r) => r.id === activeId);
 
   const loadSummary = useCallback(async () => {
-    const s = await apiFetch<Summary>(`/assessment/students/${studentId}/summary?sectionId=${sectionId}`);
-    setSummary(s);
+    try {
+      const s = await apiFetch<Summary>(`/assessment/students/${studentId}/summary?sectionId=${sectionId}`);
+      setSummary(s);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to load summary');
+    }
   }, [studentId, sectionId]);
 
   useEffect(() => { void loadSummary(); }, [loadSummary]);
@@ -76,6 +81,7 @@ export default function GradingDrawer({
   async function save() {
     if (!active) return;
     setSaving(true);
+    setError(null);
     try {
       const scores = Object.entries(ratings).filter(([, v]) => v > 0).map(([rubricItemId, rating]) => ({
         rubricItemId, rating, ...(rubricItemId in passed ? { passed: passed[rubricItemId] } : {}),
@@ -83,17 +89,23 @@ export default function GradingDrawer({
       await apiFetch('/assessment/evaluation', { method: 'POST', body: JSON.stringify({ rubricId: active.id, studentId, sectionId, scores }) });
       await loadSummary();
       onSaved();
+    } catch (err) {
+      // Never let a failed save look like success — the grade would be lost silently.
+      setError(err instanceof Error ? err.message : 'Failed to save the evaluation. Please try again.');
     } finally { setSaving(false); }
   }
 
   async function saveWeights() {
     if (!active) return;
     setSavingW(true);
+    setError(null);
     try {
       const items = active.sections.flatMap((s) => s.items).map((i) => ({ id: i.id, weightPercent: weights[i.id] ?? i.weightPercent }));
       await apiFetch(`/assessment/rubrics/${active.id}/weights`, { method: 'PATCH', body: JSON.stringify({ items }) });
       active.sections.forEach((s) => s.items.forEach((i) => { i.weightPercent = weights[i.id] ?? i.weightPercent; }));
       setWeightsDirty(false);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to save weights. Please try again.');
     } finally { setSavingW(false); }
   }
 
@@ -113,8 +125,12 @@ export default function GradingDrawer({
               </div>
             )}
           </div>
-          <button onClick={onClose} className="glass hairline icon-btn" style={{ width: 34, height: 34, fontSize: 18 }}>×</button>
+          <button onClick={onClose} aria-label={t('common.close')} className="glass hairline icon-btn" style={{ width: 34, height: 34, fontSize: 18 }}>×</button>
         </div>
+
+        {error && (
+          <div className="chip chip-danger" role="alert" style={{ display: 'block', marginBottom: 12, width: '100%' }}>{error}</div>
+        )}
 
         {rubrics.length === 0 ? (
           <div className="muted" style={{ textAlign: 'center', padding: 40 }}>{t('as.noneActive')}</div>
