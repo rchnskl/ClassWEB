@@ -64,6 +64,14 @@ export class CreateStudentDto {
   @Max(2100)
   admissionYear?: number;
 
+  @ApiPropertyOptional({ description: 'Current year of study (1–8)', example: 2 })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(8)
+  yearLevel?: number;
+
   @ApiPropertyOptional()
   @IsOptional()
   @IsString()

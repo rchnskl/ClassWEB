@@ -21,6 +21,7 @@ import { SubjectsModule } from './subjects/subjects.module';
 import { SectionsModule } from './sections/sections.module';
 import { RoomsModule } from './rooms/rooms.module';
 import { EnrollmentsModule } from './enrollments/enrollments.module';
+import { StudentGroupsModule } from './student-groups/student-groups.module';
 import { TimetableModule } from './timetable/timetable.module';
 import { CalendarModule } from './calendar/calendar.module';
 import { AttendanceModule } from './attendance/attendance.module';
@@ -60,6 +61,7 @@ import { AllExceptionsFilter } from './common/filters/all-exceptions.filter';
     SectionsModule,
     RoomsModule,
     EnrollmentsModule,
+    StudentGroupsModule,
     TimetableModule,
     CalendarModule,
     AttendanceModule,

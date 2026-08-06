@@ -1,9 +1,10 @@
-import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { StudentsRepository } from './students.repository';
 import { CreateStudentDto } from './dto/create-student.dto';
 import { UpdateStudentDto } from './dto/update-student.dto';
-import { QueryStudentDto } from './dto/query-student.dto';
+import { LookupStudentDto, QueryStudentDto } from './dto/query-student.dto';
+import { PromoteYearDto } from './dto/promote-year.dto';
 import { Paginated } from '../common/dto/pagination.dto';
 import { AuthenticatedUser } from '../common/authenticated-user';
 import { LecturerScopeService } from '../common/lecturer-scope.service';
@@ -39,6 +40,21 @@ export class StudentsService {
     return student;
   }
 
+  /**
+   * Central-roster search for building sections and groups. Unlike `list`,
+   * this is intentionally NOT restricted to the caller's own sections — a
+   * lecturer has to be able to find a student before they can add them. The
+   * trade-off is paid for by the narrow projection (identifying fields only)
+   * and by requiring a filter, so it can never be used to dump the roster.
+   */
+  lookup(user: AuthenticatedUser, query: LookupStudentDto) {
+    const q = query.q?.trim();
+    if ((!q || q.length < 2) && query.yearLevel === undefined && !query.programId) {
+      throw new BadRequestException('Provide a search term of at least 2 characters, a year level, or a program');
+    }
+    return this.repo.lookup(user.universityId, { ...query, q: q || undefined });
+  }
+
   async create(universityId: string, dto: CreateStudentDto) {
     await this.assertProgram(universityId, dto.programId);
     if (await this.repo.findByCode(universityId, dto.studentCode)) {
@@ -57,6 +73,7 @@ export class StudentsService {
       email: dto.email,
       phone: dto.phone,
       admissionYear: dto.admissionYear,
+      yearLevel: dto.yearLevel,
       citizenId: dto.citizenId,
       passportNo: dto.passportNo,
       birthDate: dto.birthDate ? new Date(dto.birthDate) : undefined,
@@ -85,6 +102,7 @@ export class StudentsService {
       ...(dto.email !== undefined && { email: dto.email }),
       ...(dto.phone !== undefined && { phone: dto.phone }),
       ...(dto.admissionYear !== undefined && { admissionYear: dto.admissionYear }),
+      ...(dto.yearLevel !== undefined && { yearLevel: dto.yearLevel }),
       ...(dto.citizenId !== undefined && { citizenId: dto.citizenId }),
       ...(dto.passportNo !== undefined && { passportNo: dto.passportNo }),
       ...(dto.birthDate !== undefined && { birthDate: dto.birthDate ? new Date(dto.birthDate) : null }),
@@ -97,6 +115,54 @@ export class StudentsService {
     await this.assertExists(universityId, id);
     await this.repo.softDelete(id);
     return { id, deleted: true };
+  }
+
+  /**
+   * Advance a whole cohort by one year at the roll-over of the academic year.
+   *
+   * Only STUDYING students move: someone on leave or suspended has not
+   * completed the year, and silently promoting them would put them in the
+   * wrong clinical placement. Students already at the final year graduate
+   * instead of advancing past the end of the curriculum. Defaults to a dry
+   * run so the numbers can be checked before anything is written.
+   */
+  async promoteYear(user: AuthenticatedUser, dto: PromoteYearDto) {
+    if (!this.lecturerScope.isAdmin(user)) {
+      throw new ForbiddenException('Only an administrator can promote a cohort');
+    }
+    if (dto.fromYear > dto.finalYear) {
+      throw new BadRequestException('fromYear cannot be beyond the final year of the curriculum');
+    }
+
+    const where: Prisma.StudentWhereInput = {
+      universityId: user.universityId,
+      deletedAt: null,
+      yearLevel: dto.fromYear,
+      status: 'STUDYING',
+      ...(dto.programId ? { programId: dto.programId } : {}),
+    };
+    const [affected, held] = await Promise.all([
+      this.repo.countBy(where),
+      this.repo.countBy({ ...where, status: { in: ['ON_LEAVE', 'SUSPENDED'] } as never }),
+    ]);
+    const graduating = dto.fromYear === dto.finalYear;
+
+    if (!dto.commit) {
+      return {
+        committed: false, fromYear: dto.fromYear, toYear: graduating ? null : dto.fromYear + 1,
+        graduating, affected, heldBack: held,
+      };
+    }
+
+    await this.repo.promote(where, graduating ? null : dto.fromYear + 1, graduating);
+    await this.repo.audit({
+      universityId: user.universityId, userId: user.id,
+      metadata: { action: 'promoteYear', fromYear: dto.fromYear, finalYear: dto.finalYear, programId: dto.programId ?? null, affected, graduating },
+    });
+    return {
+      committed: true, fromYear: dto.fromYear, toYear: graduating ? null : dto.fromYear + 1,
+      graduating, affected, heldBack: held,
+    };
   }
 
   /** Admin-only paths (create/update/delete): existence + tenant ownership, no lecturer-section scoping. */

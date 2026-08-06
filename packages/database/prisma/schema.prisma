@@ -63,6 +63,15 @@ enum StudentStatus {
   TRANSFERRED
 }
 
+/// Where a student group lives. CENTRAL groups belong to the faculty-wide
+/// roster (e.g. "ปี 2 กลุ่ม 1") and are reused across subjects and semesters —
+/// this is how clinical/lab rotations are actually organised. SECTION groups
+/// are ad-hoc sub-groups that exist only inside one section.
+enum StudentGroupScope {
+  CENTRAL
+  SECTION
+}
+
 /// Separate from StudentStatus because the spec tracks graduation explicitly.
 enum GraduationStatus {
   NOT_GRADUATED
@@ -244,6 +253,7 @@ model University {
   rubrics         Rubric[]
   evaluations     Evaluation[]
   gradeSchemes    GradeScheme[]
+  studentGroups   StudentGroup[]
 
   @@index([isActive])
   @@map("universities")
@@ -337,10 +347,11 @@ model Program {
   updatedAt    DateTime  @updatedAt
   deletedAt    DateTime?
 
-  faculty  Faculty   @relation(fields: [facultyId], references: [id])
-  courses  Course[]
-  subjects Subject[]
-  students Student[]
+  faculty       Faculty        @relation(fields: [facultyId], references: [id])
+  courses       Course[]
+  subjects      Subject[]
+  students      Student[]
+  studentGroups StudentGroup[]
 
   @@unique([facultyId, code])
   @@index([facultyId])
@@ -487,6 +498,7 @@ model Section {
   enrollments     Enrollment[]
   attendanceRules AttendanceRule[]
   evaluations     Evaluation[]
+  studentGroups   StudentGroup[]
 
   @@unique([subjectId, semesterId, sectionNo])
   @@index([universityId])
@@ -690,6 +702,11 @@ model Student {
   qrCode  String? @unique // encoded student QR payload / token
 
   admissionYear Int?
+  /// Current year of study (1–4), stored explicitly rather than derived from
+  /// admissionYear: students who repeat a year or take leave are common in
+  /// nursing, and clinical placement depends on the real year level. Admins
+  /// advance a whole cohort with the year-promotion action.
+  yearLevel     Int?
   status        StudentStatus    @default(STUDYING)
   graduation    GraduationStatus @default(NOT_GRADUATED)
   graduatedAt   DateTime?        @db.Date
@@ -699,20 +716,75 @@ model Student {
   updatedAt DateTime  @updatedAt
   deletedAt DateTime?
 
-  university   University         @relation(fields: [universityId], references: [id])
-  program      Program            @relation(fields: [programId], references: [id])
-  user         User?              @relation(fields: [userId], references: [id])
-  photo        Attachment?        @relation("StudentPhoto", fields: [photoId], references: [id])
+  university   University           @relation(fields: [universityId], references: [id])
+  program      Program              @relation(fields: [programId], references: [id])
+  user         User?                @relation(fields: [userId], references: [id])
+  photo        Attachment?          @relation("StudentPhoto", fields: [photoId], references: [id])
   enrollments  Enrollment[]
   attendance   AttendanceRecord[]
   studentNotes StudentNote[]
   evaluations  Evaluation[]
+  groups       StudentGroupMember[]
 
   @@unique([universityId, studentCode])
   @@index([universityId])
   @@index([programId])
   @@index([status])
+  @@index([universityId, yearLevel])
   @@map("students")
+}
+
+/// A named cohort of students that lecturers assign work to as a unit.
+///
+/// CENTRAL groups are owned by the faculty roster (program + year level) and
+/// are deliberately reusable across subjects/semesters, because nursing
+/// cohorts rotate through clinical and laboratory stations as fixed groups.
+/// SECTION groups belong to a single section and disappear with it.
+model StudentGroup {
+  id           String            @id @default(cuid())
+  universityId String
+  scope        StudentGroupScope @default(CENTRAL)
+  /// CENTRAL only: which cohort this group belongs to.
+  programId    String?
+  yearLevel    Int?
+  /// SECTION only: the section this ad-hoc group lives in.
+  sectionId    String?
+
+  code     String? // short label, e.g. "G1"
+  nameEn   String
+  nameTh   String?
+  /// Free-form ordering hint for display (lab rotation order, etc.).
+  order    Int     @default(0)
+  isActive Boolean @default(true)
+
+  metadata  Json?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  university University           @relation(fields: [universityId], references: [id])
+  program    Program?             @relation(fields: [programId], references: [id])
+  section    Section?             @relation(fields: [sectionId], references: [id])
+  members    StudentGroupMember[]
+
+  @@index([universityId])
+  @@index([universityId, programId, yearLevel])
+  @@index([sectionId])
+  @@map("student_groups")
+}
+
+model StudentGroupMember {
+  id        String   @id @default(cuid())
+  groupId   String
+  studentId String
+  createdAt DateTime @default(now())
+
+  group   StudentGroup @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  student Student      @relation(fields: [studentId], references: [id])
+
+  @@unique([groupId, studentId])
+  @@index([studentId])
+  @@map("student_group_members")
 }
 
 model Lecturer {

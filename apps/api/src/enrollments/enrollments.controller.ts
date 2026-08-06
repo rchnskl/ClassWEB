@@ -16,14 +16,14 @@ export class EnrollmentsController {
   @Permissions('enrollment:read')
   @ApiOperation({ summary: 'List enrollments (filter by section or student)' })
   list(@CurrentUser() user: AuthenticatedUser, @Query() query: QueryEnrollmentDto) {
-    return this.enrollments.list(user.universityId, query);
+    return this.enrollments.list(user, query);
   }
 
   @Post()
   @Permissions('enrollment:create')
   @ApiOperation({ summary: 'Enrol a student into a section (capacity-checked)' })
   create(@CurrentUser() user: AuthenticatedUser, @Body() dto: CreateEnrollmentDto) {
-    return this.enrollments.create(user.universityId, dto);
+    return this.enrollments.create(user, dto);
   }
 
   @Patch(':id/drop')
@@ -34,6 +34,6 @@ export class EnrollmentsController {
     @Param('id') id: string,
     @Body() dto: DropEnrollmentDto,
   ) {
-    return this.enrollments.drop(user.universityId, id, dto.reason);
+    return this.enrollments.drop(user, id, dto.reason);
   }
 }
