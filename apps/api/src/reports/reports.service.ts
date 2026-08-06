@@ -34,6 +34,19 @@ export class ReportsService {
     }).format(d);
   }
 
+  /**
+   * Display name for a person on an official document. International
+   * students commonly have no Thai name at all, and some nationalities have
+   * no surname — nameEn is the only guaranteed field. Show whichever
+   * language exists; when both do, show both rather than silently dropping
+   * one (a plain `nameTh ?? nameEn` loses the English name for every
+   * student who has both, which matters for cross-referencing against a
+   * passport or student ID card).
+   */
+  private personName(nameEn: string, nameTh?: string | null): string {
+    return nameTh ? `${nameTh} (${nameEn})` : nameEn;
+  }
+
   private newReportNumber(): string {
     const d = new Date();
     const ymd = `${d.getUTCFullYear()}${String(d.getUTCMonth() + 1).padStart(2, '0')}${String(d.getUTCDate()).padStart(2, '0')}`;
@@ -147,7 +160,7 @@ export class ReportsService {
         doc.fillColor('#26303f');
         doc.text(String(i + 1), cols[0] + 4, y, { width: cols[1] - cols[0] - 6 });
         doc.text(s.studentCode, cols[1] + 4, y, { width: cols[2] - cols[1] - 6 });
-        doc.text(s.nameTh ?? s.nameEn, cols[2] + 4, y, { width: cols[3] - cols[2] - 6 });
+        doc.text(this.personName(s.nameEn, s.nameTh), cols[2] + 4, y, { width: cols[3] - cols[2] - 6, lineBreak: false, ellipsis: true });
         doc.text(`${s.rate}%`, cols[3] + 4, y, { width: cols[4] - cols[3] - 6 });
         doc.text(tierTh[s.tier] ?? s.tier, cols[4] + 4, y, { width: right - cols[4] - 6 });
         y += 20;
@@ -296,7 +309,7 @@ export class ReportsService {
     doc.font(F).fontSize(12).fillColor('#4a5666').text(`เลขที่รายงาน: ${reportNumber}    ออกเมื่อ: ${this.thaiDateTime(new Date())}`, left, y);
     y += 22;
     doc.roundedRect(left, y, right - left, 78, 10).fillAndStroke('#fff6ee', '#ffd9bf');
-    doc.fillColor('#26303f').font(FB).fontSize(14).text(`${d.student.nameTh ?? d.student.nameEn}  (${d.student.studentCode})`, left + 14, y + 10);
+    doc.fillColor('#26303f').font(FB).fontSize(14).text(`${this.personName(d.student.nameEn, d.student.nameTh)}  (${d.student.studentCode})`, left + 14, y + 10);
     doc.font(F).fontSize(12).fillColor('#4a5666');
     doc.text(`หลักสูตร: ${d.student.program.code} · สถานะ: ${d.student.status}${d.student.admissionYear ? ` · ปีที่เข้า: ${d.student.admissionYear}` : ''}`, left + 14, y + 32);
     doc.font(FB).fontSize(13).fillColor('#26303f')
@@ -389,7 +402,7 @@ export class ReportsService {
     const reportNumber = await this.register(universityId, 'XLSX', checksum, byId, byName, 'STUDENT_ATTENDANCE', `Student report ${d.student.studentCode}`);
     const wb = new ExcelJS.Workbook();
     const ws = wb.addWorksheet('Student');
-    ws.addRow([`${d.student.nameTh ?? d.student.nameEn} (${d.student.studentCode})`]);
+    ws.addRow([`${this.personName(d.student.nameEn, d.student.nameTh)} (${d.student.studentCode})`]);
     ws.addRow([`Report No.: ${reportNumber}`]);
     ws.addRow([`Overall: ${d.rate}%  ·  Present ${d.present} / Late ${d.late} / Absent ${d.absent}`]);
     ws.addRow([]);
@@ -487,7 +500,7 @@ export class ReportsService {
       doc.fillColor('#26303f');
       doc.text(String(i + 1), colX[0] + 3, y, { width: colX[1] - colX[0] - 5 });
       doc.text(s.studentCode, colX[1] + 3, y, { width: colX[2] - colX[1] - 5 });
-      doc.text(s.nameTh ?? s.nameEn, colX[2] + 3, y, { width: colX[3] - colX[2] - 5, lineBreak: false, ellipsis: true });
+      doc.text(this.personName(s.nameEn, s.nameTh), colX[2] + 3, y, { width: colX[3] - colX[2] - 5, lineBreak: false, ellipsis: true });
       d.rubrics.forEach((_, ri) => {
         const sc = s.scores[ri];
         doc.text(sc == null ? '—' : String(sc), colX[rubricStart + ri] + 3, y, { width: colX[rubricStart + ri + 1] - colX[rubricStart + ri] - 5, align: 'center' });
@@ -607,7 +620,7 @@ export class ReportsService {
     y += 22;
 
     doc.roundedRect(left, y, right - left, 78, 10).fillAndStroke('#fff6ee', '#ffd9bf');
-    doc.fillColor('#26303f').font(FB).fontSize(14).text(`${summary.student.nameTh ?? summary.student.nameEn}  (${summary.student.studentCode})`, left + 14, y + 10);
+    doc.fillColor('#26303f').font(FB).fontSize(14).text(`${this.personName(summary.student.nameEn, summary.student.nameTh)}  (${summary.student.studentCode})`, left + 14, y + 10);
     doc.font(F).fontSize(12).fillColor('#4a5666')
       .text(`หลักสูตร: ${summary.student.program.code} · รายวิชา: ${section.subject.code} ${section.subject.nameTh ?? section.subject.nameEn} · Sec ${section.sectionNo}`, left + 14, y + 32);
     const gradeText = summary.grade ? `${summary.grade.grade} (${summary.grade.gpa.toFixed(2)} ${summary.grade.label})` : '—';
@@ -684,7 +697,7 @@ export class ReportsService {
     const reportNumber = await this.register(universityId, 'XLSX', checksum, byId, byName, 'STUDENT_GRADE', `Grade report ${summary.student.studentCode}`);
     const wb = new ExcelJS.Workbook();
     const ws = wb.addWorksheet('Grades');
-    ws.addRow([`${summary.student.nameTh ?? summary.student.nameEn} (${summary.student.studentCode})`]);
+    ws.addRow([`${this.personName(summary.student.nameEn, summary.student.nameTh)} (${summary.student.studentCode})`]);
     ws.addRow([`Report No.: ${reportNumber}`]);
     ws.addRow([`Total: ${summary.total}/100  ·  Grade: ${summary.grade ? summary.grade.grade + ' (' + summary.grade.gpa + ')' : '-'}`]);
     ws.addRow([]);
