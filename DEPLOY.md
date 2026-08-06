@@ -23,7 +23,7 @@ runtime, no long-lived process). Two options, both still "Cloudflare + Neon":
 | Option | Reliability | Notes |
 |---|---|---|
 | **A. Cloudflare Containers** | ⚠️ Beta (no SLA, cold start 2–3s) | Pure-Cloudflare. Uses a Worker + container-enabled Durable Object wrapper. Fine for a pilot, riskier for a system a faculty depends on daily. |
-| **B. Fly.io / Railway / Render** (recommended) | ✅ GA, always-on | Run the container there; put Cloudflare in front for DNS/CDN/TLS/WAF. Still Cloudflare for everything user-facing. More robust today. |
+| **B. Render** (recommended, free tier) | ✅ GA | Run the container there via the included `render.yaml` blueprint; put Cloudflare in front for DNS/CDN/TLS/WAF. Free tier sleeps after ~15min idle (cold start ~1min on first hit) — fine for a pilot, upgrade to a paid instance (~$7/mo, always-on) once used faculty-wide. |
 
 The `apps/api/Dockerfile` works for **both**. This runbook uses **Option B** for the API and
 Cloudflare for everything else; a Containers appendix is at the end.
@@ -52,30 +52,30 @@ Cloudflare for everything else; a Containers appendix is at the end.
 3. Your R2 S3 endpoint is `https://<ACCOUNT_ID>.r2.cloudflarestorage.com`.
    These map to the API env vars in step 3 (`BACKUP_S3_*`, `BACKUP_STORAGE=s3`).
 
-## 3. API host (Fly.io example) — set env & deploy
+## 3. API host (Render, via Blueprint) — one connect, not field-by-field
 
-Set these environment variables / secrets on the host:
+The repo includes `render.yaml` — a Blueprint that pre-configures the whole service (Docker
+build, health check, JWT secrets auto-generated) so you don't set anything up by hand.
 
-```
-NODE_ENV=production
-PORT=8080                         # or whatever the platform injects
-DATABASE_URL=<neon pooled url>
-JWT_ACCESS_SECRET=<32+ random chars>     # openssl rand -hex 32
-JWT_REFRESH_SECRET=<32+ random chars>    # different value
-JWT_ACCESS_TTL=15m
-JWT_REFRESH_TTL=7d
-CORS_ORIGINS=https://app.yourdomain.org  # the Pages URL/custom domain, comma-separated
-BACKUP_STORAGE=s3
-BACKUP_S3_ENDPOINT=https://<ACCOUNT_ID>.r2.cloudflarestorage.com
-BACKUP_S3_BUCKET=classweb-backups
-BACKUP_S3_ACCESS_KEY_ID=<r2 key id>
-BACKUP_S3_SECRET_ACCESS_KEY=<r2 secret>
-BACKUP_S3_REGION=auto
-# optional: SMTP_* (temp-password email), VAPID_* (web push), LINE_CHANNEL_ACCESS_TOKEN
-```
+1. [render.com](https://render.com) → sign in with GitHub.
+2. Dashboard → **New +** → **Blueprint** → connect this repo (`rchnskl/ClassWEB`).
+3. Render reads `render.yaml` and shows the `classweb-api` service. It asks for the two values
+   marked `sync: false`:
+   - `DATABASE_URL` → your Neon **pooled** connection string (`...-pooler...neon.tech/...?sslmode=require`)
+   - `CORS_ORIGINS` → leave blank for now; come back and set it once Cloudflare Pages (step 4)
+     gives you its URL, then redeploy.
+4. **Apply** → Render builds `apps/api/Dockerfile` and deploys. `JWT_ACCESS_SECRET` /
+   `JWT_REFRESH_SECRET` are auto-generated (strong random values) — you never see or set them.
+5. Once live, note the service URL (`https://classweb-api-xxxx.onrender.com`) — that's your API base.
 
-Deploy the image (`apps/api/Dockerfile`). Health check path: **`/api/v1/health`**.
-The app fails fast at boot if `JWT_ACCESS_SECRET`/`JWT_REFRESH_SECRET` are missing or < 16 chars.
+Health check path: **`/api/v1/health`**. The app fails fast at boot if the JWT secrets are
+missing or under 16 chars (Render's `generateValue: true` always produces long ones, so this
+should never trigger).
+
+Backups (`BACKUP_STORAGE=s3` + `BACKUP_S3_*`, see step 2) aren't in the blueprint yet — add them
+as extra environment variables on the service once the R2 bucket exists, if you want off-host
+backups from day one. Local-disk backups (the default) work fine for a pilot but don't survive
+a Render redeploy, since the container filesystem is ephemeral there.
 
 ## 4. Cloudflare Pages (frontend)
 
@@ -96,7 +96,7 @@ The frontend talks to the API purely over HTTP, so it needs one build-time varia
 ## 5. DNS + custom domains (Cloudflare)
 
 - `app.yourdomain.org` → the Pages project.
-- `api.yourdomain.org` → the API host (CNAME to Fly/Railway, proxied 🟠 through Cloudflare).
+- `api.yourdomain.org` → the API host (CNAME to the Render URL, proxied 🟠 through Cloudflare).
 - After DNS is live, set `CORS_ORIGINS` (API) to the exact `https://app.yourdomain.org`
   and `NEXT_PUBLIC_API_URL` (Pages) to `https://api.yourdomain.org/api/v1`, then redeploy both.
 

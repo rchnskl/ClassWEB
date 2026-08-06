@@ -1,0 +1,30 @@
+# Render Blueprint — provisions the ClassWeb API with one click.
+# https://render.com/docs/blueprint-spec
+#
+# Usage: Render dashboard → New → Blueprint → connect this repo. Render reads
+# this file and creates the service below automatically. You still set the
+# two secret values marked `sync: false` yourself (Render prompts for them);
+# everything else is pre-configured — no manual field-by-field setup needed.
+services:
+  - type: web
+    name: classweb-api
+    runtime: docker
+    dockerfilePath: ./apps/api/Dockerfile
+    dockerContext: .
+    plan: free
+    healthCheckPath: /api/v1/health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DATABASE_URL
+        sync: false # paste your Neon pooled connection string here
+      - key: JWT_ACCESS_SECRET
+        generateValue: true # Render generates a strong random secret
+      - key: JWT_REFRESH_SECRET
+        generateValue: true
+      - key: JWT_ACCESS_TTL
+        value: 15m
+      - key: JWT_REFRESH_TTL
+        value: 7d
+      - key: CORS_ORIGINS
+        sync: false # set to your Cloudflare Pages URL once it exists, e.g. https://classweb.pages.dev
