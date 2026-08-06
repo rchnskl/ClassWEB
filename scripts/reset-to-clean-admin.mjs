@@ -15,28 +15,36 @@
 import { PrismaClient } from '@prisma/client';
 import bcrypt from 'bcryptjs';
 import { createInterface } from 'node:readline';
+import { execSync } from 'node:child_process';
 
 const ADMIN_EMAIL = 'abacnurse@au.edu';
 const ADMIN_TEMP_PASSWORD = 'ABACnurse@6008';
 
-function askHidden(prompt) {
-  return new Promise((resolve) => {
-    process.stdout.write(prompt);
-    const rl = createInterface({ input: process.stdin, output: process.stdout, terminal: true });
-    // Suppress echo for a hidden-style prompt (best-effort in a plain TTY).
-    const onData = (char) => {
-      char = char.toString();
-      if (char === '\n' || char === '\r' || char === '') return;
-      process.stdout.write('\x1b[2K\x1b[200D' + prompt + '*'.repeat(rl.line.length + 1));
-    };
-    process.stdin.on('data', onData);
-    rl.question('', (answer) => {
-      process.stdin.removeListener('data', onData);
-      rl.close();
-      process.stdout.write('\n');
-      resolve(answer.trim());
-    });
-  });
+// Same trick as `read -rs` in bash (used successfully in db-setup.sh): turn
+// off terminal echo at the tty level for the duration of the read, so typed
+// characters never appear on screen, then restore it. Falls back to a
+// normal (visible) read if stdin isn't a real TTY (e.g. piped input).
+//
+// Reads via the readline async iterator rather than rl.question() — calling
+// question() twice in a row on the same interface reliably hangs on the
+// second call when stdin is piped (a known Node readline quirk: the stream
+// doesn't resume properly between calls). The async iterator drives off the
+// stream's natural flow and doesn't have this problem.
+const isTTY = Boolean(process.stdin.isTTY);
+const rl = createInterface({ input: process.stdin, terminal: false });
+const lines = rl[Symbol.asyncIterator]();
+
+async function askHidden(prompt) {
+  process.stdout.write(prompt);
+  if (isTTY) {
+    try { execSync('stty -echo', { stdio: 'inherit' }); } catch { /* best-effort */ }
+  }
+  const { value } = await lines.next();
+  if (isTTY) {
+    try { execSync('stty echo', { stdio: 'inherit' }); } catch { /* best-effort */ }
+  }
+  process.stdout.write('\n');
+  return (value ?? '').trim();
 }
 
 async function main() {
@@ -46,21 +54,22 @@ async function main() {
 
   const dbUrl = await askHidden('DATABASE_URL (Neon, pooled): ');
   if (!dbUrl || !/^postgres(ql)?:\/\//.test(dbUrl)) {
-    console.error('❌ That does not look like a Postgres connection string. Aborting.');
+    console.error('\n❌ That does not look like a Postgres connection string. Aborting.');
+    rl.close();
     process.exit(1);
   }
 
-  const confirm = await askHidden(
-    '\nThis PERMANENTLY deletes every student, lecturer, section, evaluation\n' +
-    'score, attendance record, subject/course, notification, report, and user\n' +
-    'account in this database (keeps University/Faculty/rooms/academic-year/\n' +
-    'RBAC/Rubric evaluation-form templates).\n' +
-    'Type YES to continue: ',
-  );
+  console.log('\nThis PERMANENTLY deletes every student, lecturer, section, evaluation');
+  console.log('score, attendance record, subject/course, notification, report, and user');
+  console.log('account in this database (keeps University/Faculty/rooms/academic-year/');
+  console.log('RBAC/Rubric evaluation-form templates).');
+  const confirm = await askHidden('Type YES to continue: ');
   if (confirm !== 'YES') {
     console.log('Aborted — nothing was changed.');
+    rl.close();
     process.exit(0);
   }
+  rl.close();
 
   const prisma = new PrismaClient({ datasources: { db: { url: dbUrl } } });
 
@@ -69,7 +78,7 @@ async function main() {
 
     // Assessment / evaluation — keep the Rubric templates themselves
     // (RubricSection/RubricItem), only clear the demo scores filled into
-    // them and the demo subject↔rubric weight assignments.
+    // them and the demo subject<->rubric weight assignments.
     await prisma.evaluationScore.deleteMany({});
     await prisma.evaluation.deleteMany({});
     await prisma.subjectRubric.deleteMany({});
