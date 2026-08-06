@@ -169,7 +169,7 @@ export default function AssessmentPage() {
             <p className="muted" style={{ margin: '4px 0 0', fontSize: 14.5 }}>{t('as.subtitle')}</p>
           </div>
           <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
-            <select className="input" value={sectionId} onChange={(e) => pickSection(e.target.value)} style={{ width: 'auto', minWidth: 160 }}>
+            <select aria-label={t('as.section')} className="input" value={sectionId} onChange={(e) => pickSection(e.target.value)} style={{ width: 'auto', minWidth: 160 }}>
               {sections.map((s) => <option key={s.id} value={s.id}>{s.subject.code} · {s.sectionNo}</option>)}
             </select>
             <button className="glass hairline" style={{ padding: '9px 14px', borderRadius: 12, fontWeight: 650, fontSize: 13.5, color: 'var(--text-1)', cursor: 'pointer' }} onClick={() => setShowBuilder(true)}>{t('rubric.manageBtn')}</button>

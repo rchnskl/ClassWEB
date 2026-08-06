@@ -224,7 +224,7 @@ function PendingRow({ code, onResolve, t }: { code: string; onResolve: (a: 'ACCE
   return (
     <div className="glass hairline" style={{ padding: '10px 14px', borderRadius: 12, display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', marginBottom: 8 }}>
       <span style={{ fontFamily: 'ui-monospace, monospace', fontWeight: 700, fontSize: 14 }}>{code}</span>
-      <select className="input" value={reason} onChange={(e) => setReason(e.target.value)} style={{ flex: 1, minWidth: 160, padding: '7px 10px', fontSize: 13 }}>
+      <select aria-label={t('att.reason')} className="input" value={reason} onChange={(e) => setReason(e.target.value)} style={{ flex: 1, minWidth: 160, padding: '7px 10px', fontSize: 13 }}>
         {REASONS.map((r) => <option key={r} value={r}>{t(`att.reason.${r}`)}</option>)}
       </select>
       <button onClick={() => onResolve('ACCEPT', reason)} className="chip chip-success" style={{ cursor: 'pointer', border: 'none', padding: '7px 12px' }}>{t('att.accept')}</button>

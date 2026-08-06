@@ -79,7 +79,7 @@ export default function StudentNotesDrawer({
         {/* Add form */}
         <form onSubmit={submit} className="glass hairline" style={{ padding: 14, borderRadius: 16, marginBottom: 18 }}>
           <div style={{ display: 'flex', gap: 8, marginBottom: 10 }}>
-            <select className="input" value={category} onChange={(e) => setCategory(e.target.value)} style={{ flex: 1 }}>
+            <select aria-label={t('notes.category')} className="input" value={category} onChange={(e) => setCategory(e.target.value)} style={{ flex: 1 }}>
               {CATEGORIES.map((c) => <option key={c} value={c}>{t(`notes.cat.${c}`)}</option>)}
             </select>
           </div>

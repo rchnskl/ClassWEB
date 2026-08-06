@@ -168,10 +168,10 @@ function ColorField({ value, onChange }: { value: string; onChange: (v: string) 
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
-    <div style={{ marginBottom: 16 }}>
+    <label style={{ display: 'block', marginBottom: 16 }}>
       <div className="muted" style={{ fontSize: 12.5, fontWeight: 650, marginBottom: 6, textTransform: 'uppercase', letterSpacing: 0.4 }}>{label}</div>
       {children}
-    </div>
+    </label>
   );
 }
 
@@ -759,11 +759,11 @@ function AuditTab() {
   return (
     <div>
       <div className="rise" style={{ display: 'flex', gap: 10, marginBottom: 14, flexWrap: 'wrap' }}>
-        <select className="input" style={{ width: 'auto', minWidth: 160 }} value={action} onChange={(e) => { setAction(e.target.value); setSkip(0); }}>
+        <select aria-label={t('set.audit.allActions')} className="input" style={{ width: 'auto', minWidth: 160 }} value={action} onChange={(e) => { setAction(e.target.value); setSkip(0); }}>
           <option value="">{t('set.audit.allActions')}</option>
           {facets.actions.map((a) => <option key={a} value={a}>{a}</option>)}
         </select>
-        <select className="input" style={{ width: 'auto', minWidth: 160 }} value={entityType} onChange={(e) => { setEntityType(e.target.value); setSkip(0); }}>
+        <select aria-label={t('set.audit.allEntities')} className="input" style={{ width: 'auto', minWidth: 160 }} value={entityType} onChange={(e) => { setEntityType(e.target.value); setSkip(0); }}>
           <option value="">{t('set.audit.allEntities')}</option>
           {facets.entityTypes.map((e) => <option key={e} value={e}>{e}</option>)}
         </select>

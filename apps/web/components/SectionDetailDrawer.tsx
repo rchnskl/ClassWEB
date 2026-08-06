@@ -162,7 +162,7 @@ export default function SectionDetailDrawer({
         </div>
         {isFull && <div className="chip chip-warning" style={{ marginBottom: 10 }}>{t('secD.capacityFull')}</div>}
         <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
-          <select className="input" value={addStudentId} onChange={(e) => setAddStudentId(e.target.value)} disabled={isFull}>
+          <select aria-label={t('secD.selectStudent')} className="input" value={addStudentId} onChange={(e) => setAddStudentId(e.target.value)} disabled={isFull}>
             <option value="">{t('secD.selectStudent')}</option>
             {availableStudents.map((s) => <option key={s.id} value={s.id}>{s.studentCode} — {name(s.nameEn, s.nameTh)}</option>)}
           </select>

@@ -156,11 +156,11 @@ function SectionsTab({ isAdmin, userId }: { isAdmin: boolean; userId: string }) 
     <div>
       <div className="rise" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', gap: 12, flexWrap: 'wrap', marginBottom: 14 }}>
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-          <select className="input" style={{ width: 'auto', minWidth: 160 }} value={subjectFilter} onChange={(e) => setSubjectFilter(e.target.value)}>
+          <select aria-label={t('sec.allSubjects')} className="input" style={{ width: 'auto', minWidth: 160 }} value={subjectFilter} onChange={(e) => setSubjectFilter(e.target.value)}>
             <option value="">{t('sec.allSubjects')}</option>
             {subjects.map((s) => <option key={s.id} value={s.id}>{s.code} — {s.nameEn}</option>)}
           </select>
-          <select className="input" style={{ width: 'auto', minWidth: 160 }} value={semesterFilter} onChange={(e) => setSemesterFilter(e.target.value)}>
+          <select aria-label={t('sec.allSemesters')} className="input" style={{ width: 'auto', minWidth: 160 }} value={semesterFilter} onChange={(e) => setSemesterFilter(e.target.value)}>
             <option value="">{t('sec.allSemesters')}</option>
             {semesters.map((s) => <option key={s.id} value={s.id}>{s.academicYear.code} / {s.nameEn}</option>)}
           </select>
