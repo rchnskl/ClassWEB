@@ -1,12 +1,13 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { Suspense, useCallback, useEffect, useState } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
 import Sidebar from '@/components/Sidebar';
 import Topbar from '@/components/Topbar';
 import { IconSearch, IconStudents } from '@/components/icons';
 import StudentNotesDrawer from '@/components/StudentNotesDrawer';
 import PdfPreviewModal from '@/components/PdfPreviewModal';
+import StudentImportModal from '@/components/StudentImportModal';
 import { apiFetch, downloadFile, fetchPreviewUrl, type MeResponse, type Paginated } from '@/lib/api';
 import { useI18n } from '@/lib/i18n';
 
@@ -19,14 +20,27 @@ interface StudentRow {
   gender: string;
   status: string;
   admissionYear?: number | null;
+  yearLevel?: number | null;
   program: { id: string; code: string; nameEn: string };
 }
 interface ProgramRef { id: string; code: string; nameEn: string }
+interface PromotePreview { affected: number; heldBack: number; graduating: boolean; toYear: number | null }
 
 const PAGE = 10;
+const YEARS = [1, 2, 3, 4];
+const EMPTY_FORM = { studentCode: '', nameEn: '', nameTh: '', nickname: '', programId: '', gender: 'FEMALE', status: 'STUDYING', yearLevel: '' };
 
 export default function StudentsPage() {
+  return (
+    <Suspense fallback={null}>
+      <StudentsPageInner />
+    </Suspense>
+  );
+}
+
+function StudentsPageInner() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const { t } = useI18n();
   const [email, setEmail] = useState('admin@nursing.au.edu');
   const [rows, setRows] = useState<StudentRow[]>([]);
@@ -36,9 +50,14 @@ export default function StudentsPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  const [yearFilter, setYearFilter] = useState('');
+  const [isAdmin, setIsAdmin] = useState(false);
+  const [showImport, setShowImport] = useState(false);
+  const [promote, setPromote] = useState<{ fromYear: string; preview: PromotePreview | null; busy: boolean; error: string | null } | null>(null);
+
   const [showForm, setShowForm] = useState(false);
   const [programs, setPrograms] = useState<ProgramRef[]>([]);
-  const [form, setForm] = useState({ studentCode: '', nameEn: '', nameTh: '', nickname: '', programId: '', gender: 'FEMALE', status: 'STUDYING' });
+  const [form, setForm] = useState(EMPTY_FORM);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
@@ -66,12 +85,13 @@ export default function StudentsPage() {
     }
   }
 
-  const load = useCallback(async (nextSkip: number, q: string) => {
+  const load = useCallback(async (nextSkip: number, q: string, year = yearFilter) => {
     setLoading(true);
     setError(null);
     try {
       const params = new URLSearchParams({ take: String(PAGE), skip: String(nextSkip) });
       if (q) params.set('search', q);
+      if (year) params.set('yearLevel', year);
       const data = await apiFetch<Paginated<StudentRow>>(`/students?${params.toString()}`);
       setRows(data.items);
       setTotal(data.total);
@@ -81,7 +101,7 @@ export default function StudentsPage() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [yearFilter]);
 
   useEffect(() => {
     if (!localStorage.getItem('accessToken')) {
@@ -90,21 +110,27 @@ export default function StudentsPage() {
     }
     const u = localStorage.getItem('user');
     if (u) { try { setEmail(JSON.parse(u).email); } catch {} }
-    apiFetch<MeResponse>('/users/me').catch(() => {});
+    apiFetch<MeResponse>('/users/me')
+      .then((me) => setIsAdmin(me.roles.some((r) => r.role.code === 'ADMIN')))
+      .catch(() => {});
     apiFetch<ProgramRef[]>('/programs').then(setPrograms).catch(() => {});
-    void load(0, '');
-  }, [router, load]);
+    // Arriving from the global search box: prefill and run that search immediately.
+    const fromSearch = searchParams.get('search');
+    if (fromSearch) setSearch(fromSearch);
+    void load(0, fromSearch ?? '');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [router]);
 
-  // Debounced search.
+  // Debounced search; the year filter re-queries immediately.
   useEffect(() => {
-    const t = setTimeout(() => void load(0, search), 300);
+    const t = setTimeout(() => void load(0, search, yearFilter), 300);
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [search]);
+  }, [search, yearFilter]);
 
   function openCreate() {
     setEditingId(null);
-    setForm({ studentCode: '', nameEn: '', nameTh: '', nickname: '', programId: '', gender: 'FEMALE', status: 'STUDYING' });
+    setForm({ ...EMPTY_FORM, yearLevel: yearFilter });
     setFormError(null);
     setShowForm(true);
   }
@@ -113,9 +139,29 @@ export default function StudentsPage() {
     setForm({
       studentCode: row.studentCode, nameEn: row.nameEn, nameTh: row.nameTh ?? '', nickname: row.nickname ?? '',
       programId: row.program.id ?? '', gender: row.gender, status: row.status,
+      yearLevel: row.yearLevel != null ? String(row.yearLevel) : '',
     });
     setFormError(null);
     setShowForm(true);
+  }
+
+  async function runPromote(commit: boolean) {
+    if (!promote) return;
+    setPromote({ ...promote, busy: true, error: null });
+    try {
+      const res = await apiFetch<PromotePreview>('/students/promote-year', {
+        method: 'POST',
+        body: JSON.stringify({ fromYear: Number(promote.fromYear), finalYear: 4, commit }),
+      });
+      if (commit) {
+        setPromote(null);
+        await load(0, search, yearFilter);
+      } else {
+        setPromote({ ...promote, preview: res, busy: false, error: null });
+      }
+    } catch (err) {
+      setPromote({ ...promote, busy: false, error: err instanceof Error ? err.message : t('promo.failed') });
+    }
   }
 
   async function submitForm(e: React.FormEvent) {
@@ -123,14 +169,17 @@ export default function StudentsPage() {
     setSaving(true);
     setFormError(null);
     try {
+      // yearLevel is a <select> string; the API wants a number or nothing at all.
+      const { yearLevel, ...rest } = form;
+      const payload = { ...rest, ...(yearLevel ? { yearLevel: Number(yearLevel) } : {}) };
       if (editingId) {
-        await apiFetch(`/students/${editingId}`, { method: 'PATCH', body: JSON.stringify(form) });
+        await apiFetch(`/students/${editingId}`, { method: 'PATCH', body: JSON.stringify(payload) });
       } else {
-        await apiFetch('/students', { method: 'POST', body: JSON.stringify(form) });
+        await apiFetch('/students', { method: 'POST', body: JSON.stringify(payload) });
       }
       setShowForm(false);
       setEditingId(null);
-      setForm({ studentCode: '', nameEn: '', nameTh: '', nickname: '', programId: '', gender: 'FEMALE', status: 'STUDYING' });
+      setForm(EMPTY_FORM);
       await load(skip, search);
     } catch (err) {
       setFormError(err instanceof Error ? err.message : 'Failed to save student');
@@ -169,9 +218,23 @@ export default function StudentsPage() {
               {total} {t('students.count')}
             </p>
           </div>
-          <button className="btn-primary" style={{ padding: '11px 18px', fontSize: 14.5 }} onClick={() => (showForm ? setShowForm(false) : openCreate())}>
-            {showForm ? t('students.close') : t('students.add')}
-          </button>
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+            {isAdmin && (
+              <>
+                <button className="glass hairline" style={{ padding: '11px 16px', fontSize: 14, borderRadius: 12, fontWeight: 650, color: 'var(--text-1)' }}
+                  onClick={() => setPromote({ fromYear: yearFilter || '1', preview: null, busy: false, error: null })}>
+                  ⬆ {t('promo.button')}
+                </button>
+                <button className="glass hairline" style={{ padding: '11px 16px', fontSize: 14, borderRadius: 12, fontWeight: 650, color: 'var(--text-1)' }}
+                  onClick={() => setShowImport(true)}>
+                  ⬆ {t('imp.button')}
+                </button>
+              </>
+            )}
+            <button className="btn-primary" style={{ padding: '11px 18px', fontSize: 14.5 }} onClick={() => (showForm ? setShowForm(false) : openCreate())}>
+              {showForm ? t('students.close') : t('students.add')}
+            </button>
+          </div>
         </div>
 
         {showForm && (
@@ -188,6 +251,12 @@ export default function StudentsPage() {
             <Field label={t('students.gender')}>
               <select className="input" value={form.gender} onChange={(e) => setForm({ ...form, gender: e.target.value })}>
                 <option value="FEMALE">{t('students.female')}</option><option value="MALE">{t('students.male')}</option><option value="OTHER">{t('students.other')}</option>
+              </select>
+            </Field>
+            <Field label={t('students.yearLevel')}>
+              <select className="input" value={form.yearLevel} onChange={(e) => setForm({ ...form, yearLevel: e.target.value })}>
+                <option value="">{t('students.noYear')}</option>
+                {YEARS.map((y) => <option key={y} value={y}>{t('common.year')} {y}</option>)}
               </select>
             </Field>
             {editingId && (
@@ -207,15 +276,21 @@ export default function StudentsPage() {
           </form>
         )}
 
-        {/* Search */}
-        <div className="glass hairline rise" style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '11px 16px', borderRadius: 14, marginBottom: 16, color: 'var(--text-2)', maxWidth: 420 }}>
-          <IconSearch />
-          <input
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder={t('students.search')}
-            style={{ border: 'none', background: 'transparent', outline: 'none', color: 'var(--text-0)', fontSize: 14, width: '100%' }}
-          />
+        {/* Search + year filter */}
+        <div className="rise" style={{ display: 'flex', gap: 10, marginBottom: 16, flexWrap: 'wrap', alignItems: 'center' }}>
+          <div className="glass hairline" style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '11px 16px', borderRadius: 14, color: 'var(--text-2)', flex: '1 1 260px', maxWidth: 420 }}>
+            <IconSearch />
+            <input
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder={t('students.search')}
+              style={{ border: 'none', background: 'transparent', outline: 'none', color: 'var(--text-0)', fontSize: 14, width: '100%' }}
+            />
+          </div>
+          <select className="input" aria-label={t('students.filterYear')} value={yearFilter} onChange={(e) => setYearFilter(e.target.value)} style={{ maxWidth: 170 }}>
+            <option value="">{t('students.allYears')}</option>
+            {YEARS.map((y) => <option key={y} value={y}>{t('common.year')} {y}</option>)}
+          </select>
         </div>
 
         <div className="glass rise" style={{ padding: 8, overflow: 'hidden' }}>
@@ -245,7 +320,11 @@ export default function StudentsPage() {
                     </Td>
                     <Td>{s.nickname || <span className="muted">—</span>}</Td>
                     <Td><span className="chip" style={{ background: 'var(--glass-hairline)', color: 'var(--text-1)' }}>{s.program.code}</span></Td>
-                    <Td>{s.admissionYear ?? <span className="muted">—</span>}</Td>
+                    <Td>
+                      {s.yearLevel != null
+                        ? <span className="chip" style={{ background: 'var(--glass-hairline)', color: 'var(--text-1)' }}>{t('common.year')} {s.yearLevel}</span>
+                        : <span className="muted">—</span>}
+                    </Td>
                     <Td><StatusChip status={s.status} t={t} /></Td>
                     <Td>
                       {/* Uniform icon buttons on a single line — with five
@@ -285,6 +364,61 @@ export default function StudentsPage() {
       )}
 
       {previewUrl && <PdfPreviewModal url={previewUrl} onClose={() => setPreviewUrl(null)} />}
+
+      {showImport && (
+        <StudentImportModal
+          programs={programs}
+          onClose={() => setShowImport(false)}
+          onImported={() => void load(0, search, yearFilter)}
+        />
+      )}
+
+      {promote && (
+        <div role="dialog" aria-modal="true" aria-label={t('promo.title')}
+          style={{ position: 'fixed', inset: 0, background: 'rgba(8,12,20,0.55)', backdropFilter: 'blur(4px)', display: 'grid', placeItems: 'center', zIndex: 60, padding: 16 }}
+          onClick={(e) => { if (e.target === e.currentTarget) setPromote(null); }}>
+          <div className="glass" style={{ width: 'min(520px, 100%)', borderRadius: 18, padding: 22 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12, marginBottom: 12 }}>
+              <div>
+                <h2 style={{ margin: 0, fontSize: 19, fontWeight: 720 }}>{t('promo.title')}</h2>
+                <p className="muted" style={{ margin: '4px 0 0', fontSize: 13 }}>{t('promo.subtitle')}</p>
+              </div>
+              <button onClick={() => setPromote(null)} aria-label={t('common.close')} className="glass hairline icon-btn"
+                style={{ width: 34, height: 34, borderRadius: 10, display: 'grid', placeItems: 'center', color: 'var(--text-1)' }}>✕</button>
+            </div>
+
+            <Field label={t('promo.fromYear')}>
+              <select className="input" value={promote.fromYear}
+                onChange={(e) => setPromote({ ...promote, fromYear: e.target.value, preview: null })}>
+                {YEARS.map((y) => <option key={y} value={y}>{t('common.year')} {y}</option>)}
+              </select>
+            </Field>
+
+            {promote.preview && (
+              <div className={`chip ${promote.preview.graduating ? 'chip-warning' : 'chip-success'}`}
+                style={{ display: 'block', borderRadius: 12, padding: '10px 13px', margin: '12px 0' }}>
+                {promote.preview.graduating
+                  ? <>{t('promo.willGraduate')}: <strong>{promote.preview.affected}</strong></>
+                  : <>{t('promo.willMove')} {t('common.year')} {promote.preview.toYear}: <strong>{promote.preview.affected}</strong></>}
+                {promote.preview.heldBack > 0 && <div style={{ fontSize: 12, marginTop: 4 }}>{t('promo.heldBack')}: {promote.preview.heldBack}</div>}
+              </div>
+            )}
+
+            {promote.error && <div className="chip chip-danger" role="alert" style={{ display: 'block', borderRadius: 12, padding: '10px 13px', margin: '12px 0' }}>{promote.error}</div>}
+
+            <div style={{ display: 'flex', gap: 10, marginTop: 14, flexWrap: 'wrap' }}>
+              <button className="glass hairline" disabled={promote.busy} onClick={() => runPromote(false)}
+                style={{ padding: '11px 18px', borderRadius: 12, fontWeight: 650, fontSize: 14, color: 'var(--text-1)' }}>
+                {promote.busy && !promote.preview ? t('imp.checking') : t('promo.check')}
+              </button>
+              <button className="btn-primary" disabled={!promote.preview || promote.preview.affected === 0 || promote.busy} onClick={() => runPromote(true)}
+                style={{ padding: '11px 18px', fontSize: 14, opacity: !promote.preview || promote.preview.affected === 0 ? 0.55 : 1 }}>
+                {t('promo.confirm')}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

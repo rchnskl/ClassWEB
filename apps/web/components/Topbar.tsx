@@ -6,7 +6,8 @@ import ThemeToggle from './ThemeToggle';
 import LanguageToggle from './LanguageToggle';
 import NotificationBell from './NotificationBell';
 import ChangePasswordModal from './ChangePasswordModal';
-import { IconSearch, IconLogout, IconMenu } from './icons';
+import GlobalSearch from './GlobalSearch';
+import { IconLogout, IconMenu } from './icons';
 import { clearSession } from '@/lib/api';
 import { useI18n } from '@/lib/i18n';
 import { useUI } from '@/lib/ui';
@@ -32,13 +33,7 @@ export default function Topbar({ email }: { email: string }) {
         <IconMenu />
       </button>
 
-      <div
-        className="glass hairline hide-mobile"
-        style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '9px 14px', borderRadius: 14, flex: '1 1 180px', minWidth: 0, maxWidth: 420, color: 'var(--text-2)' }}
-      >
-        <IconSearch style={{ flexShrink: 0 }} />
-        <span style={{ fontSize: 14, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{t('top.search')}</span>
-      </div>
+      <GlobalSearch />
 
       <div style={{ flex: 1 }} />
 

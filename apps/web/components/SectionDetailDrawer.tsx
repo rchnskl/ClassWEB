@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { apiFetch, type Paginated } from '@/lib/api';
 import { useI18n } from '@/lib/i18n';
+import StudentPicker, { type StudentHit } from './StudentPicker';
 
 interface SectionDetail {
   id: string; sectionNo: string; capacity: number; currentEnrollment: number; isActive: boolean;
@@ -14,8 +15,8 @@ interface SectionDetail {
 }
 interface RoomRef { id: string; roomNumber: string }
 interface LecturerRef { id: string; nameEn: string; employeeCode: string }
-interface EnrollmentRow { id: string; status: string; student: { id: string; studentCode: string; nameEn: string } }
-interface StudentRef { id: string; studentCode: string; nameEn: string; nameTh: string | null }
+interface EnrollmentRow { id: string; status: string; student: { id: string; studentCode: string; nameEn: string; nameTh?: string | null } }
+interface GroupRef { id: string; nameEn: string; nameTh: string | null; yearLevel: number | null; _count: { members: number } }
 interface RubricConfigRow { rubricId: string; code: string; nameEn: string; nameTh: string | null; weightPercent: number; isActive: boolean }
 
 export default function SectionDetailDrawer({
@@ -33,10 +34,14 @@ export default function SectionDetailDrawer({
   const [savingInfo, setSavingInfo] = useState(false);
 
   const [roster, setRoster] = useState<EnrollmentRow[]>([]);
-  const [students, setStudents] = useState<StudentRef[]>([]);
-  const [addStudentId, setAddStudentId] = useState('');
   const [addingStudent, setAddingStudent] = useState(false);
   const [busyEnrollmentId, setBusyEnrollmentId] = useState<string | null>(null);
+  const [rosterError, setRosterError] = useState<string | null>(null);
+
+  const [groups, setGroups] = useState<GroupRef[]>([]);
+  const [addGroupId, setAddGroupId] = useState('');
+  const [addingGroup, setAddingGroup] = useState(false);
+  const [groupResult, setGroupResult] = useState<{ enrolled: number; skipped: { studentCode: string; reason: string }[] } | null>(null);
 
   const [rubricConfig, setRubricConfig] = useState<RubricConfigRow[] | null>(null);
   const [savingRubrics, setSavingRubrics] = useState(false);
@@ -59,7 +64,7 @@ export default function SectionDetailDrawer({
       await loadRoster();
       apiFetch<RoomRef[] | Paginated<RoomRef>>('/rooms?take=200').then((d) => setRooms(Array.isArray(d) ? d : d.items)).catch(() => {});
       if (isAdmin) apiFetch<Paginated<LecturerRef>>('/lecturers?take=200').then((d) => setLecturers(d.items)).catch(() => {});
-      apiFetch<Paginated<StudentRef>>('/students?take=200').then((d) => setStudents(d.items)).catch(() => {});
+      apiFetch<Paginated<GroupRef>>('/student-groups?take=100').then((d) => setGroups(d.items)).catch(() => {});
       apiFetch<RubricConfigRow[]>(`/assessment/subjects/${s.subject.id}/rubric-config`).then(setRubricConfig).catch(() => {});
     })();
   }, [loadSection, loadRoster, isAdmin]);
@@ -81,28 +86,51 @@ export default function SectionDetailDrawer({
     } finally { setSavingInfo(false); }
   }
 
-  const availableStudents = students.filter((s) => !roster.some((r) => r.student.id === s.id));
-
-  async function addStudent() {
-    if (!addStudentId) return;
+  async function addStudent(hit: StudentHit) {
     setAddingStudent(true);
+    setRosterError(null);
     try {
-      await apiFetch('/enrollments', { method: 'POST', body: JSON.stringify({ sectionId, studentId: addStudentId }) });
-      setAddStudentId('');
+      await apiFetch('/enrollments', { method: 'POST', body: JSON.stringify({ sectionId, studentId: hit.id }) });
       await loadRoster();
       await loadSection();
       onChanged();
+    } catch (err) {
+      // Surfaces the real reason (capacity, already in another section of this
+      // subject, not currently studying) instead of failing silently.
+      setRosterError(err instanceof Error ? err.message : t('secD.addFailed'));
     } finally { setAddingStudent(false); }
+  }
+
+  async function addGroup() {
+    if (!addGroupId) return;
+    setAddingGroup(true);
+    setRosterError(null);
+    setGroupResult(null);
+    try {
+      const res = await apiFetch<{ enrolled: number; skipped: { studentCode: string; reason: string }[] }>(
+        `/student-groups/${addGroupId}/enroll`,
+        { method: 'POST', body: JSON.stringify({ sectionId }) },
+      );
+      setGroupResult(res);
+      await loadRoster();
+      await loadSection();
+      onChanged();
+    } catch (err) {
+      setRosterError(err instanceof Error ? err.message : t('secD.addFailed'));
+    } finally { setAddingGroup(false); }
   }
 
   async function dropStudent(enrollmentId: string) {
     if (!window.confirm(t('secD.confirmDrop'))) return;
     setBusyEnrollmentId(enrollmentId);
+    setRosterError(null);
     try {
       await apiFetch(`/enrollments/${enrollmentId}/drop`, { method: 'PATCH', body: JSON.stringify({}) });
       await loadRoster();
       await loadSection();
       onChanged();
+    } catch (err) {
+      setRosterError(err instanceof Error ? err.message : t('secD.dropFailed'));
     } finally { setBusyEnrollmentId(null); }
   }
 
@@ -161,22 +189,53 @@ export default function SectionDetailDrawer({
           <div style={{ fontWeight: 700, fontSize: 13.5 }}>{t('secD.roster')} ({section.currentEnrollment}/{section.capacity})</div>
         </div>
         {isFull && <div className="chip chip-warning" style={{ marginBottom: 10 }}>{t('secD.capacityFull')}</div>}
+
+        {/* Add one student — type-ahead over the whole faculty roster, not a
+            pre-loaded dropdown (which silently truncated at 200 and showed
+            nothing at all to a lecturer once /students became section-scoped). */}
+        <div style={{ marginBottom: 10, opacity: isFull ? 0.6 : 1 }}>
+          <StudentPicker
+            onPick={addStudent}
+            excludeSectionId={sectionId}
+            disabled={isFull || addingStudent}
+            placeholder={t('secD.searchStudent')}
+          />
+        </div>
+
+        {/* Add a whole group at once */}
         <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
-          <select aria-label={t('secD.selectStudent')} className="input" value={addStudentId} onChange={(e) => setAddStudentId(e.target.value)} disabled={isFull}>
-            <option value="">{t('secD.selectStudent')}</option>
-            {availableStudents.map((s) => <option key={s.id} value={s.id}>{s.studentCode} — {name(s.nameEn, s.nameTh)}</option>)}
+          <select aria-label={t('secD.selectGroup')} className="input" value={addGroupId} onChange={(e) => setAddGroupId(e.target.value)} disabled={isFull}>
+            <option value="">{t('secD.selectGroup')}</option>
+            {groups.map((g) => (
+              <option key={g.id} value={g.id}>
+                {name(g.nameEn, g.nameTh)} ({g._count.members})
+              </option>
+            ))}
           </select>
-          <button onClick={addStudent} disabled={!addStudentId || addingStudent || isFull} className="btn-primary" style={{ padding: '9px 16px', fontSize: 13, whiteSpace: 'nowrap' }}>
-            {addingStudent ? '…' : t('secD.addStudent')}
+          <button onClick={addGroup} disabled={!addGroupId || addingGroup || isFull} className="glass hairline"
+            style={{ padding: '9px 16px', fontSize: 13, whiteSpace: 'nowrap', borderRadius: 11, fontWeight: 650, color: 'var(--text-1)' }}>
+            {addingGroup ? '…' : t('secD.addGroup')}
           </button>
         </div>
+
+        {rosterError && <div className="chip chip-danger" role="alert" style={{ display: 'block', borderRadius: 11, padding: '8px 12px', marginBottom: 10, fontSize: 12.5 }}>{rosterError}</div>}
+
+        {groupResult && (
+          <div className={`chip ${groupResult.skipped.length ? 'chip-warning' : 'chip-success'}`} style={{ display: 'block', borderRadius: 11, padding: '9px 12px', marginBottom: 10, fontSize: 12.5 }}>
+            <div>{t('secD.groupAdded')}: <strong>{groupResult.enrolled}</strong>{groupResult.skipped.length > 0 && <> · {t('secD.groupSkipped')}: <strong>{groupResult.skipped.length}</strong></>}</div>
+            {groupResult.skipped.slice(0, 5).map((s) => (
+              <div key={s.studentCode} style={{ fontSize: 11.5, marginTop: 3, opacity: 0.9 }}>{s.studentCode} — {s.reason}</div>
+            ))}
+          </div>
+        )}
+
         <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 24 }}>
           {roster.length === 0 ? (
             <div className="muted" style={{ textAlign: 'center', padding: 20, fontSize: 13 }}>{t('secD.noStudents')}</div>
           ) : roster.map((e) => (
             <div key={e.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 12px', borderRadius: 10, background: 'var(--popover-hover)' }}>
               <span style={{ fontFamily: 'ui-monospace, monospace', fontWeight: 600, fontSize: 12.5 }}>{e.student.studentCode}</span>
-              <span style={{ flex: 1, fontSize: 13 }}>{e.student.nameEn}</span>
+              <span style={{ flex: 1, fontSize: 13 }}>{name(e.student.nameEn, e.student.nameTh ?? null)}</span>
               <button onClick={() => dropStudent(e.id)} disabled={busyEnrollmentId === e.id} className="btn-danger" style={{ padding: '5px 12px', fontSize: 11.5 }}>
                 {busyEnrollmentId === e.id ? '…' : t('secD.dropStudent')}
               </button>

@@ -24,6 +24,7 @@ const SEM_LABEL: Record<string, { en: string; th: string }> = {
 const NAV = [
   { key: 'nav.dashboard', icon: IconGrid, href: '/dashboard', id: 'Dashboard' },
   { key: 'nav.students', icon: IconStudents, href: '/students', id: 'Students' },
+  { key: 'nav.groups', icon: IconStudents, href: '/groups', id: 'Groups' },
   { key: 'nav.lecturers', icon: IconTeacher, href: '/lecturers', id: 'Lecturers' },
   { key: 'nav.sections', icon: IconBook, href: '/sections', id: 'Sections' },
   { key: 'nav.timetable', icon: IconCalendar, href: '/timetable', id: 'Timetable' },

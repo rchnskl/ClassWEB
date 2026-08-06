@@ -107,6 +107,31 @@ export async function apiFetch<T>(path: string, init: RequestInit = {}, _retried
   }
 }
 
+/**
+ * POST multipart/form-data (file uploads). Deliberately does NOT set a
+ * content-type header: the browser has to add its own multipart boundary,
+ * and setting it by hand produces a body the server cannot parse.
+ */
+export async function uploadFile<T>(path: string, form: FormData): Promise<T> {
+  beginRequest();
+  try {
+    const accessToken = token();
+    const res = await fetch(`${API_BASE}${path}`, {
+      method: 'POST',
+      headers: accessToken ? { authorization: `Bearer ${accessToken}` } : {},
+      body: form,
+    });
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      const message = Array.isArray(body?.message) ? body.message.join(', ') : body?.message;
+      throw new ApiError(res.status, message ?? res.statusText);
+    }
+    return body as T;
+  } finally {
+    endRequest();
+  }
+}
+
 /** Fetch a protected file endpoint with auth and trigger a browser download. */
 export async function downloadFile(path: string, fallbackName: string): Promise<void> {
   const token = typeof window !== 'undefined' ? localStorage.getItem('accessToken') : null;

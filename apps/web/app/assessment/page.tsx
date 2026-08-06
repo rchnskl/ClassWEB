@@ -122,7 +122,12 @@ export default function AssessmentPage() {
   }
 
   async function openConfig() {
-    if (!currentSubjectId) return;
+    if (!currentSubjectId) {
+      // Previously a silent no-op — indistinguishable from a dead button
+      // when there's no section (and therefore no subject) selected yet.
+      setActionError(t('as.noSubjectSelected'));
+      return;
+    }
     setActionError(null);
     try {
       const rows = await apiFetch<RubricConfigRow[]>(`/assessment/subjects/${currentSubjectId}/rubric-config`);
@@ -169,11 +174,21 @@ export default function AssessmentPage() {
             <p className="muted" style={{ margin: '4px 0 0', fontSize: 14.5 }}>{t('as.subtitle')}</p>
           </div>
           <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
-            <select aria-label={t('as.section')} className="input" value={sectionId} onChange={(e) => pickSection(e.target.value)} style={{ width: 'auto', minWidth: 160 }}>
-              {sections.map((s) => <option key={s.id} value={s.id}>{s.subject.code} · {s.sectionNo}</option>)}
-            </select>
+            {sections.length === 0 ? (
+              <span className="chip chip-warning" style={{ fontSize: 12.5 }}>{t('as.noSections')}</span>
+            ) : (
+              <select aria-label={t('as.section')} className="input" value={sectionId} onChange={(e) => pickSection(e.target.value)} style={{ width: 'auto', minWidth: 160 }}>
+                {sections.map((s) => <option key={s.id} value={s.id}>{s.subject.code} · {s.sectionNo}</option>)}
+              </select>
+            )}
             <button className="glass hairline" style={{ padding: '9px 14px', borderRadius: 12, fontWeight: 650, fontSize: 13.5, color: 'var(--text-1)', cursor: 'pointer' }} onClick={() => setShowBuilder(true)}>{t('rubric.manageBtn')}</button>
-            <button className="glass hairline" style={{ padding: '9px 14px', borderRadius: 12, fontWeight: 650, fontSize: 13.5, color: 'var(--text-1)', cursor: 'pointer' }} onClick={openConfig}>📋 {t('as.configRubrics')}</button>
+            <button
+              className="glass hairline" disabled={!currentSubjectId} title={!currentSubjectId ? t('as.noSubjectSelected') : undefined}
+              style={{ padding: '9px 14px', borderRadius: 12, fontWeight: 650, fontSize: 13.5, color: 'var(--text-1)', cursor: currentSubjectId ? 'pointer' : 'not-allowed', opacity: currentSubjectId ? 1 : 0.5 }}
+              onClick={openConfig}
+            >
+              📋 {t('as.configRubrics')}
+            </button>
             <button className="glass hairline" style={{ padding: '9px 14px', borderRadius: 12, fontWeight: 650, fontSize: 13.5, color: 'var(--text-1)', cursor: 'pointer' }} onClick={openScheme}>⚙︎ {t('as.gradeScheme')}</button>
           </div>
         </div>
