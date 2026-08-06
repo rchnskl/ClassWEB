@@ -55,3 +55,8 @@ scratchpad/.pgdata-dev/
 apps/web/test-results/
 apps/web/playwright-report/
 apps/web/playwright/.cache/
+
+# Cloudflare (OpenNext build output + wrangler local state)
+apps/web/.open-next/
+apps/web/.wrangler/
+.wrangler/
