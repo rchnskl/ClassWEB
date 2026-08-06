@@ -35,8 +35,10 @@ COPY --from=build /app/apps/api/dist ./apps/api/dist
 COPY --from=build /app/apps/api/assets ./apps/api/assets
 COPY --from=build /app/packages/database ./packages/database
 COPY --from=build /app/apps/api/package.json ./apps/api/package.json
+COPY apps/api/docker-entrypoint.sh ./docker-entrypoint.sh
+RUN chmod +x ./docker-entrypoint.sh
 
 USER app
 # PORT is provided by the platform; the app reads process.env.PORT.
 EXPOSE 3001
-CMD ["node", "apps/api/dist/main.js"]
+CMD ["./docker-entrypoint.sh"]
