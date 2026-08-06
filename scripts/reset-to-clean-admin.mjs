@@ -15,34 +15,27 @@
 import { PrismaClient } from '@prisma/client';
 import bcrypt from 'bcryptjs';
 import { createInterface } from 'node:readline';
-import { execSync } from 'node:child_process';
 
 const ADMIN_EMAIL = 'abacnurse@au.edu';
 const ADMIN_TEMP_PASSWORD = 'ABACnurse@6008';
 
-// Same trick as `read -rs` in bash (used successfully in db-setup.sh): turn
-// off terminal echo at the tty level for the duration of the read, so typed
-// characters never appear on screen, then restore it. Falls back to a
-// normal (visible) read if stdin isn't a real TTY (e.g. piped input).
+// Plain visible prompt — reads via the readline async iterator rather than
+// rl.question() (calling question() twice in a row on the same interface
+// reliably hangs on the second call when stdin is piped, a known Node
+// readline quirk; the async iterator drives off the stream's natural flow
+// and doesn't have this problem).
 //
-// Reads via the readline async iterator rather than rl.question() — calling
-// question() twice in a row on the same interface reliably hangs on the
-// second call when stdin is piped (a known Node readline quirk: the stream
-// doesn't resume properly between calls). The async iterator drives off the
-// stream's natural flow and doesn't have this problem.
-const isTTY = Boolean(process.stdin.isTTY);
+// Not hidden: this connection string is already visible in your Neon
+// browser tab, and a hidden/no-echo prompt gives zero feedback while
+// pasting — you can't tell whether the paste landed, which was actively
+// causing failed attempts. Nothing typed here is written to disk or logged;
+// it only lives in this terminal's own scrollback on your machine.
 const rl = createInterface({ input: process.stdin, terminal: false });
 const lines = rl[Symbol.asyncIterator]();
 
 async function askHidden(prompt) {
   process.stdout.write(prompt);
-  if (isTTY) {
-    try { execSync('stty -echo', { stdio: 'inherit' }); } catch { /* best-effort */ }
-  }
   const { value } = await lines.next();
-  if (isTTY) {
-    try { execSync('stty echo', { stdio: 'inherit' }); } catch { /* best-effort */ }
-  }
   process.stdout.write('\n');
   return (value ?? '').trim();
 }

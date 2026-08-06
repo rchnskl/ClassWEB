@@ -16,7 +16,6 @@
 // Run:  node scripts/import-nus2202.mjs
 import { PrismaClient } from '@prisma/client';
 import { createInterface } from 'node:readline';
-import { execSync } from 'node:child_process';
 import { SUBJECT, LECTURERS, ROSTER, LAB_EXAMS, LAB_PROCEDURES } from './data/nus2202.mjs';
 
 // Course is a required parent of Subject in this schema. The documents name
@@ -25,15 +24,16 @@ const COURSE = { code: 'NUS', nameEn: 'Nursing Science' };
 const IMPORT_TAG = 'NUS2202-1-2026';
 const BKK = '+07:00';
 
-const isTTY = Boolean(process.stdin.isTTY);
+// Plain visible prompt (not hidden) — this connection string is already
+// visible in your Neon browser tab, and a no-echo prompt gives zero
+// feedback while pasting, which was actively causing failed attempts.
+// Nothing typed here is written to disk or logged.
 const rl = createInterface({ input: process.stdin, terminal: false });
 const lines = rl[Symbol.asyncIterator]();
 
 async function askHidden(prompt) {
   process.stdout.write(prompt);
-  if (isTTY) { try { execSync('stty -echo', { stdio: 'inherit' }); } catch { /* best-effort */ } }
   const { value } = await lines.next();
-  if (isTTY) { try { execSync('stty echo', { stdio: 'inherit' }); } catch { /* best-effort */ } }
   process.stdout.write('\n');
   return (value ?? '').trim();
 }
