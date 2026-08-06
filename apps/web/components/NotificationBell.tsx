@@ -19,6 +19,7 @@ export default function NotificationBell() {
   const [unread, setUnread] = useState(0);
   const [pos, setPos] = useState<{ top: number; right: number; width: number } | null>(null);
   const [showChannels, setShowChannels] = useState(false);
+  const [markingAll, setMarkingAll] = useState(false);
   const btnRef = useRef<HTMLButtonElement>(null);
 
   const load = useCallback(async () => {
@@ -70,11 +71,15 @@ export default function NotificationBell() {
     } catch { /* ignore */ }
   }
   async function markAll() {
+    if (markingAll) return;
+    setMarkingAll(true);
     try {
       await apiFetch('/notifications/read-all', { method: 'PATCH' });
       setUnread(0);
       setItems((prev) => prev.map((n) => ({ ...n, readAt: n.readAt ?? new Date().toISOString() })));
-    } catch { /* ignore */ }
+    } catch { /* ignore */ } finally {
+      setMarkingAll(false);
+    }
   }
 
   const fmt = (iso: string) => new Intl.DateTimeFormat(lang === 'th' ? 'th-TH' : 'en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date(iso));
@@ -104,7 +109,7 @@ export default function NotificationBell() {
           >
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
               <div style={{ fontWeight: 700, fontSize: 14.5 }}>{t('notif.title')}</div>
-              {unread > 0 && <button onClick={markAll} style={{ border: 'none', background: 'transparent', color: 'var(--brand)', fontSize: 12, fontWeight: 600, cursor: 'pointer' }}>{t('notif.markAll')}</button>}
+              {unread > 0 && <button onClick={markAll} disabled={markingAll} style={{ border: 'none', background: 'transparent', color: 'var(--brand)', fontSize: 12, fontWeight: 600, cursor: markingAll ? 'wait' : 'pointer', opacity: markingAll ? 0.6 : 1 }}>{t('notif.markAll')}</button>}
             </div>
             {items.length === 0 ? (
               <div className="muted" style={{ textAlign: 'center', padding: 24, fontSize: 13 }}>{t('notif.empty')}</div>

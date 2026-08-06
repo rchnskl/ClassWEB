@@ -1,6 +1,32 @@
 export const API_BASE =
   process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001/api/v1';
 
+// ---------------------------------------------------------------------------
+// In-flight request tracking, for a global "something is happening" status
+// bar (see components/GlobalLoadingBar.tsx). Every apiFetch call counts
+// itself while in flight so no page has to wire this up individually.
+// ---------------------------------------------------------------------------
+let activeRequests = 0;
+const loadingListeners = new Set<() => void>();
+
+export function subscribeApiLoading(listener: () => void): () => void {
+  loadingListeners.add(listener);
+  return () => { loadingListeners.delete(listener); };
+}
+
+export function isApiLoading(): boolean {
+  return activeRequests > 0;
+}
+
+function beginRequest() {
+  activeRequests += 1;
+  if (activeRequests === 1) loadingListeners.forEach((l) => l());
+}
+function endRequest() {
+  activeRequests = Math.max(0, activeRequests - 1);
+  if (activeRequests === 0) loadingListeners.forEach((l) => l());
+}
+
 export class ApiError extends Error {
   constructor(
     public status: number,
@@ -51,29 +77,34 @@ export async function refreshAccessToken(): Promise<string | null> {
 }
 
 export async function apiFetch<T>(path: string, init: RequestInit = {}, _retried = false): Promise<T> {
-  const accessToken = token();
-  const res = await fetch(`${API_BASE}${path}`, {
-    ...init,
-    headers: {
-      'content-type': 'application/json',
-      ...(accessToken ? { authorization: `Bearer ${accessToken}` } : {}),
-      ...(init.headers ?? {}),
-    },
-  });
+  beginRequest();
+  try {
+    const accessToken = token();
+    const res = await fetch(`${API_BASE}${path}`, {
+      ...init,
+      headers: {
+        'content-type': 'application/json',
+        ...(accessToken ? { authorization: `Bearer ${accessToken}` } : {}),
+        ...(init.headers ?? {}),
+      },
+    });
 
-  // Access token likely expired — try one silent refresh, then replay the request once.
-  // Never do this for the refresh call itself, and never loop.
-  if (res.status === 401 && !_retried && !path.startsWith('/auth/')) {
-    const fresh = await refreshAccessToken();
-    if (fresh) return apiFetch<T>(path, init, true);
-  }
+    // Access token likely expired — try one silent refresh, then replay the request once.
+    // Never do this for the refresh call itself, and never loop.
+    if (res.status === 401 && !_retried && !path.startsWith('/auth/')) {
+      const fresh = await refreshAccessToken();
+      if (fresh) return await apiFetch<T>(path, init, true);
+    }
 
-  const body = await res.json().catch(() => ({}));
-  if (!res.ok) {
-    const message = Array.isArray(body?.message) ? body.message.join(', ') : body?.message;
-    throw new ApiError(res.status, message ?? res.statusText);
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      const message = Array.isArray(body?.message) ? body.message.join(', ') : body?.message;
+      throw new ApiError(res.status, message ?? res.statusText);
+    }
+    return body as T;
+  } finally {
+    endRequest();
   }
-  return body as T;
 }
 
 /** Fetch a protected file endpoint with auth and trigger a browser download. */

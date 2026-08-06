@@ -36,6 +36,9 @@ export default function AttendancePage() {
   const [state, setState] = useState<State | null>(null);
   const [origin, setOrigin] = useState('');
   const [actionError, setActionError] = useState<string | null>(null);
+  const [openBusy, setOpenBusy] = useState(false);
+  const [markingId, setMarkingId] = useState<string | null>(null);
+  const [resolvingId, setResolvingId] = useState<string | null>(null);
 
   const today = new Date().toISOString().slice(0, 10);
 
@@ -61,33 +64,45 @@ export default function AttendancePage() {
   }, [selected, loadState]);
 
   async function open() {
-    if (!selected) return;
+    if (!selected || openBusy) return;
     setActionError(null);
+    setOpenBusy(true);
     try {
       await apiFetch(`/attendance/sessions/${selected}/open`, { method: 'POST' });
       await loadState(selected);
     } catch (err) {
       setActionError(err instanceof Error ? err.message : 'Failed to open the attendance window.');
+    } finally {
+      setOpenBusy(false);
     }
   }
   async function mark(studentId: string, status: string) {
-    if (!selected) return;
+    // Guard against a rapid double-tap firing the same mark twice while the
+    // first request is still in flight — only blocks this one student's row.
+    if (!selected || markingId === studentId) return;
     setActionError(null);
+    setMarkingId(studentId);
     try {
       await apiFetch('/attendance/records', { method: 'POST', body: JSON.stringify({ classSessionId: selected, studentId, status }) });
       await loadState(selected);
     } catch (err) {
       // A silently-failed mark makes the teacher think attendance was recorded when it wasn't.
       setActionError(err instanceof Error ? err.message : 'Failed to record attendance. Please try again.');
+    } finally {
+      setMarkingId(null);
     }
   }
   async function resolve(id: string, action: 'ACCEPT' | 'REJECT', reason: string) {
+    if (resolvingId === id) return;
     setActionError(null);
+    setResolvingId(id);
     try {
       await apiFetch(`/attendance/checkins/${id}/resolve`, { method: 'POST', body: JSON.stringify({ action, reason }) });
       if (selected) await loadState(selected);
     } catch (err) {
       setActionError(err instanceof Error ? err.message : 'Failed to resolve the check-in.');
+    } finally {
+      setResolvingId(null);
     }
   }
 
@@ -147,7 +162,9 @@ export default function AttendancePage() {
                   ) : (
                     <>
                       <div style={{ fontSize: 40, marginBottom: 10 }}>📷</div>
-                      <button className="btn-primary" onClick={open} style={{ padding: '12px 20px', fontSize: 15 }}>{t('att.open')}</button>
+                      <button className="btn-primary" onClick={open} disabled={openBusy} style={{ padding: '12px 20px', fontSize: 15, cursor: openBusy ? 'wait' : 'pointer', opacity: openBusy ? 0.7 : 1 }}>
+                        {openBusy ? `${t('att.open')}…` : t('att.open')}
+                      </button>
                     </>
                   )}
 
@@ -165,7 +182,7 @@ export default function AttendancePage() {
                     <div className="glass rise" style={{ padding: 18, borderLeft: '3px solid var(--warning)' }}>
                       <h2 style={{ fontSize: 15.5, fontWeight: 700, margin: '0 0 12px' }}>⚠️ {t('att.pending')} ({state.pending.length})</h2>
                       {state.pending.map((p) => (
-                        <PendingRow key={p.id} code={p.enteredCode} t={t} onResolve={(action, reason) => resolve(p.id, action, reason)} />
+                        <PendingRow key={p.id} code={p.enteredCode} t={t} busy={resolvingId === p.id} onResolve={(action, reason) => resolve(p.id, action, reason)} />
                       ))}
                     </div>
                   )}
@@ -179,9 +196,9 @@ export default function AttendancePage() {
                           <span style={{ fontWeight: 600, fontSize: 14, flex: 1, minWidth: 120 }}>{r.nameEn}</span>
                           {r.record && <StatusBadge status={r.record.status} method={r.record.method} t={t} />}
                           <div style={{ display: 'flex', gap: 6 }}>
-                            <MarkBtn active={r.record?.status === 'PRESENT'} tone="var(--success)" onClick={() => mark(r.studentId, 'PRESENT')}>{t('att.present')}</MarkBtn>
-                            <MarkBtn active={r.record?.status === 'LATE'} tone="var(--warning)" onClick={() => mark(r.studentId, 'LATE')}>{t('att.late')}</MarkBtn>
-                            <MarkBtn active={r.record?.status === 'ABSENT'} tone="var(--danger)" onClick={() => mark(r.studentId, 'ABSENT')}>{t('att.absent')}</MarkBtn>
+                            <MarkBtn active={r.record?.status === 'PRESENT'} busy={markingId === r.studentId} tone="var(--success)" onClick={() => mark(r.studentId, 'PRESENT')}>{t('att.present')}</MarkBtn>
+                            <MarkBtn active={r.record?.status === 'LATE'} busy={markingId === r.studentId} tone="var(--warning)" onClick={() => mark(r.studentId, 'LATE')}>{t('att.late')}</MarkBtn>
+                            <MarkBtn active={r.record?.status === 'ABSENT'} busy={markingId === r.studentId} tone="var(--danger)" onClick={() => mark(r.studentId, 'ABSENT')}>{t('att.absent')}</MarkBtn>
                           </div>
                         </div>
                       ))}
@@ -205,12 +222,13 @@ function Count({ label, value, tone }: { label: string; value: number; tone?: st
     </div>
   );
 }
-function MarkBtn({ children, onClick, active, tone }: { children: React.ReactNode; onClick: () => void; active?: boolean; tone: string }) {
+function MarkBtn({ children, onClick, active, busy, tone }: { children: React.ReactNode; onClick: () => void; active?: boolean; busy?: boolean; tone: string }) {
   return (
-    <button onClick={onClick} style={{
-      padding: '5px 10px', borderRadius: 9, fontSize: 12, fontWeight: 600, cursor: 'pointer',
+    <button onClick={onClick} disabled={busy} style={{
+      padding: '5px 10px', borderRadius: 9, fontSize: 12, fontWeight: 600, cursor: busy ? 'wait' : 'pointer',
       border: `1px solid ${active ? tone : 'var(--glass-hairline)'}`,
       background: active ? tone : 'transparent', color: active ? '#fff' : 'var(--text-1)', transition: 'all .15s',
+      opacity: busy ? 0.6 : 1,
     }}>{children}</button>
   );
 }
@@ -219,16 +237,16 @@ function StatusBadge({ status, method, t }: { status: string; method: string; t:
   const label: Record<string, string> = { PRESENT: t('att.present'), LATE: t('att.late'), ABSENT: t('att.absent') };
   return <span className={`chip ${map[status] ?? ''}`}>{label[status] ?? status} {method === 'QR_CODE' ? '· QR' : ''}</span>;
 }
-function PendingRow({ code, onResolve, t }: { code: string; onResolve: (a: 'ACCEPT' | 'REJECT', reason: string) => void; t: (k: string) => string }) {
+function PendingRow({ code, onResolve, busy, t }: { code: string; onResolve: (a: 'ACCEPT' | 'REJECT', reason: string) => void; busy?: boolean; t: (k: string) => string }) {
   const [reason, setReason] = useState<string>('WRONG_CODE');
   return (
     <div className="glass hairline" style={{ padding: '10px 14px', borderRadius: 12, display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', marginBottom: 8 }}>
       <span style={{ fontFamily: 'ui-monospace, monospace', fontWeight: 700, fontSize: 14 }}>{code}</span>
-      <select aria-label={t('att.reason')} className="input" value={reason} onChange={(e) => setReason(e.target.value)} style={{ flex: 1, minWidth: 160, padding: '7px 10px', fontSize: 13 }}>
+      <select aria-label={t('att.reason')} className="input" value={reason} onChange={(e) => setReason(e.target.value)} disabled={busy} style={{ flex: 1, minWidth: 160, padding: '7px 10px', fontSize: 13 }}>
         {REASONS.map((r) => <option key={r} value={r}>{t(`att.reason.${r}`)}</option>)}
       </select>
-      <button onClick={() => onResolve('ACCEPT', reason)} className="chip chip-success" style={{ cursor: 'pointer', border: 'none', padding: '7px 12px' }}>{t('att.accept')}</button>
-      <button onClick={() => onResolve('REJECT', reason)} className="chip chip-danger" style={{ cursor: 'pointer', border: 'none', padding: '7px 12px' }}>{t('att.reject')}</button>
+      <button onClick={() => onResolve('ACCEPT', reason)} disabled={busy} className="chip chip-success" style={{ cursor: busy ? 'wait' : 'pointer', border: 'none', padding: '7px 12px', opacity: busy ? 0.6 : 1 }}>{t('att.accept')}</button>
+      <button onClick={() => onResolve('REJECT', reason)} disabled={busy} className="chip chip-danger" style={{ cursor: busy ? 'wait' : 'pointer', border: 'none', padding: '7px 12px', opacity: busy ? 0.6 : 1 }}>{t('att.reject')}</button>
     </div>
   );
 }
