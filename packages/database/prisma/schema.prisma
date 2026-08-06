@@ -140,6 +140,15 @@ enum SemesterType {
   SPECIAL
 }
 
+/// หมวดวิชา — the 5 curriculum categories a subject is classified under.
+enum SubjectCategory {
+  GENERAL_EDUCATION
+  PROFESSIONAL_FOUNDATION
+  PROFESSIONAL_THEORY
+  PROFESSIONAL_PRACTICE
+  FREE_ELECTIVE
+}
+
 enum CalendarEventType {
   HOLIDAY
   SPECIAL_EVENT
@@ -259,20 +268,34 @@ model University {
   @@map("universities")
 }
 
+/// A physical site rooms/buildings belong to. Kept as one hierarchy for both
+/// the home campus and external clinical training sites — a teaching
+/// hospital's wards are modelled the same way as an on-campus building, just
+/// under a Campus whose locationType says what kind of place it actually is.
+enum CampusType {
+  CAMPUS
+  HOSPITAL
+  HEALTH_PROMOTING_HOSPITAL
+  HEALTH_SERVICE_CENTER
+  CLINIC
+  MEDICAL_CENTER
+}
+
 model Campus {
-  id           String    @id @default(cuid())
+  id           String     @id @default(cuid())
   universityId String
   code         String
   nameEn       String
   nameTh       String?
+  locationType CampusType @default(CAMPUS)
   address      String?
   city         String?
-  country      String?   @default("Thailand")
-  timezone     String    @default("Asia/Bangkok")
-  isActive     Boolean   @default(true)
+  country      String?    @default("Thailand")
+  timezone     String     @default("Asia/Bangkok")
+  isActive     Boolean    @default(true)
   metadata     Json?
-  createdAt    DateTime  @default(now())
-  updatedAt    DateTime  @updatedAt
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
   deletedAt    DateTime?
 
   university University @relation(fields: [universityId], references: [id])
@@ -333,19 +356,24 @@ model Department {
 
 /// A degree program, e.g. "Bachelor of Nursing Science".
 model Program {
-  id           String    @id @default(cuid())
-  facultyId    String
-  code         String
-  nameEn       String
-  nameTh       String?
-  degreeType   String? // e.g. "Bachelor", "Master"
-  durationYrs  Int?      @default(4)
-  totalCredits Int?
-  isActive     Boolean   @default(true)
-  metadata     Json?
-  createdAt    DateTime  @default(now())
-  updatedAt    DateTime  @updatedAt
-  deletedAt    DateTime?
+  id               String    @id @default(cuid())
+  facultyId        String
+  code             String
+  nameEn           String
+  nameTh           String?
+  degreeType       String? // e.g. "Bachelor", "Master"
+  durationYrs      Int?      @default(4)
+  totalCredits     Int?
+  /// The Buddhist-era year this curriculum revision was approved, e.g. 2565
+  /// (หลักสูตรปรับปรุง พ.ศ. 2565) — a program is reused across many intake
+  /// cohorts, but which curriculum version a student is on is a real,
+  /// citable fact on transcripts and accreditation documents.
+  curriculumYearBE Int?
+  isActive         Boolean   @default(true)
+  metadata         Json?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+  deletedAt        DateTime?
 
   faculty       Faculty        @relation(fields: [facultyId], references: [id])
   courses       Course[]
@@ -443,20 +471,26 @@ model Course {
 }
 
 model Subject {
-  id          String    @id @default(cuid())
+  id          String           @id @default(cuid())
   programId   String
   courseId    String // every subject belongs to a curriculum Course (confirmed by faculty)
   code        String // Course Code, e.g. "NUR1101"
   nameEn      String
   nameTh      String?
   description String? // Course Description
-  credits     Int       @default(3)
+  credits     Int              @default(3)
   /// Contact-hour breakdown, e.g. { "lecture": 2, "lab": 3, "clinical": 0 }.
   creditHours Json?
-  isActive    Boolean   @default(true)
+  /// หมวดวิชา — which of the 5 curriculum categories this subject falls
+  /// under, for the study-plan view and transcript grouping.
+  category    SubjectCategory?
+  /// แผนการเรียน — which year of the curriculum (1–4) this subject is
+  /// normally taken in.
+  yearLevel   Int?
+  isActive    Boolean          @default(true)
   metadata    Json?
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
   deletedAt   DateTime?
 
   program        Program         @relation(fields: [programId], references: [id])

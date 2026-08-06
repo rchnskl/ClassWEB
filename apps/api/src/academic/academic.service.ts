@@ -163,7 +163,7 @@ export class AcademicService {
   }
 
   private programSelect = {
-    id: true, code: true, nameEn: true, nameTh: true, degreeType: true, durationYrs: true, totalCredits: true,
+    id: true, code: true, nameEn: true, nameTh: true, degreeType: true, durationYrs: true, totalCredits: true, curriculumYearBE: true,
     faculty: { select: { id: true, code: true, nameEn: true } },
     _count: { select: { courses: true, subjects: true, students: true } },
   } as const;
@@ -192,6 +192,7 @@ export class AcademicService {
         degreeType: dto.degreeType,
         durationYrs: dto.durationYrs,
         totalCredits: dto.totalCredits,
+        curriculumYearBE: dto.curriculumYearBE,
       },
       select: this.programSelect,
     });
@@ -217,6 +218,7 @@ export class AcademicService {
         ...(dto.degreeType !== undefined && { degreeType: dto.degreeType }),
         ...(dto.durationYrs !== undefined && { durationYrs: dto.durationYrs }),
         ...(dto.totalCredits !== undefined && { totalCredits: dto.totalCredits }),
+        ...(dto.curriculumYearBE !== undefined && { curriculumYearBE: dto.curriculumYearBE }),
       },
       select: this.programSelect,
     });

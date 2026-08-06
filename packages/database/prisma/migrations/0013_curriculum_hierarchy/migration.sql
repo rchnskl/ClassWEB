@@ -1,0 +1,15 @@
+-- CreateEnum
+CREATE TYPE "SubjectCategory" AS ENUM ('GENERAL_EDUCATION', 'PROFESSIONAL_FOUNDATION', 'PROFESSIONAL_THEORY', 'PROFESSIONAL_PRACTICE', 'FREE_ELECTIVE');
+
+-- CreateEnum
+CREATE TYPE "CampusType" AS ENUM ('CAMPUS', 'HOSPITAL', 'HEALTH_PROMOTING_HOSPITAL', 'HEALTH_SERVICE_CENTER', 'CLINIC', 'MEDICAL_CENTER');
+
+-- AlterTable
+ALTER TABLE "campuses" ADD COLUMN     "locationType" "CampusType" NOT NULL DEFAULT 'CAMPUS';
+
+-- AlterTable
+ALTER TABLE "programs" ADD COLUMN     "curriculumYearBE" INTEGER;
+
+-- AlterTable
+ALTER TABLE "subjects" ADD COLUMN     "category" "SubjectCategory",
+ADD COLUMN     "yearLevel" INTEGER;

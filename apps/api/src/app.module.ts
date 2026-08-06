@@ -20,6 +20,7 @@ import { LecturersModule } from './lecturers/lecturers.module';
 import { SubjectsModule } from './subjects/subjects.module';
 import { SectionsModule } from './sections/sections.module';
 import { RoomsModule } from './rooms/rooms.module';
+import { LocationsModule } from './locations/locations.module';
 import { EnrollmentsModule } from './enrollments/enrollments.module';
 import { StudentGroupsModule } from './student-groups/student-groups.module';
 import { TimetableModule } from './timetable/timetable.module';
@@ -60,6 +61,7 @@ import { AllExceptionsFilter } from './common/filters/all-exceptions.filter';
     SubjectsModule,
     SectionsModule,
     RoomsModule,
+    LocationsModule,
     EnrollmentsModule,
     StudentGroupsModule,
     TimetableModule,

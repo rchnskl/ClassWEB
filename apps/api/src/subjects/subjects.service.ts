@@ -9,7 +9,7 @@ export class SubjectsService {
   constructor(private readonly prisma: PrismaService) {}
 
   private select = {
-    id: true, code: true, nameEn: true, nameTh: true, credits: true, description: true,
+    id: true, code: true, nameEn: true, nameTh: true, credits: true, description: true, category: true, yearLevel: true,
     program: { select: { id: true, code: true, nameEn: true } },
     course: { select: { id: true, code: true, nameEn: true } },
     _count: { select: { sections: true } },
@@ -20,6 +20,8 @@ export class SubjectsService {
       deletedAt: null,
       program: { faculty: { universityId } },
       ...(query.programId ? { programId: query.programId } : {}),
+      ...(query.category ? { category: query.category } : {}),
+      ...(query.yearLevel !== undefined ? { yearLevel: query.yearLevel } : {}),
       ...(query.search
         ? { OR: [
             { code: { contains: query.search, mode: 'insensitive' } },
@@ -71,6 +73,8 @@ export class SubjectsService {
         nameTh: dto.nameTh,
         description: dto.description,
         credits: dto.credits ?? 3,
+        category: dto.category,
+        yearLevel: dto.yearLevel,
       },
       select: this.select,
     });
@@ -107,6 +111,8 @@ export class SubjectsService {
         ...(dto.nameTh !== undefined && { nameTh: dto.nameTh }),
         ...(dto.description !== undefined && { description: dto.description }),
         ...(dto.credits !== undefined && { credits: dto.credits }),
+        ...(dto.category !== undefined && { category: dto.category }),
+        ...(dto.yearLevel !== undefined && { yearLevel: dto.yearLevel }),
       },
       select: this.select,
     });

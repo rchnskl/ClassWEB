@@ -8,7 +8,7 @@ import SectionDetailDrawer from '@/components/SectionDetailDrawer';
 import { apiFetch, type Paginated } from '@/lib/api';
 import { useI18n } from '@/lib/i18n';
 
-type Tab = 'subjects' | 'sections' | 'departments' | 'programs';
+type Tab = 'subjects' | 'sections' | 'departments' | 'programs' | 'locations';
 
 export default function SectionsPage() {
   const router = useRouter();
@@ -43,16 +43,18 @@ export default function SectionsPage() {
         </div>
 
         <div className="tabbar rise" style={{ marginBottom: 16 }}>
-          <button className={`tab ${tab === 'sections' ? 'active' : ''}`} onClick={() => setTab('sections')}>{t('sec.tab.sections')}</button>
-          <button className={`tab ${tab === 'subjects' ? 'active' : ''}`} onClick={() => setTab('subjects')}>{t('sec.tab.subjects')}</button>
-          <button className={`tab ${tab === 'departments' ? 'active' : ''}`} onClick={() => setTab('departments')}>{t('dept.title')}</button>
           <button className={`tab ${tab === 'programs' ? 'active' : ''}`} onClick={() => setTab('programs')}>{t('prog.title')}</button>
+          <button className={`tab ${tab === 'subjects' ? 'active' : ''}`} onClick={() => setTab('subjects')}>{t('sec.tab.subjects')}</button>
+          <button className={`tab ${tab === 'sections' ? 'active' : ''}`} onClick={() => setTab('sections')}>{t('sec.tab.sections')}</button>
+          <button className={`tab ${tab === 'departments' ? 'active' : ''}`} onClick={() => setTab('departments')}>{t('dept.title')}</button>
+          <button className={`tab ${tab === 'locations' ? 'active' : ''}`} onClick={() => setTab('locations')}>{t('loc.title')}</button>
         </div>
 
-        {tab === 'sections' && <SectionsTab isAdmin={isAdmin} userId={userId} />}
-        {tab === 'subjects' && <SubjectsTab isAdmin={isAdmin} />}
-        {tab === 'departments' && <DepartmentsTab isAdmin={isAdmin} />}
         {tab === 'programs' && <ProgramsTab isAdmin={isAdmin} />}
+        {tab === 'subjects' && <SubjectsTab isAdmin={isAdmin} />}
+        {tab === 'sections' && <SectionsTab isAdmin={isAdmin} userId={userId} />}
+        {tab === 'departments' && <DepartmentsTab isAdmin={isAdmin} />}
+        {tab === 'locations' && <LocationsTab isAdmin={isAdmin} />}
       </div>
     </div>
   );
@@ -269,8 +271,11 @@ function SectionsTab({ isAdmin, userId }: { isAdmin: boolean; userId: string }) 
 // Subjects tab
 // ---------------------------------------------------------------------------
 
+const SUBJECT_CATEGORIES = ['GENERAL_EDUCATION', 'PROFESSIONAL_FOUNDATION', 'PROFESSIONAL_THEORY', 'PROFESSIONAL_PRACTICE', 'FREE_ELECTIVE'] as const;
+
 interface SubjectRow {
   id: string; code: string; nameEn: string; nameTh: string | null; credits: number; description: string | null;
+  category: string | null; yearLevel: number | null;
   program: { id: string; code: string; nameEn: string };
   course: { id: string; code: string; nameEn: string };
   _count: { sections: number };
@@ -278,7 +283,7 @@ interface SubjectRow {
 interface ProgramRef { id: string; code: string; nameEn: string }
 interface CourseRef { id: string; code: string; nameEn: string; programId: string }
 
-const EMPTY_SUBJECT_FORM = { programId: '', courseId: '', code: '', nameEn: '', nameTh: '', description: '', credits: 3 };
+const EMPTY_SUBJECT_FORM = { programId: '', courseId: '', code: '', nameEn: '', nameTh: '', description: '', credits: 3, category: '', yearLevel: '' };
 
 function SubjectsTab({ isAdmin }: { isAdmin: boolean }) {
   const { t, lang } = useI18n();
@@ -328,7 +333,10 @@ function SubjectsTab({ isAdmin }: { isAdmin: boolean }) {
   }
   function openEdit(row: SubjectRow) {
     setEditingId(row.id);
-    setForm({ programId: row.program.id, courseId: row.course.id, code: row.code, nameEn: row.nameEn, nameTh: row.nameTh ?? '', description: row.description ?? '', credits: row.credits });
+    setForm({
+      programId: row.program.id, courseId: row.course.id, code: row.code, nameEn: row.nameEn, nameTh: row.nameTh ?? '',
+      description: row.description ?? '', credits: row.credits, category: row.category ?? '', yearLevel: row.yearLevel != null ? String(row.yearLevel) : '',
+    });
     setFormError(null);
     setShowForm(true);
   }
@@ -338,7 +346,10 @@ function SubjectsTab({ isAdmin }: { isAdmin: boolean }) {
     setSaving(true);
     setFormError(null);
     try {
-      const body = { ...form, nameTh: form.nameTh || undefined, description: form.description || undefined };
+      const body = {
+        ...form, nameTh: form.nameTh || undefined, description: form.description || undefined,
+        category: form.category || undefined, yearLevel: form.yearLevel ? Number(form.yearLevel) : undefined,
+      };
       if (editingId) await apiFetch(`/subjects/${editingId}`, { method: 'PATCH', body: JSON.stringify(body) });
       else await apiFetch('/subjects', { method: 'POST', body: JSON.stringify(body) });
       setShowForm(false);
@@ -418,6 +429,18 @@ function SubjectsTab({ isAdmin }: { isAdmin: boolean }) {
           <F label={`${t('subj.nameEn')} *`}><input className="input" required value={form.nameEn} onChange={(e) => setForm({ ...form, nameEn: e.target.value })} /></F>
           <F label={t('subj.nameTh')}><input className="input" value={form.nameTh} onChange={(e) => setForm({ ...form, nameTh: e.target.value })} /></F>
           <F label={t('subj.credits')}><input type="number" min={0} max={12} className="input" value={form.credits} onChange={(e) => setForm({ ...form, credits: Number(e.target.value) })} /></F>
+          <F label={t('subj.category')}>
+            <select className="input" value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })}>
+              <option value="">{t('subj.select')}</option>
+              {SUBJECT_CATEGORIES.map((c) => <option key={c} value={c}>{t(`subj.category.${c}`)}</option>)}
+            </select>
+          </F>
+          <F label={t('subj.yearLevel')}>
+            <select className="input" value={form.yearLevel} onChange={(e) => setForm({ ...form, yearLevel: e.target.value })}>
+              <option value="">{t('students.noYear')}</option>
+              {[1, 2, 3, 4].map((y) => <option key={y} value={y}>{t('common.year')} {y}</option>)}
+            </select>
+          </F>
           <F label={t('subj.description')}><input className="input" value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} /></F>
           <button className="btn-primary" type="submit" disabled={saving} style={{ padding: 12, fontSize: 14.5 }}>{saving ? t('subj.saving') : editingId ? t('subj.save') : t('subj.create')}</button>
           {formError && <div className="chip chip-danger" style={{ gridColumn: '1 / -1', borderRadius: 12, padding: '9px 12px' }}>{formError}</div>}
@@ -443,14 +466,14 @@ function SubjectsTab({ isAdmin }: { isAdmin: boolean }) {
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 14 }}>
             <thead>
               <tr style={{ textAlign: 'left', color: 'var(--text-2)' }}>
-                <Th>{t('subj.code')}</Th><Th>{t('subj.nameEn')}</Th><Th>{t('subj.program')}</Th><Th>{t('subj.credits')}</Th><Th>{t('subj.sections')}</Th><Th> </Th>
+                <Th>{t('subj.code')}</Th><Th>{t('subj.nameEn')}</Th><Th>{t('subj.program')}</Th><Th>{t('subj.category')}</Th><Th>{t('subj.yearLevel')}</Th><Th>{t('subj.credits')}</Th><Th>{t('subj.sections')}</Th><Th> </Th>
               </tr>
             </thead>
             <tbody>
               {loading ? (
-                <tr><td colSpan={6} style={{ padding: 40, textAlign: 'center' }} className="muted">{t('common.loading')}</td></tr>
+                <tr><td colSpan={8} style={{ padding: 40, textAlign: 'center' }} className="muted">{t('common.loading')}</td></tr>
               ) : rows.length === 0 ? (
-                <tr><td colSpan={6} style={{ padding: 48, textAlign: 'center' }}>
+                <tr><td colSpan={8} style={{ padding: 48, textAlign: 'center' }}>
                   <div style={{ fontWeight: 650 }}>{t('subj.none')}</div>
                   <div className="muted" style={{ fontSize: 13, marginTop: 4 }}>{t('subj.noneHint')}</div>
                 </td></tr>
@@ -462,6 +485,8 @@ function SubjectsTab({ isAdmin }: { isAdmin: boolean }) {
                     {s.description && <div className="muted" style={{ fontSize: 12 }}>{s.description}</div>}
                   </Td>
                   <Td><span className="chip" style={{ background: 'var(--glass-hairline)', color: 'var(--text-1)' }}>{s.program.code}</span></Td>
+                  <Td>{s.category ? <span className="chip" style={{ background: 'var(--glass-hairline)', color: 'var(--text-1)', fontSize: 11.5 }}>{t(`subj.category.${s.category}`)}</span> : <span className="muted">—</span>}</Td>
+                  <Td>{s.yearLevel ?? <span className="muted">—</span>}</Td>
                   <Td>{s.credits}</Td>
                   <Td>{s._count.sections}</Td>
                   <Td>
@@ -645,11 +670,12 @@ function DepartmentsTab({ isAdmin }: { isAdmin: boolean }) {
 interface ProgramRow {
   id: string; code: string; nameEn: string; nameTh: string | null;
   degreeType: string | null; durationYrs: number | null; totalCredits: number | null;
+  curriculumYearBE: number | null;
   faculty: { id: string; code: string; nameEn: string };
   _count: { courses: number; subjects: number; students: number };
 }
 
-const EMPTY_PROGRAM_FORM = { facultyId: '', code: '', nameEn: '', nameTh: '', degreeType: '', durationYrs: '', totalCredits: '' };
+const EMPTY_PROGRAM_FORM = { facultyId: '', code: '', nameEn: '', nameTh: '', degreeType: '', durationYrs: '', totalCredits: '', curriculumYearBE: '' };
 
 function ProgramsTab({ isAdmin }: { isAdmin: boolean }) {
   const { t, lang } = useI18n();
@@ -686,6 +712,7 @@ function ProgramsTab({ isAdmin }: { isAdmin: boolean }) {
       facultyId: row.faculty.id, code: row.code, nameEn: row.nameEn, nameTh: row.nameTh ?? '',
       degreeType: row.degreeType ?? '', durationYrs: row.durationYrs != null ? String(row.durationYrs) : '',
       totalCredits: row.totalCredits != null ? String(row.totalCredits) : '',
+      curriculumYearBE: row.curriculumYearBE != null ? String(row.curriculumYearBE) : '',
     });
     setFormError(null);
     setShowForm(true);
@@ -702,6 +729,7 @@ function ProgramsTab({ isAdmin }: { isAdmin: boolean }) {
         degreeType: form.degreeType || undefined,
         durationYrs: form.durationYrs ? Number(form.durationYrs) : undefined,
         totalCredits: form.totalCredits ? Number(form.totalCredits) : undefined,
+        curriculumYearBE: form.curriculumYearBE ? Number(form.curriculumYearBE) : undefined,
       };
       if (editingId) await apiFetch(`/programs/${editingId}`, { method: 'PATCH', body: JSON.stringify(body) });
       else await apiFetch('/programs', { method: 'POST', body: JSON.stringify(body) });
@@ -738,6 +766,7 @@ function ProgramsTab({ isAdmin }: { isAdmin: boolean }) {
           <F label={t('prog.degreeType')}><input className="input" value={form.degreeType} onChange={(e) => setForm({ ...form, degreeType: e.target.value })} placeholder="Bachelor" /></F>
           <F label={t('prog.durationYrs')}><input type="number" min={1} max={10} className="input" value={form.durationYrs} onChange={(e) => setForm({ ...form, durationYrs: e.target.value })} /></F>
           <F label={t('prog.totalCredits')}><input type="number" min={1} className="input" value={form.totalCredits} onChange={(e) => setForm({ ...form, totalCredits: e.target.value })} /></F>
+          <F label={t('prog.curriculumYear')}><input type="number" min={2400} max={2700} className="input" placeholder="2565" value={form.curriculumYearBE} onChange={(e) => setForm({ ...form, curriculumYearBE: e.target.value })} /></F>
           {!editingId && faculties.length > 0 && (
             <F label="Faculty *">
               <select className="input" required value={form.facultyId} onChange={(e) => setForm({ ...form, facultyId: e.target.value })}>
@@ -756,16 +785,17 @@ function ProgramsTab({ isAdmin }: { isAdmin: boolean }) {
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 14 }}>
             <thead>
               <tr style={{ textAlign: 'left', color: 'var(--text-2)' }}>
-                <Th>{t('prog.code')}</Th><Th>{t('subj.nameEn')}</Th><Th>{t('prog.durationYrs')}</Th><Th>{t('subj.sections')}</Th><Th> </Th>
+                <Th>{t('prog.code')}</Th><Th>{t('subj.nameEn')}</Th><Th>{t('prog.curriculumYear')}</Th><Th>{t('prog.durationYrs')}</Th><Th>{t('subj.sections')}</Th><Th> </Th>
               </tr>
             </thead>
             <tbody>
               {rows.length === 0 ? (
-                <tr><td colSpan={5} style={{ padding: 40, textAlign: 'center' }} className="muted">{t('prog.none')}</td></tr>
+                <tr><td colSpan={6} style={{ padding: 40, textAlign: 'center' }} className="muted">{t('prog.none')}</td></tr>
               ) : rows.map((p) => (
                 <tr key={p.id} style={{ borderTop: '1px solid var(--glass-hairline)' }}>
                   <Td><span style={{ fontFamily: 'ui-monospace, monospace', fontWeight: 600 }}>{p.code}</span></Td>
                   <Td>{name(p.nameEn, p.nameTh)}</Td>
+                  <Td>{p.curriculumYearBE ?? <span className="muted">—</span>}</Td>
                   <Td>{p.durationYrs ?? <span className="muted">—</span>}</Td>
                   <Td>{p._count.courses} {t('prog.courses')} · {p._count.subjects} {t('subj.sections')}</Td>
                   <Td>
@@ -774,6 +804,263 @@ function ProgramsTab({ isAdmin }: { isAdmin: boolean }) {
                         <button onClick={() => openEdit(p)} className="glass hairline" style={{ padding: '6px 12px', borderRadius: 10, fontSize: 12, fontWeight: 600 }}>✏️</button>
                         <button onClick={() => removeProgram(p.id)} disabled={busyId === p.id} className="btn-danger" style={{ padding: '6px 12px', fontSize: 12 }}>
                           {busyId === p.id ? '…' : t('subj.delete')}
+                        </button>
+                      </div>
+                    )}
+                  </Td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Locations tab — campuses (incl. external clinical sites) and buildings
+// ---------------------------------------------------------------------------
+
+const CAMPUS_TYPES = ['CAMPUS', 'HOSPITAL', 'HEALTH_PROMOTING_HOSPITAL', 'HEALTH_SERVICE_CENTER', 'CLINIC', 'MEDICAL_CENTER'] as const;
+
+interface CampusRow {
+  id: string; code: string; nameEn: string; nameTh: string | null; locationType: string; address: string | null; city: string | null;
+  _count: { buildings: number };
+}
+interface BuildingRow {
+  id: string; code: string; nameEn: string; nameTh: string | null; floors: number | null;
+  campus: { id: string; code: string; nameEn: string; locationType: string };
+  _count: { rooms: number };
+}
+
+const EMPTY_CAMPUS_FORM = { code: '', nameEn: '', nameTh: '', locationType: 'CAMPUS', address: '', city: '' };
+const EMPTY_BUILDING_FORM = { campusId: '', code: '', nameEn: '', nameTh: '', floors: '1' };
+
+function LocationsTab({ isAdmin }: { isAdmin: boolean }) {
+  const { t, lang } = useI18n();
+  const name = (en: string, th: string | null) => (lang === 'th' && th ? th : en);
+
+  const [campuses, setCampuses] = useState<CampusRow[]>([]);
+  const [buildings, setBuildings] = useState<BuildingRow[]>([]);
+  const [selectedCampusId, setSelectedCampusId] = useState<string | null>(null);
+
+  const [showCampusForm, setShowCampusForm] = useState(false);
+  const [editingCampusId, setEditingCampusId] = useState<string | null>(null);
+  const [campusForm, setCampusForm] = useState(EMPTY_CAMPUS_FORM);
+  const [savingCampus, setSavingCampus] = useState(false);
+  const [campusError, setCampusError] = useState<string | null>(null);
+  const [busyCampusId, setBusyCampusId] = useState<string | null>(null);
+
+  const [showBuildingForm, setShowBuildingForm] = useState(false);
+  const [editingBuildingId, setEditingBuildingId] = useState<string | null>(null);
+  const [buildingForm, setBuildingForm] = useState(EMPTY_BUILDING_FORM);
+  const [savingBuilding, setSavingBuilding] = useState(false);
+  const [buildingError, setBuildingError] = useState<string | null>(null);
+  const [busyBuildingId, setBusyBuildingId] = useState<string | null>(null);
+
+  const loadCampuses = useCallback(async () => {
+    const data = await apiFetch<Paginated<CampusRow>>('/locations/campuses?take=100');
+    setCampuses(data.items);
+  }, []);
+  const loadBuildings = useCallback(async () => {
+    const data = await apiFetch<Paginated<BuildingRow>>('/locations/buildings?take=200');
+    setBuildings(data.items);
+  }, []);
+  useEffect(() => { void loadCampuses(); void loadBuildings(); }, [loadCampuses, loadBuildings]);
+
+  function openCreateCampus() {
+    setEditingCampusId(null);
+    setCampusForm(EMPTY_CAMPUS_FORM);
+    setCampusError(null);
+    setShowCampusForm(true);
+  }
+  function openEditCampus(row: CampusRow) {
+    setEditingCampusId(row.id);
+    setCampusForm({ code: row.code, nameEn: row.nameEn, nameTh: row.nameTh ?? '', locationType: row.locationType, address: row.address ?? '', city: row.city ?? '' });
+    setCampusError(null);
+    setShowCampusForm(true);
+  }
+  async function submitCampusForm(e: React.FormEvent) {
+    e.preventDefault();
+    setSavingCampus(true);
+    setCampusError(null);
+    try {
+      const body = { ...campusForm, nameTh: campusForm.nameTh || undefined, address: campusForm.address || undefined, city: campusForm.city || undefined };
+      if (editingCampusId) await apiFetch(`/locations/campuses/${editingCampusId}`, { method: 'PATCH', body: JSON.stringify(body) });
+      else await apiFetch('/locations/campuses', { method: 'POST', body: JSON.stringify(body) });
+      setShowCampusForm(false);
+      await loadCampuses();
+    } catch (err) {
+      setCampusError(err instanceof Error ? err.message : 'Failed to save location');
+    } finally { setSavingCampus(false); }
+  }
+  async function removeCampus(id: string) {
+    if (!window.confirm(t('loc.confirmDeleteCampus'))) return;
+    setBusyCampusId(id);
+    try { await apiFetch(`/locations/campuses/${id}`, { method: 'DELETE' }); await loadCampuses(); }
+    catch (err) { window.alert(err instanceof Error ? err.message : 'Failed'); }
+    finally { setBusyCampusId(null); }
+  }
+
+  function openCreateBuilding(campusId?: string) {
+    setEditingBuildingId(null);
+    setBuildingForm({ ...EMPTY_BUILDING_FORM, campusId: campusId ?? selectedCampusId ?? '' });
+    setBuildingError(null);
+    setShowBuildingForm(true);
+  }
+  function openEditBuilding(row: BuildingRow) {
+    setEditingBuildingId(row.id);
+    setBuildingForm({ campusId: row.campus.id, code: row.code, nameEn: row.nameEn, nameTh: row.nameTh ?? '', floors: row.floors != null ? String(row.floors) : '1' });
+    setBuildingError(null);
+    setShowBuildingForm(true);
+  }
+  async function submitBuildingForm(e: React.FormEvent) {
+    e.preventDefault();
+    setSavingBuilding(true);
+    setBuildingError(null);
+    try {
+      const body = { ...buildingForm, nameTh: buildingForm.nameTh || undefined, floors: buildingForm.floors ? Number(buildingForm.floors) : undefined };
+      if (editingBuildingId) await apiFetch(`/locations/buildings/${editingBuildingId}`, { method: 'PATCH', body: JSON.stringify(body) });
+      else await apiFetch('/locations/buildings', { method: 'POST', body: JSON.stringify(body) });
+      setShowBuildingForm(false);
+      await loadBuildings();
+      await loadCampuses();
+    } catch (err) {
+      setBuildingError(err instanceof Error ? err.message : 'Failed to save building');
+    } finally { setSavingBuilding(false); }
+  }
+  async function removeBuilding(id: string) {
+    if (!window.confirm(t('loc.confirmDeleteBuilding'))) return;
+    setBusyBuildingId(id);
+    try { await apiFetch(`/locations/buildings/${id}`, { method: 'DELETE' }); await loadBuildings(); await loadCampuses(); }
+    catch (err) { window.alert(err instanceof Error ? err.message : 'Failed'); }
+    finally { setBusyBuildingId(null); }
+  }
+
+  const visibleBuildings = selectedCampusId ? buildings.filter((b) => b.campus.id === selectedCampusId) : buildings;
+
+  return (
+    <div>
+      <div className="rise" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', gap: 12, flexWrap: 'wrap', marginBottom: 14 }}>
+        <p className="muted" style={{ fontSize: 13, margin: 0 }}>{t('loc.subtitle')}</p>
+        {isAdmin && (
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button className="glass hairline" onClick={() => (showBuildingForm ? setShowBuildingForm(false) : openCreateBuilding())}
+              style={{ padding: '11px 16px', fontSize: 13.5, borderRadius: 12, fontWeight: 650, color: 'var(--text-1)' }}>
+              {showBuildingForm ? t('subj.close') : t('loc.addBuilding')}
+            </button>
+            <button className="btn-primary" onClick={() => (showCampusForm ? setShowCampusForm(false) : openCreateCampus())} style={{ padding: '11px 18px', fontSize: 14 }}>
+              {showCampusForm ? t('subj.close') : t('loc.addCampus')}
+            </button>
+          </div>
+        )}
+      </div>
+
+      {showCampusForm && isAdmin && (
+        <form onSubmit={submitCampusForm} className="glass rise" style={{ padding: 20, marginBottom: 16, display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 12, alignItems: 'end' }}>
+          <F label={`${t('loc.code')} *`}><input className="input" required value={campusForm.code} onChange={(e) => setCampusForm({ ...campusForm, code: e.target.value })} placeholder="MAIN" /></F>
+          <F label={`${t('subj.nameEn')} *`}><input className="input" required value={campusForm.nameEn} onChange={(e) => setCampusForm({ ...campusForm, nameEn: e.target.value })} /></F>
+          <F label={t('subj.nameTh')}><input className="input" value={campusForm.nameTh} onChange={(e) => setCampusForm({ ...campusForm, nameTh: e.target.value })} /></F>
+          <F label={`${t('loc.type')} *`}>
+            <select className="input" required value={campusForm.locationType} onChange={(e) => setCampusForm({ ...campusForm, locationType: e.target.value })}>
+              {CAMPUS_TYPES.map((c) => <option key={c} value={c}>{t(`loc.type.${c}`)}</option>)}
+            </select>
+          </F>
+          <F label={t('loc.address')}><input className="input" value={campusForm.address} onChange={(e) => setCampusForm({ ...campusForm, address: e.target.value })} /></F>
+          <F label={t('loc.city')}><input className="input" value={campusForm.city} onChange={(e) => setCampusForm({ ...campusForm, city: e.target.value })} /></F>
+          <button className="btn-primary" type="submit" disabled={savingCampus} style={{ padding: 12, fontSize: 14.5 }}>{savingCampus ? t('subj.saving') : editingCampusId ? t('subj.save') : t('subj.create')}</button>
+          {campusError && <div className="chip chip-danger" style={{ gridColumn: '1 / -1', borderRadius: 12, padding: '9px 12px' }}>{campusError}</div>}
+        </form>
+      )}
+
+      {showBuildingForm && isAdmin && (
+        <form onSubmit={submitBuildingForm} className="glass rise" style={{ padding: 20, marginBottom: 16, display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 12, alignItems: 'end', border: '1px solid var(--brand-orange)' }}>
+          <div style={{ gridColumn: '1 / -1', fontWeight: 650, fontSize: 14 }}>{t('loc.addBuilding')}</div>
+          <F label={`${t('loc.title')} *`}>
+            <select className="input" required value={buildingForm.campusId} onChange={(e) => setBuildingForm({ ...buildingForm, campusId: e.target.value })}>
+              <option value="" disabled>{t('subj.select')}</option>
+              {campuses.map((c) => <option key={c.id} value={c.id}>{c.code} — {name(c.nameEn, c.nameTh)}</option>)}
+            </select>
+          </F>
+          <F label={`${t('loc.code')} *`}><input className="input" required value={buildingForm.code} onChange={(e) => setBuildingForm({ ...buildingForm, code: e.target.value })} placeholder="CL" /></F>
+          <F label={`${t('subj.nameEn')} *`}><input className="input" required value={buildingForm.nameEn} onChange={(e) => setBuildingForm({ ...buildingForm, nameEn: e.target.value })} /></F>
+          <F label={t('subj.nameTh')}><input className="input" value={buildingForm.nameTh} onChange={(e) => setBuildingForm({ ...buildingForm, nameTh: e.target.value })} /></F>
+          <F label={t('loc.floors')}><input type="number" min={1} className="input" value={buildingForm.floors} onChange={(e) => setBuildingForm({ ...buildingForm, floors: e.target.value })} /></F>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button className="btn-primary" type="submit" disabled={savingBuilding} style={{ padding: 12, fontSize: 14 }}>{savingBuilding ? t('subj.saving') : editingBuildingId ? t('subj.save') : t('subj.create')}</button>
+            <button type="button" className="glass hairline" onClick={() => setShowBuildingForm(false)} style={{ padding: 12, borderRadius: 10, fontSize: 14, fontWeight: 600 }}>{t('subj.close')}</button>
+          </div>
+          {buildingError && <div className="chip chip-danger" style={{ gridColumn: '1 / -1', borderRadius: 12, padding: '9px 12px' }}>{buildingError}</div>}
+        </form>
+      )}
+
+      {/* Campuses / sites */}
+      <div className="glass rise" style={{ padding: 8, overflow: 'hidden', marginBottom: 16 }}>
+        <div style={{ overflowX: 'auto' }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 14 }}>
+            <thead>
+              <tr style={{ textAlign: 'left', color: 'var(--text-2)' }}>
+                <Th>{t('loc.code')}</Th><Th>{t('subj.nameEn')}</Th><Th>{t('loc.type')}</Th><Th>{t('loc.buildings')}</Th><Th> </Th>
+              </tr>
+            </thead>
+            <tbody>
+              {campuses.length === 0 ? (
+                <tr><td colSpan={5} style={{ padding: 40, textAlign: 'center' }} className="muted">{t('loc.none')}</td></tr>
+              ) : campuses.map((c) => (
+                <tr key={c.id} style={{ borderTop: '1px solid var(--glass-hairline)', background: selectedCampusId === c.id ? 'var(--glass-hairline)' : undefined, cursor: 'pointer' }}
+                  onClick={() => setSelectedCampusId(selectedCampusId === c.id ? null : c.id)}>
+                  <Td><span style={{ fontFamily: 'ui-monospace, monospace', fontWeight: 600 }}>{c.code}</span></Td>
+                  <Td>{name(c.nameEn, c.nameTh)}{c.city && <span className="muted" style={{ fontSize: 12 }}> · {c.city}</span>}</Td>
+                  <Td><span className="chip" style={{ background: c.locationType === 'CAMPUS' ? 'var(--glass-hairline)' : 'var(--chip-info-bg, rgba(94,144,255,0.15))', color: 'var(--text-1)', fontSize: 11.5 }}>{t(`loc.type.${c.locationType}`)}</span></Td>
+                  <Td>{c._count.buildings}</Td>
+                  <td style={{ padding: '13px 14px' }} onClick={(e) => e.stopPropagation()}>
+                    {isAdmin && (
+                      <div style={{ display: 'inline-flex', gap: 6 }}>
+                        <button onClick={() => openEditCampus(c)} className="glass hairline" style={{ padding: '6px 12px', borderRadius: 10, fontSize: 12, fontWeight: 600 }}>✏️</button>
+                        <button onClick={() => removeCampus(c.id)} disabled={busyCampusId === c.id} className="btn-danger" style={{ padding: '6px 12px', fontSize: 12 }}>
+                          {busyCampusId === c.id ? '…' : t('subj.delete')}
+                        </button>
+                      </div>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {/* Buildings — filtered by the selected campus/site above, if any */}
+      <div className="glass rise" style={{ padding: 8, overflow: 'hidden' }}>
+        <div style={{ padding: '10px 14px 0' }}>
+          <span className="muted" style={{ fontSize: 12.5, fontWeight: 600 }}>
+            {selectedCampusId ? `${t('loc.buildings')} — ${name(campuses.find((c) => c.id === selectedCampusId)?.nameEn ?? '', campuses.find((c) => c.id === selectedCampusId)?.nameTh ?? null)}` : t('loc.allBuildings')}
+          </span>
+        </div>
+        <div style={{ overflowX: 'auto' }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 14 }}>
+            <thead>
+              <tr style={{ textAlign: 'left', color: 'var(--text-2)' }}>
+                <Th>{t('loc.code')}</Th><Th>{t('subj.nameEn')}</Th><Th>{t('loc.title')}</Th><Th>{t('loc.floors')}</Th><Th>{t('loc.rooms')}</Th><Th> </Th>
+              </tr>
+            </thead>
+            <tbody>
+              {visibleBuildings.length === 0 ? (
+                <tr><td colSpan={6} style={{ padding: 40, textAlign: 'center' }} className="muted">{t('loc.noneBuildings')}</td></tr>
+              ) : visibleBuildings.map((b) => (
+                <tr key={b.id} style={{ borderTop: '1px solid var(--glass-hairline)' }}>
+                  <Td><span style={{ fontFamily: 'ui-monospace, monospace', fontWeight: 600 }}>{b.code}</span></Td>
+                  <Td>{name(b.nameEn, b.nameTh)}</Td>
+                  <Td>{b.campus.code}</Td>
+                  <Td>{b.floors ?? <span className="muted">—</span>}</Td>
+                  <Td>{b._count.rooms}</Td>
+                  <Td>
+                    {isAdmin && (
+                      <div style={{ display: 'inline-flex', gap: 6 }}>
+                        <button onClick={() => openEditBuilding(b)} className="glass hairline" style={{ padding: '6px 12px', borderRadius: 10, fontSize: 12, fontWeight: 600 }}>✏️</button>
+                        <button onClick={() => removeBuilding(b.id)} disabled={busyBuildingId === b.id} className="btn-danger" style={{ padding: '6px 12px', fontSize: 12 }}>
+                          {busyBuildingId === b.id ? '…' : t('subj.delete')}
                         </button>
                       </div>
                     )}

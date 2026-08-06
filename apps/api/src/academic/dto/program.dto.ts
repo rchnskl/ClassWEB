@@ -35,6 +35,10 @@ export class CreateProgramDto {
   @ApiPropertyOptional({ minimum: 1 })
   @IsOptional() @Type(() => Number) @IsInt() @Min(1)
   totalCredits?: number;
+
+  @ApiPropertyOptional({ description: 'Buddhist-era year this curriculum revision was approved, e.g. 2565', example: 2565, minimum: 2400, maximum: 2700 })
+  @IsOptional() @Type(() => Number) @IsInt() @Min(2400) @Max(2700)
+  curriculumYearBE?: number;
 }
 
 export class UpdateProgramDto extends PartialType(CreateProgramDto) {}
