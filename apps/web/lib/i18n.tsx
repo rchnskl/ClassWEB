@@ -8,7 +8,7 @@ type Dict = Record<string, string>;
 
 const EN: Dict = {
   'brand.tagline': 'Faculty of Nursing · Assumption University',
-  'brand.short': 'Nursing · AU',
+  'brand.short': 'Nursing Science ABAC',
   'lock.title': 'Session locked',
   'lock.subtitle': 'You were idle for a while. Enter your password to continue where you left off.',
   'lock.password': 'Password',
@@ -581,7 +581,7 @@ const EN: Dict = {
 
 const TH: Dict = {
   'brand.tagline': 'คณะพยาบาลศาสตร์ · มหาวิทยาลัยอัสสัมชัญ',
-  'brand.short': 'พยาบาล · AU',
+  'brand.short': 'Nursing Science ABAC',
   'lock.title': 'ล็อกเซสชัน',
   'lock.subtitle': 'ไม่มีการใช้งานชั่วขณะ กรุณากรอกรหัสผ่านเพื่อใช้งานต่อจากจุดเดิม',
   'lock.password': 'รหัสผ่าน',
