@@ -494,15 +494,50 @@ model Subject {
   updatedAt   DateTime         @updatedAt
   deletedAt   DateTime?
 
-  program        Program         @relation(fields: [programId], references: [id])
-  course         Course          @relation(fields: [courseId], references: [id])
+  program        Program             @relation(fields: [programId], references: [id])
+  course         Course              @relation(fields: [courseId], references: [id])
   sections       Section[]
   subjectRubrics SubjectRubric[]
+  memberships    SubjectMembership[]
 
   @@unique([programId, code])
   @@index([programId])
   @@index([courseId])
   @@map("subjects")
+}
+
+enum SubjectMemberRole {
+  COURSE_MANAGER
+  TEAM_MEMBER
+}
+
+/// A lecturer's self-declared (or manager-assigned) membership in a subject's
+/// teaching team. COURSE_MANAGER (max 2, enforced in the application layer —
+/// a simple count isn't expressible as a DB constraint) creates/edits the
+/// subject's sections, schedule, room, and full grade sheet across every
+/// section. TEAM_MEMBER gets subject-level visibility only; their actual
+/// write access to a specific section still runs through the existing
+/// SectionLecturer/primary-lecturer relationship, which a Course Manager
+/// assigns. The @@unique below is the actual enforcement of "can't join a
+/// subject twice, whether by self-service or being pulled in by a manager" —
+/// a DB constraint, not just an application check that a race can slip past.
+model SubjectMembership {
+  id          String            @id @default(cuid())
+  subjectId   String
+  lecturerId  String
+  role        SubjectMemberRole
+  /// Set when a Course Manager pulled this lecturer in directly, rather than
+  /// the lecturer self-joining.
+  invitedById String?
+  createdAt   DateTime          @default(now())
+
+  subject   Subject   @relation(fields: [subjectId], references: [id])
+  lecturer  Lecturer  @relation("SubjectMembershipLecturer", fields: [lecturerId], references: [id])
+  invitedBy Lecturer? @relation("SubjectMembershipInvitedBy", fields: [invitedById], references: [id])
+
+  @@unique([subjectId, lecturerId])
+  @@index([lecturerId])
+  @@map("subject_memberships")
 }
 
 model Section {
@@ -849,18 +884,20 @@ model Lecturer {
   updatedAt DateTime  @updatedAt
   deletedAt DateTime?
 
-  university        University        @relation(fields: [universityId], references: [id])
-  faculty           Faculty?          @relation(fields: [facultyId], references: [id])
-  department        Department?       @relation("LecturerDepartment", fields: [departmentId], references: [id])
-  user              User?             @relation(fields: [userId], references: [id])
-  photo             Attachment?       @relation("LecturerPhoto", fields: [photoId], references: [id])
-  signature         Attachment?       @relation("LecturerSignature", fields: [signatureId], references: [id])
-  headedDepartments Department[]      @relation("DepartmentHead")
-  primarySections   Section[]         @relation("SectionPrimaryLecturer")
-  coSections        SectionLecturer[]
-  sectionSchedules  SectionSchedule[]
-  classSessions     ClassSession[]
-  calendarEntries   CalendarEntry[]
+  university                University          @relation(fields: [universityId], references: [id])
+  faculty                   Faculty?            @relation(fields: [facultyId], references: [id])
+  department                Department?         @relation("LecturerDepartment", fields: [departmentId], references: [id])
+  user                      User?               @relation(fields: [userId], references: [id])
+  photo                     Attachment?         @relation("LecturerPhoto", fields: [photoId], references: [id])
+  signature                 Attachment?         @relation("LecturerSignature", fields: [signatureId], references: [id])
+  headedDepartments         Department[]        @relation("DepartmentHead")
+  primarySections           Section[]           @relation("SectionPrimaryLecturer")
+  coSections                SectionLecturer[]
+  sectionSchedules          SectionSchedule[]
+  classSessions             ClassSession[]
+  calendarEntries           CalendarEntry[]
+  subjectMemberships        SubjectMembership[] @relation("SubjectMembershipLecturer")
+  invitedSubjectMemberships SubjectMembership[] @relation("SubjectMembershipInvitedBy")
 
   @@unique([universityId, employeeCode])
   @@index([universityId])

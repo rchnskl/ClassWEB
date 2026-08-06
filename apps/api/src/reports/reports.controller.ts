@@ -17,7 +17,7 @@ export class ReportsController {
   @Permissions('report:export')
   @ApiOperation({ summary: 'Attendance summary report — professional PDF (logos, signature, QR verify)' })
   async pdf(@CurrentUser() user: AuthenticatedUser, @Res() res: Response) {
-    const { buffer, reportNumber } = await this.reports.attendancePdf(user.universityId, user.id, user.email);
+    const { buffer, reportNumber } = await this.reports.attendancePdf(user, user.id, user.email);
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', `attachment; filename="${reportNumber}.pdf"`);
     res.send(buffer);
@@ -28,7 +28,7 @@ export class ReportsController {
   @Permissions('report:export')
   @ApiOperation({ summary: 'Attendance summary — CSV' })
   async csv(@CurrentUser() user: AuthenticatedUser, @Res() res: Response) {
-    const { content, reportNumber } = await this.reports.attendanceCsv(user.universityId, user.id, user.email);
+    const { content, reportNumber } = await this.reports.attendanceCsv(user, user.id, user.email);
     res.setHeader('Content-Type', 'text/csv; charset=utf-8');
     res.setHeader('Content-Disposition', `attachment; filename="${reportNumber}.csv"`);
     res.send(content);
@@ -39,7 +39,7 @@ export class ReportsController {
   @Permissions('report:export')
   @ApiOperation({ summary: 'Attendance summary — Excel' })
   async xlsx(@CurrentUser() user: AuthenticatedUser, @Res() res: Response) {
-    const { buffer, reportNumber } = await this.reports.attendanceXlsx(user.universityId, user.id, user.email);
+    const { buffer, reportNumber } = await this.reports.attendanceXlsx(user, user.id, user.email);
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
     res.setHeader('Content-Disposition', `attachment; filename="${reportNumber}.xlsx"`);
     res.send(buffer);

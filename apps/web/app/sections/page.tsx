@@ -92,6 +92,9 @@ function SectionsTab({ isAdmin, userId }: { isAdmin: boolean; userId: string }) 
   const [semesters, setSemesters] = useState<SemesterRef[]>([]);
   const [rooms, setRooms] = useState<RoomRef[]>([]);
   const [lecturers, setLecturers] = useState<LecturerRef[]>([]);
+  const [managedSubjectIds, setManagedSubjectIds] = useState<string[]>([]);
+  const isManagerOfAny = isAdmin || managedSubjectIds.length > 0;
+  const creatableSubjects = isAdmin ? subjects : subjects.filter((s) => managedSubjectIds.includes(s.id));
 
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState(EMPTY_SECTION_FORM);
@@ -117,13 +120,26 @@ function SectionsTab({ isAdmin, userId }: { isAdmin: boolean; userId: string }) 
     apiFetch<Paginated<SubjectRef>>('/subjects?take=200').then((d) => setSubjects(d.items)).catch(() => {});
     apiFetch<SemesterRef[]>('/semesters').then(setSemesters).catch(() => {});
     apiFetch<RoomRef[] | Paginated<RoomRef>>('/rooms?take=200').then((d) => setRooms(Array.isArray(d) ? d : d.items)).catch(() => {});
-    if (isAdmin) apiFetch<Paginated<LecturerRef>>('/lecturers?take=200').then((d) => setLecturers(d.items)).catch(() => {});
+    if (isAdmin) {
+      apiFetch<Paginated<LecturerRef>>('/lecturers?take=200').then((d) => setLecturers(d.items)).catch(() => {});
+    } else {
+      apiFetch<{ managed: string[] }>('/subjects/mine/memberships')
+        .then((d) => setManagedSubjectIds(d.managed))
+        .catch(() => {});
+    }
   }, [isAdmin]);
+
+  useEffect(() => {
+    // A course manager may assign any lecturer as the section's teacher, same as admin.
+    if (!isAdmin && managedSubjectIds.length > 0) {
+      apiFetch<Paginated<LecturerRef>>('/lecturers?take=200').then((d) => setLecturers(d.items)).catch(() => {});
+    }
+  }, [isAdmin, managedSubjectIds]);
 
   useEffect(() => { const timer = setTimeout(() => void load(), 250); return () => clearTimeout(timer); }, [load]);
 
   function openCreate() {
-    setForm(EMPTY_SECTION_FORM);
+    setForm({ ...EMPTY_SECTION_FORM, subjectId: creatableSubjects[0]?.id ?? '' });
     setFormError(null);
     setShowForm(true);
   }
@@ -168,17 +184,25 @@ function SectionsTab({ isAdmin, userId }: { isAdmin: boolean; userId: string }) 
           </select>
           <input className="input" style={{ width: 220 }} placeholder={t('sec.search')} value={search} onChange={(e) => setSearch(e.target.value)} />
         </div>
-        <button className="btn-primary" onClick={() => (showForm ? setShowForm(false) : openCreate())} style={{ padding: '11px 18px', fontSize: 14 }}>
-          {showForm ? t('sec.close') : t('sec.add')}
-        </button>
+        {isManagerOfAny && (
+          <button className="btn-primary" onClick={() => (showForm ? setShowForm(false) : openCreate())} style={{ padding: '11px 18px', fontSize: 14 }}>
+            {showForm ? t('sec.close') : t('sec.add')}
+          </button>
+        )}
       </div>
 
-      {showForm && (
+      {!isAdmin && !isManagerOfAny && (
+        <div className="chip" style={{ display: 'block', marginBottom: 14, background: 'var(--glass-hairline)', color: 'var(--text-1)', borderRadius: 12, padding: '10px 13px' }}>
+          {t('sec.needManagerHint')}
+        </div>
+      )}
+
+      {showForm && isManagerOfAny && (
         <form onSubmit={submitForm} className="glass rise" style={{ padding: 20, marginBottom: 16, display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 12, alignItems: 'end' }}>
           <F label={`${t('sec.subject')} *`}>
             <select className="input" required value={form.subjectId} onChange={(e) => setForm({ ...form, subjectId: e.target.value })}>
               <option value="" disabled>{t('sec.select')}</option>
-              {subjects.map((s) => <option key={s.id} value={s.id}>{s.code} — {s.nameEn}</option>)}
+              {creatableSubjects.map((s) => <option key={s.id} value={s.id}>{s.code} — {s.nameEn}</option>)}
             </select>
           </F>
           <F label={`${t('sec.semester')} *`}>
@@ -188,14 +212,12 @@ function SectionsTab({ isAdmin, userId }: { isAdmin: boolean; userId: string }) 
             </select>
           </F>
           <F label={`${t('sec.sectionNo')} *`}><input className="input" required value={form.sectionNo} onChange={(e) => setForm({ ...form, sectionNo: e.target.value })} placeholder="001" /></F>
-          {isAdmin ? (
-            <F label={t('sec.lecturer')}>
-              <select className="input" value={form.lecturerId} onChange={(e) => setForm({ ...form, lecturerId: e.target.value })}>
-                <option value="">{t('sec.select')}</option>
-                {lecturers.map((l) => <option key={l.id} value={l.id}>{l.nameEn} ({l.employeeCode})</option>)}
-              </select>
-            </F>
-          ) : null}
+          <F label={t('sec.lecturer')}>
+            <select className="input" value={form.lecturerId} onChange={(e) => setForm({ ...form, lecturerId: e.target.value })}>
+              <option value="">{t('sec.select')}</option>
+              {lecturers.map((l) => <option key={l.id} value={l.id}>{l.nameEn} ({l.employeeCode})</option>)}
+            </select>
+          </F>
           <F label={t('sec.room')}>
             <select className="input" value={form.roomId} onChange={(e) => setForm({ ...form, roomId: e.target.value })}>
               <option value="">{t('sec.select')}</option>
@@ -204,7 +226,6 @@ function SectionsTab({ isAdmin, userId }: { isAdmin: boolean; userId: string }) 
           </F>
           <F label={t('sec.capacity')}><input type="number" min={1} className="input" value={form.capacity} onChange={(e) => setForm({ ...form, capacity: Number(e.target.value) })} /></F>
           <button className="btn-primary" type="submit" disabled={saving} style={{ padding: 12, fontSize: 14.5 }}>{saving ? t('sec.saving') : t('sec.create')}</button>
-          {!isAdmin && <div className="chip" style={{ gridColumn: '1 / -1', background: 'var(--glass-hairline)', color: 'var(--text-1)' }}>{t('sec.selfAssignHint')}</div>}
           {formError && <div className="chip chip-danger" style={{ gridColumn: '1 / -1', borderRadius: 12, padding: '9px 12px' }}>{formError}</div>}
         </form>
       )}
@@ -244,7 +265,7 @@ function SectionsTab({ isAdmin, userId }: { isAdmin: boolean; userId: string }) 
                     <Td>
                       <div style={{ display: 'inline-flex', gap: 6 }}>
                         <button onClick={() => setManagingId(s.id)} className="glass hairline" style={{ padding: '6px 12px', borderRadius: 10, fontSize: 12, fontWeight: 600 }}>{t('sec.manage')}</button>
-                        {isAdmin && (
+                        {(isAdmin || managedSubjectIds.includes(s.subject.id)) && (
                           <button onClick={() => removeSection(s.id)} disabled={busyId === s.id} className="btn-danger" style={{ padding: '6px 12px', fontSize: 12 }}>
                             {busyId === s.id ? '…' : t('sec.delete')}
                           </button>
@@ -308,6 +329,22 @@ function SubjectsTab({ isAdmin }: { isAdmin: boolean }) {
   const [savingCourse, setSavingCourse] = useState(false);
   const [courseError, setCourseError] = useState<string | null>(null);
 
+  const [managed, setManaged] = useState<string[]>([]);
+  const [memberOf, setMemberOf] = useState<string[]>([]);
+  const [joiningId, setJoiningId] = useState<string | null>(null);
+  const [joinRole, setJoinRole] = useState<'COURSE_MANAGER' | 'TEAM_MEMBER'>('TEAM_MEMBER');
+  const [joining, setJoining] = useState(false);
+  const [joinError, setJoinError] = useState<string | null>(null);
+  const [teamSubjectId, setTeamSubjectId] = useState<string | null>(null);
+
+  const loadMemberships = useCallback(async () => {
+    try {
+      const d = await apiFetch<{ managed: string[]; member: string[] }>('/subjects/mine/memberships');
+      setManaged(d.managed);
+      setMemberOf(d.member);
+    } catch { /* not a lecturer account — ignore */ }
+  }, []);
+
   const load = useCallback(async () => {
     setLoading(true);
     try {
@@ -322,8 +359,27 @@ function SubjectsTab({ isAdmin }: { isAdmin: boolean }) {
   useEffect(() => {
     apiFetch<ProgramRef[]>('/programs').then(setPrograms).catch(() => {});
     apiFetch<CourseRef[]>('/courses').then(setCourses).catch(() => {});
-  }, []);
+    if (!isAdmin) void loadMemberships();
+  }, [isAdmin, loadMemberships]);
   useEffect(() => { const timer = setTimeout(() => void load(), 250); return () => clearTimeout(timer); }, [load]);
+
+  function openJoin(subjectId: string) {
+    setJoiningId(subjectId);
+    setJoinRole('TEAM_MEMBER');
+    setJoinError(null);
+  }
+
+  async function submitJoin(subjectId: string) {
+    setJoining(true);
+    setJoinError(null);
+    try {
+      await apiFetch(`/subjects/${subjectId}/join`, { method: 'POST', body: JSON.stringify({ role: joinRole }) });
+      setJoiningId(null);
+      await loadMemberships();
+    } catch (err) {
+      setJoinError(err instanceof Error ? err.message : 'Failed to join subject');
+    } finally { setJoining(false); }
+  }
 
   function openCreate() {
     setEditingId(null);
@@ -490,13 +546,38 @@ function SubjectsTab({ isAdmin }: { isAdmin: boolean }) {
                   <Td>{s.credits}</Td>
                   <Td>{s._count.sections}</Td>
                   <Td>
-                    {isAdmin && (
+                    {isAdmin ? (
                       <div style={{ display: 'inline-flex', gap: 6 }}>
                         <button onClick={() => openEdit(s)} className="glass hairline" style={{ padding: '6px 12px', borderRadius: 10, fontSize: 12, fontWeight: 600 }}>✏️</button>
                         <button onClick={() => removeSubject(s.id)} disabled={busyId === s.id} className="btn-danger" style={{ padding: '6px 12px', fontSize: 12 }}>
                           {busyId === s.id ? '…' : t('subj.delete')}
                         </button>
                       </div>
+                    ) : managed.includes(s.id) ? (
+                      <div style={{ display: 'inline-flex', gap: 6, alignItems: 'center' }}>
+                        <span className="chip chip-success">{t('subj.role.COURSE_MANAGER')}</span>
+                        <button onClick={() => setTeamSubjectId(s.id)} className="glass hairline" style={{ padding: '6px 10px', borderRadius: 10, fontSize: 12, fontWeight: 600 }}>
+                          {t('subj.manageTeam')}
+                        </button>
+                      </div>
+                    ) : memberOf.includes(s.id) ? (
+                      <span className="chip" style={{ background: 'var(--glass-hairline)', color: 'var(--text-1)' }}>{t('subj.role.TEAM_MEMBER')}</span>
+                    ) : joiningId === s.id ? (
+                      <div style={{ display: 'inline-flex', gap: 6, alignItems: 'center' }}>
+                        <select className="input" style={{ width: 'auto', padding: '6px 8px', fontSize: 12 }} value={joinRole} onChange={(e) => setJoinRole(e.target.value as 'COURSE_MANAGER' | 'TEAM_MEMBER')}>
+                          <option value="TEAM_MEMBER">{t('subj.role.TEAM_MEMBER')}</option>
+                          <option value="COURSE_MANAGER">{t('subj.role.COURSE_MANAGER')}</option>
+                        </select>
+                        <button onClick={() => submitJoin(s.id)} disabled={joining} className="btn-primary" style={{ padding: '6px 12px', fontSize: 12 }}>
+                          {joining ? '…' : t('subj.confirmJoin')}
+                        </button>
+                        <button onClick={() => setJoiningId(null)} className="glass hairline" style={{ padding: '6px 10px', fontSize: 12, borderRadius: 10 }}>{t('subj.close')}</button>
+                        {joinError && <div className="chip chip-danger" style={{ fontSize: 11 }}>{joinError}</div>}
+                      </div>
+                    ) : (
+                      <button onClick={() => openJoin(s.id)} className="glass hairline" style={{ padding: '6px 12px', borderRadius: 10, fontSize: 12, fontWeight: 600 }}>
+                        {t('subj.join')}
+                      </button>
                     )}
                   </Td>
                 </tr>
@@ -505,6 +586,114 @@ function SubjectsTab({ isAdmin }: { isAdmin: boolean }) {
           </table>
         </div>
         <div style={{ padding: '10px 14px' }}><span className="muted" style={{ fontSize: 12.5 }}>{total} {t('subj.count')}</span></div>
+      </div>
+
+      {teamSubjectId && <SubjectTeamModal subjectId={teamSubjectId} onClose={() => setTeamSubjectId(null)} />}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Subject team management modal — course manager pulls lecturers from the
+// central roster into the subject's teaching team.
+// ---------------------------------------------------------------------------
+
+interface MemberRow {
+  id: string; role: 'COURSE_MANAGER' | 'TEAM_MEMBER';
+  lecturer: { id: string; employeeCode: string; nameEn: string; nameTh: string | null };
+}
+
+function SubjectTeamModal({ subjectId, onClose }: { subjectId: string; onClose: () => void }) {
+  const { t } = useI18n();
+  const [members, setMembers] = useState<MemberRow[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [allLecturers, setAllLecturers] = useState<{ id: string; nameEn: string; employeeCode: string }[]>([]);
+  const [pickLecturerId, setPickLecturerId] = useState('');
+  const [adding, setAdding] = useState(false);
+  const [busyId, setBusyId] = useState<string | null>(null);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const data = await apiFetch<MemberRow[]>(`/subjects/${subjectId}/members`);
+      setMembers(data);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to load team');
+    } finally { setLoading(false); }
+  }, [subjectId]);
+
+  useEffect(() => {
+    void load();
+    apiFetch<Paginated<{ id: string; nameEn: string; employeeCode: string }>>('/lecturers?take=200')
+      .then((d) => setAllLecturers(d.items)).catch(() => {});
+  }, [load]);
+
+  const memberIds = new Set(members.map((m) => m.lecturer.id));
+  const pickable = allLecturers.filter((l) => !memberIds.has(l.id));
+
+  async function addMember() {
+    if (!pickLecturerId) return;
+    setAdding(true);
+    setError(null);
+    try {
+      await apiFetch(`/subjects/${subjectId}/team`, { method: 'POST', body: JSON.stringify({ lecturerId: pickLecturerId, role: 'TEAM_MEMBER' }) });
+      setPickLecturerId('');
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to add team member');
+    } finally { setAdding(false); }
+  }
+
+  async function removeMember(lecturerId: string) {
+    setBusyId(lecturerId);
+    try { await apiFetch(`/subjects/${subjectId}/team/${lecturerId}`, { method: 'DELETE' }); await load(); }
+    catch (err) { window.alert(err instanceof Error ? err.message : 'Failed'); }
+    finally { setBusyId(null); }
+  }
+
+  return (
+    <div role="dialog" aria-modal="true"
+      style={{ position: 'fixed', inset: 0, background: 'rgba(8,12,20,0.55)', backdropFilter: 'blur(4px)', display: 'grid', placeItems: 'center', zIndex: 60, padding: 16 }}
+      onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+      <div className="glass" style={{ width: 'min(520px, 100%)', maxHeight: '82vh', overflow: 'auto', borderRadius: 18, padding: 22 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12, marginBottom: 14 }}>
+          <h2 style={{ margin: 0, fontSize: 18, fontWeight: 720 }}>{t('subj.manageTeam')}</h2>
+          <button onClick={onClose} aria-label={t('common.close')} className="glass hairline icon-btn"
+            style={{ width: 34, height: 34, borderRadius: 10, display: 'grid', placeItems: 'center', color: 'var(--text-1)' }}>✕</button>
+        </div>
+
+        <div style={{ display: 'flex', gap: 8, marginBottom: 14 }}>
+          <select className="input" style={{ flex: 1 }} value={pickLecturerId} onChange={(e) => setPickLecturerId(e.target.value)}>
+            <option value="">{t('subj.select')}</option>
+            {pickable.map((l) => <option key={l.id} value={l.id}>{l.nameEn} ({l.employeeCode})</option>)}
+          </select>
+          <button onClick={addMember} disabled={!pickLecturerId || adding} className="btn-primary" style={{ padding: '10px 16px', fontSize: 13.5 }}>
+            {adding ? '…' : t('subj.addToTeam')}
+          </button>
+        </div>
+
+        {error && <div className="chip chip-danger" style={{ display: 'block', borderRadius: 12, padding: '9px 12px', marginBottom: 12 }}>{error}</div>}
+
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+          {loading ? (
+            <div className="muted" style={{ textAlign: 'center', padding: 20 }}>{t('common.loading')}</div>
+          ) : members.length === 0 ? (
+            <div className="muted" style={{ textAlign: 'center', padding: 20, fontSize: 13 }}>{t('subj.noTeamMembers')}</div>
+          ) : members.map((m) => (
+            <div key={m.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 12px', borderRadius: 10, background: 'var(--popover-hover)' }}>
+              <span style={{ flex: 1, fontSize: 13 }}>{m.lecturer.nameEn} <span className="muted">({m.lecturer.employeeCode})</span></span>
+              <span className="chip" style={{ background: m.role === 'COURSE_MANAGER' ? 'var(--chip-success-bg, rgba(34,197,94,0.15))' : 'var(--glass-hairline)', color: 'var(--text-1)', fontSize: 11 }}>
+                {t(`subj.role.${m.role}`)}
+              </span>
+              {m.role !== 'COURSE_MANAGER' && (
+                <button onClick={() => removeMember(m.lecturer.id)} disabled={busyId === m.lecturer.id} className="btn-danger" style={{ padding: '5px 11px', fontSize: 11.5 }}>
+                  {busyId === m.lecturer.id ? '…' : '✕'}
+                </button>
+              )}
+            </div>
+          ))}
+        </div>
       </div>
     </div>
   );

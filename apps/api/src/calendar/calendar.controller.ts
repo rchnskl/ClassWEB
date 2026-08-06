@@ -14,9 +14,9 @@ export class CalendarController {
 
   @Get('entries')
   @Permissions('timetable:read')
-  @ApiOperation({ summary: 'List calendar entries overlapping a date range' })
+  @ApiOperation({ summary: "List calendar entries overlapping a date range (another user's PRIVATE entries are excluded)" })
   list(@CurrentUser() user: AuthenticatedUser, @Query() query: QueryCalendarDto) {
-    return this.calendar.list(user.universityId, query);
+    return this.calendar.list(user.universityId, user.id, query);
   }
 
   @Post('entries')
@@ -28,8 +28,8 @@ export class CalendarController {
 
   @Delete('entries/:id')
   @Permissions('timetable:delete')
-  @ApiOperation({ summary: 'Delete a calendar entry' })
+  @ApiOperation({ summary: 'Delete a calendar entry (a PRIVATE entry can only be deleted by its owner or admin)' })
   remove(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string) {
-    return this.calendar.remove(user.universityId, id);
+    return this.calendar.remove(user.universityId, user.id, user.roleCodes.includes('ADMIN'), id);
   }
 }

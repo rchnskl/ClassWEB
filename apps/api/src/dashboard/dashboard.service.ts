@@ -39,11 +39,10 @@ export class DashboardService {
     endOfDay.setDate(endOfDay.getDate() + 1);
 
     const isAdmin = this.lecturerScope.isAdmin(user);
-    let sectionIds: string[] | null = null; // null = no restriction (admin)
-    if (!isAdmin) {
-      const me = await this.lecturerScope.myLecturerId(user);
-      sectionIds = me ? await this.lecturerScope.sectionIdsFor(me) : [];
-    }
+    // null = no restriction (admin). A course manager's scope includes every
+    // section under a subject they manage, not just sections they personally
+    // teach, so the dashboard matches what they can actually act on.
+    const sectionIds: string[] | null = isAdmin ? null : await this.lecturerScope.accessibleSectionIds(user);
     const sectionWhere = sectionIds ? { universityId, id: { in: sectionIds } } : { universityId };
     const enrollmentSectionWhere = sectionIds ? { universityId, id: { in: sectionIds } } : { universityId };
 

@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation';
 import Sidebar from '@/components/Sidebar';
 import Topbar from '@/components/Topbar';
 import { IconSearch, IconTeacher } from '@/components/icons';
-import { apiFetch, type Paginated } from '@/lib/api';
+import { apiFetch, type MeResponse, type Paginated } from '@/lib/api';
 import { useI18n } from '@/lib/i18n';
 
 interface LecturerRow {
@@ -32,6 +32,7 @@ export default function LecturersPage() {
   const router = useRouter();
   const { t } = useI18n();
   const [email, setEmail] = useState('');
+  const [isAdmin, setIsAdmin] = useState(false);
   const [rows, setRows] = useState<LecturerRow[]>([]);
   const [total, setTotal] = useState(0);
   const [skip, setSkip] = useState(0);
@@ -70,6 +71,7 @@ export default function LecturersPage() {
     if (!localStorage.getItem('accessToken')) { router.replace('/login'); return; }
     const u = localStorage.getItem('user');
     if (u) { try { setEmail(JSON.parse(u).email); } catch {} }
+    apiFetch<MeResponse>('/users/me').then((me) => setIsAdmin(me.roles.some((r) => r.role.code === 'ADMIN'))).catch(() => {});
     apiFetch<DepartmentRef[]>('/departments').then(setDepartments).catch(() => {});
     void load(0, '');
   }, [router, load]);
@@ -161,12 +163,14 @@ export default function LecturersPage() {
             <h1 style={{ fontSize: 27, fontWeight: 750, letterSpacing: -0.6, margin: 0 }}>{t('lecturers.title')}</h1>
             <p className="muted" style={{ margin: '4px 0 0', fontSize: 14.5 }}>{total} {t('lecturers.count')}</p>
           </div>
-          <button className="btn-primary" style={{ padding: '11px 18px', fontSize: 14.5 }} onClick={() => (showForm ? setShowForm(false) : openCreate())}>
-            {showForm ? t('lecturers.close') : t('lecturers.add')}
-          </button>
+          {isAdmin && (
+            <button className="btn-primary" style={{ padding: '11px 18px', fontSize: 14.5 }} onClick={() => (showForm ? setShowForm(false) : openCreate())}>
+              {showForm ? t('lecturers.close') : t('lecturers.add')}
+            </button>
+          )}
         </div>
 
-        {showForm && createdResult && (
+        {isAdmin && showForm && createdResult && (
           <div className="glass rise" style={{ padding: 20, marginBottom: 18 }}>
             <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 6 }}>✓ {t('lecturers.createdTitle')}</div>
             <p className="muted" style={{ fontSize: 13, margin: '0 0 14px' }}>{t('lecturers.createdHint')}</p>
@@ -181,7 +185,7 @@ export default function LecturersPage() {
           </div>
         )}
 
-        {showForm && !createdResult && (
+        {isAdmin && showForm && !createdResult && (
           <form onSubmit={submitForm} className="glass rise" style={{ padding: 20, marginBottom: 18, display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 12, alignItems: 'end' }}>
             <Field label={`${t('lecturers.employeeCode')} *`}><input className="input" required value={form.employeeCode} onChange={(e) => setForm({ ...form, employeeCode: e.target.value })} placeholder="EMP-0003" /></Field>
             <Field label={`${t('lecturers.englishName')} *`}><input className="input" required value={form.nameEn} onChange={(e) => setForm({ ...form, nameEn: e.target.value })} placeholder="Dr. Full Name" /></Field>
@@ -221,14 +225,14 @@ export default function LecturersPage() {
             <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 14 }}>
               <thead>
                 <tr style={{ textAlign: 'left', color: 'var(--text-2)' }}>
-                  <Th>{t('lecturers.employeeCode')}</Th><Th>{t('lecturers.name')}</Th><Th>{t('lecturers.department')}</Th><Th>{t('lecturers.account')}</Th><Th>{t('lecturers.sections')}</Th><Th>{t('lecturers.status')}</Th><Th> </Th>
+                  <Th>{t('lecturers.employeeCode')}</Th><Th>{t('lecturers.name')}</Th><Th>{t('lecturers.department')}</Th><Th>{t('lecturers.account')}</Th><Th>{t('lecturers.sections')}</Th><Th>{t('lecturers.status')}</Th>{isAdmin && <Th> </Th>}
                 </tr>
               </thead>
               <tbody>
                 {loading ? (
-                  <tr><td colSpan={7} style={{ padding: 40, textAlign: 'center' }} className="muted">{t('common.loading')}</td></tr>
+                  <tr><td colSpan={isAdmin ? 7 : 6} style={{ padding: 40, textAlign: 'center' }} className="muted">{t('common.loading')}</td></tr>
                 ) : rows.length === 0 ? (
-                  <tr><td colSpan={7} style={{ padding: 48, textAlign: 'center' }}>
+                  <tr><td colSpan={isAdmin ? 7 : 6} style={{ padding: 48, textAlign: 'center' }}>
                     <div className="brand-gradient floaty" style={{ width: 46, height: 46, borderRadius: 14, margin: '0 auto 12px', display: 'grid', placeItems: 'center' }}><IconTeacher width={22} height={22} /></div>
                     <div style={{ fontWeight: 650 }}>{t('lecturers.none')}</div>
                     <div className="muted" style={{ fontSize: 13, marginTop: 4 }}>{t('lecturers.noneHint')}</div>
@@ -253,21 +257,23 @@ export default function LecturersPage() {
                     <Td>
                       <span className={`chip ${l.isActive ? 'chip-success' : 'chip-danger'}`}>{l.isActive ? t('lecturers.active') : t('lecturers.inactive')}</span>
                     </Td>
-                    <Td>
-                      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 6 }}>
-                        <button onClick={() => openEdit(l)} className="glass hairline icon-btn" style={{ padding: '6px 12px', borderRadius: 10, fontSize: 12.5, fontWeight: 600, color: 'var(--text-1)', whiteSpace: 'nowrap' }}>
-                          ✏️ {t('lecturers.edit')}
-                        </button>
-                        <button
-                          onClick={() => toggleActive(l)}
-                          disabled={busyId === l.id}
-                          className={l.isActive ? 'btn-danger' : 'glass hairline'}
-                          style={{ padding: '6px 12px', borderRadius: 10, fontSize: 12.5, fontWeight: 600, cursor: busyId === l.id ? 'wait' : 'pointer', whiteSpace: 'nowrap' }}
-                        >
-                          {busyId === l.id ? '…' : l.isActive ? t('lecturers.deactivate') : t('lecturers.activate')}
-                        </button>
-                      </div>
-                    </Td>
+                    {isAdmin && (
+                      <Td>
+                        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 6 }}>
+                          <button onClick={() => openEdit(l)} className="glass hairline icon-btn" style={{ padding: '6px 12px', borderRadius: 10, fontSize: 12.5, fontWeight: 600, color: 'var(--text-1)', whiteSpace: 'nowrap' }}>
+                            ✏️ {t('lecturers.edit')}
+                          </button>
+                          <button
+                            onClick={() => toggleActive(l)}
+                            disabled={busyId === l.id}
+                            className={l.isActive ? 'btn-danger' : 'glass hairline'}
+                            style={{ padding: '6px 12px', borderRadius: 10, fontSize: 12.5, fontWeight: 600, cursor: busyId === l.id ? 'wait' : 'pointer', whiteSpace: 'nowrap' }}
+                          >
+                            {busyId === l.id ? '…' : l.isActive ? t('lecturers.deactivate') : t('lecturers.activate')}
+                          </button>
+                        </div>
+                      </Td>
+                    )}
                   </tr>
                 ))}
               </tbody>

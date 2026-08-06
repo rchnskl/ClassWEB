@@ -1,14 +1,19 @@
-import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import * as bcrypt from 'bcryptjs';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateLecturerDto, QueryLecturerDto, UpdateLecturerDto } from './dto/lecturer.dto';
 import { Paginated } from '../common/dto/pagination.dto';
 import { generateTempPassword } from '../common/temp-password';
+import { AuthenticatedUser } from '../common/authenticated-user';
+import { LecturerScopeService } from '../common/lecturer-scope.service';
 
 @Injectable()
 export class LecturersService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly lecturerScope: LecturerScopeService,
+  ) {}
 
   private select = {
     id: true, employeeCode: true, nameEn: true, nameTh: true, position: true,
@@ -17,7 +22,13 @@ export class LecturersService {
     _count: { select: { primarySections: true } },
   } satisfies Prisma.LecturerSelect;
 
-  async list(universityId: string, query: QueryLecturerDto): Promise<Paginated<unknown>> {
+  /**
+   * A lecturer only sees colleagues they actually work with — teammates on a
+   * shared subject, or co-teachers on a section — not the whole faculty
+   * roster. Admin sees everyone.
+   */
+  async list(user: AuthenticatedUser, query: QueryLecturerDto): Promise<Paginated<unknown>> {
+    const universityId = user.universityId;
     const where: Prisma.LecturerWhereInput = {
       universityId, deletedAt: null,
       ...(query.search
@@ -28,6 +39,10 @@ export class LecturersService {
           ] }
         : {}),
     };
+    if (!this.lecturerScope.isAdmin(user)) {
+      const me = await this.lecturerScope.myLecturerId(user);
+      where.id = { in: me ? await this.lecturerScope.teammateLecturerIds(me) : [] };
+    }
     const [items, total] = await this.prisma.$transaction([
       this.prisma.lecturer.findMany({ where, select: this.select, orderBy: { employeeCode: 'asc' }, take: query.take, skip: query.skip }),
       this.prisma.lecturer.count({ where }),
@@ -35,7 +50,20 @@ export class LecturersService {
     return { total, take: query.take, skip: query.skip, items };
   }
 
-  async get(universityId: string, id: string) {
+  async get(user: AuthenticatedUser, id: string) {
+    const lecturer = await this.findByIdInTenant(user.universityId, id);
+    if (!this.lecturerScope.isAdmin(user)) {
+      const me = await this.lecturerScope.myLecturerId(user);
+      const teammates = me ? await this.lecturerScope.teammateLecturerIds(me) : [];
+      if (!teammates.includes(id)) {
+        throw new ForbiddenException('You can only view lecturers on a shared subject or section');
+      }
+    }
+    return lecturer;
+  }
+
+  /** Tenant-only lookup, no team scoping — used by the admin-only write paths below. */
+  private async findByIdInTenant(universityId: string, id: string) {
     const lecturer = await this.prisma.lecturer.findFirst({
       where: { id, universityId, deletedAt: null },
       select: this.select,
@@ -103,7 +131,7 @@ export class LecturersService {
   }
 
   async update(universityId: string, id: string, dto: UpdateLecturerDto) {
-    await this.get(universityId, id); // ensures existence + tenant ownership
+    await this.findByIdInTenant(universityId, id); // ensures existence + tenant ownership
 
     if (dto.departmentId) {
       const dept = await this.prisma.department.findFirst({
@@ -140,7 +168,7 @@ export class LecturersService {
   }
 
   async remove(universityId: string, id: string) {
-    await this.get(universityId, id);
+    await this.findByIdInTenant(universityId, id);
     await this.prisma.lecturer.update({ where: { id }, data: { deletedAt: new Date(), isActive: false } });
     return { id, deleted: true };
   }

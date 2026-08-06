@@ -13,8 +13,8 @@ export class AnalyticsController {
 
   @Get('overview')
   @Permissions('report:read')
-  @ApiOperation({ summary: 'Attendance analytics + at-risk students (tenant-scoped)' })
+  @ApiOperation({ summary: "Attendance analytics + at-risk students (admin: tenant-wide; lecturer: own sections only)" })
   overview(@CurrentUser() user: AuthenticatedUser) {
-    return this.analytics.overview(user.universityId);
+    return this.analytics.overview(user);
   }
 }

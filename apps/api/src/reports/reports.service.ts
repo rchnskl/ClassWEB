@@ -54,11 +54,13 @@ export class ReportsService {
     return `RPT-${ymd}-${randomBytes(3).toString('hex').toUpperCase()}`;
   }
 
-  private async gather(universityId: string) {
+  /** Attendance overview for the report — scoped per-lecturer via AnalyticsService.overview(). */
+  private async gather(user: AuthenticatedUser) {
+    const universityId = user.universityId;
     const [university, faculty, overview] = await Promise.all([
       this.prisma.university.findUnique({ where: { id: universityId }, select: { nameEn: true, nameTh: true, code: true } }),
       this.prisma.faculty.findFirst({ where: { universityId, code: 'NURSING' }, select: { nameEn: true, nameTh: true } }),
-      this.analytics.overview(universityId),
+      this.analytics.overview(user),
     ]);
     return { university, faculty, overview };
   }
@@ -137,8 +139,9 @@ export class ReportsService {
 
   // ---- PDF --------------------------------------------------------------
 
-  async attendancePdf(universityId: string, byId?: string, byName?: string): Promise<{ buffer: Buffer; reportNumber: string }> {
-    const { university, faculty, overview } = await this.gather(universityId);
+  async attendancePdf(user: AuthenticatedUser, byId?: string, byName?: string): Promise<{ buffer: Buffer; reportNumber: string }> {
+    const universityId = user.universityId;
+    const { university, faculty, overview } = await this.gather(user);
     const checksum = createHash('sha256').update(JSON.stringify(overview)).digest('hex');
     const reportNumber = await this.register(universityId, 'PDF', checksum, byId, byName);
     const verifyUrl = `${WEB_BASE}/verify/${reportNumber}`;
@@ -237,8 +240,9 @@ export class ReportsService {
 
   // ---- CSV --------------------------------------------------------------
 
-  async attendanceCsv(universityId: string, byId?: string, byName?: string): Promise<{ content: string; reportNumber: string }> {
-    const { overview } = await this.gather(universityId);
+  async attendanceCsv(user: AuthenticatedUser, byId?: string, byName?: string): Promise<{ content: string; reportNumber: string }> {
+    const universityId = user.universityId;
+    const { overview } = await this.gather(user);
     const checksum = createHash('sha256').update(JSON.stringify(overview)).digest('hex');
     const reportNumber = await this.register(universityId, 'CSV', checksum, byId, byName);
     const rows = [
@@ -257,8 +261,9 @@ export class ReportsService {
 
   // ---- Excel ------------------------------------------------------------
 
-  async attendanceXlsx(universityId: string, byId?: string, byName?: string): Promise<{ buffer: Buffer; reportNumber: string }> {
-    const { university, faculty, overview } = await this.gather(universityId);
+  async attendanceXlsx(user: AuthenticatedUser, byId?: string, byName?: string): Promise<{ buffer: Buffer; reportNumber: string }> {
+    const universityId = user.universityId;
+    const { university, faculty, overview } = await this.gather(user);
     const checksum = createHash('sha256').update(JSON.stringify(overview)).digest('hex');
     const reportNumber = await this.register(universityId, 'XLSX', checksum, byId, byName);
 

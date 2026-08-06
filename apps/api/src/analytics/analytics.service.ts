@@ -1,5 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { AuthenticatedUser } from '../common/authenticated-user';
+import { LecturerScopeService } from '../common/lecturer-scope.service';
 
 export type RiskTier = 'OK' | 'WARNING' | 'RISK' | 'CRITICAL';
 
@@ -26,15 +28,25 @@ function tierFor(rate: number): RiskTier {
 }
 
 /**
- * Attendance analytics + automatic student-risk identification, tenant-scoped.
- * Rates are computed from AttendanceRecord (PRESENT/LATE count as attended).
+ * Attendance analytics + automatic student-risk identification. Admin sees
+ * the whole tenant; a lecturer sees only sections they teach or manage —
+ * otherwise this endpoint would leak every student's attendance record and
+ * risk status to any lecturer in the faculty (confirmed gap: this used to
+ * take only universityId with no per-lecturer scoping at all).
  */
 @Injectable()
 export class AnalyticsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly lecturerScope: LecturerScopeService,
+  ) {}
 
-  async overview(universityId: string) {
-    const where = { enrollment: { section: { universityId } } } as const;
+  async overview(user: AuthenticatedUser) {
+    const universityId = user.universityId;
+    const sectionFilter = this.lecturerScope.isAdmin(user)
+      ? {}
+      : { id: { in: await this.lecturerScope.accessibleSectionIds(user) } };
+    const where = { enrollment: { section: { universityId, ...sectionFilter } } } as const;
 
     const [byStatus, totalPer, attendedPer, latePer] = await Promise.all([
       this.prisma.attendanceRecord.groupBy({ by: ['status'], where, _count: { _all: true } }),

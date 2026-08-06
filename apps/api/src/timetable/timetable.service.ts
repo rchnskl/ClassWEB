@@ -1,6 +1,8 @@
 import { BadRequestException, ConflictException, Injectable } from '@nestjs/common';
 import { DayOfWeek, Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+import { AuthenticatedUser } from '../common/authenticated-user';
+import { LecturerScopeService } from '../common/lecturer-scope.service';
 import { CreateScheduleDto, GenerateSessionsDto } from './dto/timetable.dto';
 
 const JS_DAY_TO_ENUM: DayOfWeek[] = [
@@ -20,7 +22,10 @@ function overlaps(aStart: string, aEnd: string, bStart: string, bEnd: string): b
 
 @Injectable()
 export class TimetableService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly lecturerScope: LecturerScopeService,
+  ) {}
 
   private scheduleSelect = {
     id: true, dayOfWeek: true, startTime: true, endTime: true,
@@ -34,7 +39,8 @@ export class TimetableService {
     lecturer: { select: { id: true, nameEn: true } },
   } satisfies Prisma.SectionScheduleSelect;
 
-  async createSchedule(universityId: string, dto: CreateScheduleDto) {
+  async createSchedule(user: AuthenticatedUser, dto: CreateScheduleDto) {
+    const universityId = user.universityId;
     if (toMinutes(dto.startTime) >= toMinutes(dto.endTime)) {
       throw new BadRequestException('startTime must be before endTime');
     }
@@ -44,6 +50,7 @@ export class TimetableService {
       select: { id: true, semesterId: true, roomId: true, lecturerId: true },
     });
     if (!section) throw new BadRequestException('Section does not exist in this tenant');
+    await this.lecturerScope.assertTeachesOrManages(user, section.id);
 
     const roomId = dto.roomId ?? section.roomId;
     const lecturerId = dto.lecturerId ?? section.lecturerId;
@@ -103,14 +110,23 @@ export class TimetableService {
     }
   }
 
-  async timetable(universityId: string, semesterId?: string) {
+  /**
+   * Weekly schedule — a lecturer's own personal timetable shows only
+   * sections they teach or manage; admin sees the whole faculty.
+   */
+  async timetable(user: AuthenticatedUser, semesterId?: string) {
+    const universityId = user.universityId;
     const semester = semesterId
       ? await this.prisma.semester.findFirst({ where: { id: semesterId, academicYear: { universityId } }, select: { id: true } })
       : await this.prisma.semester.findFirst({ where: { isCurrent: true, academicYear: { universityId } }, select: { id: true } });
     if (!semester) return { semesterId: null, slots: [] };
 
+    const sectionFilter = this.lecturerScope.isAdmin(user)
+      ? {}
+      : { id: { in: await this.lecturerScope.accessibleSectionIds(user) } };
+
     const slots = await this.prisma.sectionSchedule.findMany({
-      where: { section: { semesterId: semester.id, universityId, deletedAt: null } },
+      where: { section: { semesterId: semester.id, universityId, deletedAt: null, ...sectionFilter } },
       select: this.scheduleSelect,
       orderBy: [{ dayOfWeek: 'asc' }, { startTime: 'asc' }],
     });
@@ -118,7 +134,8 @@ export class TimetableService {
   }
 
   /** Expand a section's weekly schedule into concrete ClassSessions across the semester. */
-  async generateSessions(universityId: string, dto: GenerateSessionsDto) {
+  async generateSessions(user: AuthenticatedUser, dto: GenerateSessionsDto) {
+    const universityId = user.universityId;
     const section = await this.prisma.section.findFirst({
       where: { id: dto.sectionId, universityId, deletedAt: null },
       select: {
@@ -128,6 +145,7 @@ export class TimetableService {
       },
     });
     if (!section) throw new BadRequestException('Section does not exist in this tenant');
+    await this.lecturerScope.assertTeachesOrManages(user, section.id);
     if (section.schedules.length === 0) throw new BadRequestException('Section has no schedule to expand');
 
     const holidays = await this.prisma.calendarEvent.findMany({
@@ -164,9 +182,17 @@ export class TimetableService {
     return { sectionId: section.id, generated: result.count, totalPlanned: rows.length };
   }
 
-  async sessions(universityId: string, sectionId?: string, date?: string) {
+  async sessions(user: AuthenticatedUser, sectionId?: string, date?: string) {
+    const universityId = user.universityId;
+    if (sectionId) {
+      await this.lecturerScope.assertTeachesOrManages(user, sectionId);
+    }
     const where: Prisma.ClassSessionWhereInput = { section: { universityId, deletedAt: null } };
-    if (sectionId) where.sectionId = sectionId;
+    if (sectionId) {
+      where.sectionId = sectionId;
+    } else if (!this.lecturerScope.isAdmin(user)) {
+      where.sectionId = { in: await this.lecturerScope.accessibleSectionIds(user) };
+    }
     if (date) {
       const day = new Date(date);
       const next = new Date(day);

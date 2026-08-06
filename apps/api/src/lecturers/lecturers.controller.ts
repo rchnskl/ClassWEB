@@ -14,15 +14,15 @@ export class LecturersController {
 
   @Get()
   @Permissions('lecturer:read')
-  @ApiOperation({ summary: 'List lecturers (tenant-scoped, searchable, paginated)' })
+  @ApiOperation({ summary: "List lecturers a non-admin can see their own teaching team; admin sees the whole tenant" })
   list(@CurrentUser() user: AuthenticatedUser, @Query() query: QueryLecturerDto) {
-    return this.lecturers.list(user.universityId, query);
+    return this.lecturers.list(user, query);
   }
 
   @Get(':id')
   @Permissions('lecturer:read')
   get(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string) {
-    return this.lecturers.get(user.universityId, id);
+    return this.lecturers.get(user, id);
   }
 
   @Post()

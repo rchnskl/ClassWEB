@@ -9,7 +9,6 @@ import { apiFetch, type MeResponse, type Paginated } from '@/lib/api';
 import { useI18n } from '@/lib/i18n';
 
 interface ProgramRef { id: string; code: string; nameEn: string }
-interface SectionRef { id: string; sectionNo: string; subject: { code: string; nameEn: string } }
 interface GroupRow {
   id: string; scope: 'CENTRAL' | 'SECTION'; code: string | null;
   nameEn: string; nameTh: string | null; yearLevel: number | null; order: number;
@@ -33,9 +32,6 @@ export default function GroupsPage() {
   const [email, setEmail] = useState('');
   const [isAdmin, setIsAdmin] = useState(false);
   const [programs, setPrograms] = useState<ProgramRef[]>([]);
-  const [mySections, setMySections] = useState<SectionRef[]>([]);
-  const mySectionIds = new Set(mySections.map((s) => s.id));
-  const canManageGroups = isAdmin || mySections.length > 0;
   const [rows, setRows] = useState<GroupRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -45,23 +41,18 @@ export default function GroupsPage() {
   const [busyMember, setBusyMember] = useState<string | null>(null);
 
   const [showSplit, setShowSplit] = useState(false);
-  const [split, setSplit] = useState({
-    programId: '', yearLevel: '2', sectionId: '', groupCount: '6', strategy: 'SEQUENTIAL',
-    namePrefixTh: 'กลุ่ม', namePrefixEn: 'Group',
-  });
+  const [split, setSplit] = useState({ programId: '', yearLevel: '2', groupCount: '6', strategy: 'SEQUENTIAL', namePrefixTh: 'กลุ่ม', namePrefixEn: 'Group' });
   const [splitting, setSplitting] = useState(false);
   const [splitError, setSplitError] = useState<string | null>(null);
 
   const [newName, setNewName] = useState('');
-  const [newSectionId, setNewSectionId] = useState('');
   const [creating, setCreating] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      const params = new URLSearchParams({ take: '100' });
-      if (isAdmin) params.set('scope', 'CENTRAL');
+      const params = new URLSearchParams({ take: '100', scope: 'CENTRAL' });
       if (yearFilter) params.set('yearLevel', yearFilter);
       const data = await apiFetch<Paginated<GroupRow>>(`/student-groups?${params.toString()}`);
       setRows(data.items);
@@ -70,7 +61,7 @@ export default function GroupsPage() {
     } finally {
       setLoading(false);
     }
-  }, [yearFilter, isAdmin]);
+  }, [yearFilter]);
 
   useEffect(() => {
     if (!localStorage.getItem('accessToken')) { router.replace('/login'); return; }
@@ -81,9 +72,6 @@ export default function GroupsPage() {
       .catch(() => {});
     apiFetch<ProgramRef[]>('/programs')
       .then((p) => { setPrograms(p); setSplit((s) => ({ ...s, programId: p[0]?.id ?? '' })); })
-      .catch(() => {});
-    apiFetch<Paginated<SectionRef>>('/sections?take=200')
-      .then((d) => { setMySections(d.items); setSplit((s) => ({ ...s, sectionId: d.items[0]?.id ?? '' })); setNewSectionId(d.items[0]?.id ?? ''); })
       .catch(() => {});
   }, [router]);
 
@@ -99,21 +87,16 @@ export default function GroupsPage() {
 
   async function createGroup() {
     if (!newName.trim()) return;
-    if (!isAdmin && !newSectionId) return;
     setCreating(true);
     setError(null);
     try {
       await apiFetch('/student-groups', {
         method: 'POST',
-        body: JSON.stringify(
-          isAdmin
-            ? {
-                scope: 'CENTRAL', nameEn: newName.trim(), nameTh: newName.trim(),
-                ...(yearFilter ? { yearLevel: Number(yearFilter) } : {}),
-                ...(programs[0] ? { programId: programs[0].id } : {}),
-              }
-            : { scope: 'SECTION', sectionId: newSectionId, nameEn: newName.trim(), nameTh: newName.trim() },
-        ),
+        body: JSON.stringify({
+          scope: 'CENTRAL', nameEn: newName.trim(), nameTh: newName.trim(),
+          ...(yearFilter ? { yearLevel: Number(yearFilter) } : {}),
+          ...(programs[0] ? { programId: programs[0].id } : {}),
+        }),
       });
       setNewName('');
       await load();
@@ -123,35 +106,23 @@ export default function GroupsPage() {
   }
 
   async function runSplit() {
-    if (!isAdmin && !split.sectionId) return;
     setSplitting(true);
     setSplitError(null);
     try {
       await apiFetch('/student-groups/auto-split', {
         method: 'POST',
-        body: JSON.stringify(
-          isAdmin
-            ? {
-                scope: 'CENTRAL',
-                programId: split.programId,
-                yearLevel: Number(split.yearLevel),
-                groupCount: Number(split.groupCount),
-                strategy: split.strategy,
-                namePrefixEn: split.namePrefixEn,
-                namePrefixTh: split.namePrefixTh,
-              }
-            : {
-                scope: 'SECTION',
-                sectionId: split.sectionId,
-                groupCount: Number(split.groupCount),
-                strategy: split.strategy,
-                namePrefixEn: split.namePrefixEn,
-                namePrefixTh: split.namePrefixTh,
-              },
-        ),
+        body: JSON.stringify({
+          scope: 'CENTRAL',
+          programId: split.programId,
+          yearLevel: Number(split.yearLevel),
+          groupCount: Number(split.groupCount),
+          strategy: split.strategy,
+          namePrefixEn: split.namePrefixEn,
+          namePrefixTh: split.namePrefixTh,
+        }),
       });
       setShowSplit(false);
-      if (isAdmin) setYearFilter(split.yearLevel);
+      setYearFilter(split.yearLevel);
       await load();
     } catch (err) {
       setSplitError(err instanceof Error ? err.message : 'Auto-split failed');
@@ -204,38 +175,28 @@ export default function GroupsPage() {
             <h1 style={{ fontSize: 27, fontWeight: 750, letterSpacing: -0.6, margin: 0 }}>{t('grp.title')}</h1>
             <p className="muted" style={{ margin: '4px 0 0', fontSize: 14.5 }}>{t('grp.subtitle')}</p>
           </div>
-          {canManageGroups && (
+          {isAdmin && (
             <button className="btn-primary" style={{ padding: '11px 18px', fontSize: 14.5 }} onClick={() => setShowSplit((v) => !v)}>
               {showSplit ? t('students.close') : t('grp.autoSplit')}
             </button>
           )}
         </div>
 
-        {showSplit && canManageGroups && (
+        {showSplit && isAdmin && (
           <div className="glass rise" style={{ padding: 20, marginBottom: 18 }}>
             <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 4 }}>{t('grp.autoSplit')}</div>
-            <p className="muted" style={{ fontSize: 12.5, margin: '0 0 14px' }}>{isAdmin ? t('grp.autoSplitHint') : t('grp.autoSplitHintSection')}</p>
+            <p className="muted" style={{ fontSize: 12.5, margin: '0 0 14px' }}>{t('grp.autoSplitHint')}</p>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 12, alignItems: 'end' }}>
-              {isAdmin ? (
-                <>
-                  <Field label={t('students.program')}>
-                    <select className="input" value={split.programId} onChange={(e) => setSplit({ ...split, programId: e.target.value })}>
-                      {programs.map((p) => <option key={p.id} value={p.id}>{p.code}</option>)}
-                    </select>
-                  </Field>
-                  <Field label={t('common.year')}>
-                    <select className="input" value={split.yearLevel} onChange={(e) => setSplit({ ...split, yearLevel: e.target.value })}>
-                      {YEARS.map((y) => <option key={y} value={y}>{t('common.year')} {y}</option>)}
-                    </select>
-                  </Field>
-                </>
-              ) : (
-                <Field label={t('grp.mySection')}>
-                  <select className="input" value={split.sectionId} onChange={(e) => setSplit({ ...split, sectionId: e.target.value })}>
-                    {mySections.map((s) => <option key={s.id} value={s.id}>{s.subject.code} — {s.sectionNo}</option>)}
-                  </select>
-                </Field>
-              )}
+              <Field label={t('students.program')}>
+                <select className="input" value={split.programId} onChange={(e) => setSplit({ ...split, programId: e.target.value })}>
+                  {programs.map((p) => <option key={p.id} value={p.id}>{p.code}</option>)}
+                </select>
+              </Field>
+              <Field label={t('common.year')}>
+                <select className="input" value={split.yearLevel} onChange={(e) => setSplit({ ...split, yearLevel: e.target.value })}>
+                  {YEARS.map((y) => <option key={y} value={y}>{t('common.year')} {y}</option>)}
+                </select>
+              </Field>
               <Field label={t('grp.groupCount')}>
                 <input className="input" type="number" min={2} max={50} value={split.groupCount} onChange={(e) => setSplit({ ...split, groupCount: e.target.value })} />
               </Field>
@@ -248,11 +209,10 @@ export default function GroupsPage() {
               <Field label={t('grp.prefix')}>
                 <input className="input" value={split.namePrefixTh} onChange={(e) => setSplit({ ...split, namePrefixTh: e.target.value })} />
               </Field>
-              <button className="btn-primary" disabled={splitting || (!isAdmin && !split.sectionId)} onClick={runSplit} style={{ padding: 12, fontSize: 14 }}>
+              <button className="btn-primary" disabled={splitting} onClick={runSplit} style={{ padding: 12, fontSize: 14 }}>
                 {splitting ? t('students.saving') : t('grp.doSplit')}
               </button>
             </div>
-            {!isAdmin && mySections.length === 0 && <div className="chip chip-danger" style={{ display: 'block', borderRadius: 11, padding: '9px 12px', marginTop: 12 }}>{t('grp.noSections')}</div>}
             {splitError && <div className="chip chip-danger" role="alert" style={{ display: 'block', borderRadius: 11, padding: '9px 12px', marginTop: 12 }}>{splitError}</div>}
           </div>
         )}
@@ -267,19 +227,6 @@ export default function GroupsPage() {
               <input className="input" style={{ maxWidth: 240 }} placeholder={t('grp.newName')} value={newName}
                 onChange={(e) => setNewName(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') void createGroup(); }} />
               <button className="glass hairline" disabled={!newName.trim() || creating} onClick={createGroup}
-                style={{ padding: '10px 16px', borderRadius: 11, fontWeight: 650, fontSize: 13.5, color: 'var(--text-1)' }}>
-                {creating ? '…' : t('grp.create')}
-              </button>
-            </>
-          )}
-          {!isAdmin && mySections.length > 0 && (
-            <>
-              <select className="input" style={{ maxWidth: 220 }} aria-label={t('grp.mySection')} value={newSectionId} onChange={(e) => setNewSectionId(e.target.value)}>
-                {mySections.map((s) => <option key={s.id} value={s.id}>{s.subject.code} — {s.sectionNo}</option>)}
-              </select>
-              <input className="input" style={{ maxWidth: 240 }} placeholder={t('grp.newName')} value={newName}
-                onChange={(e) => setNewName(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') void createGroup(); }} />
-              <button className="glass hairline" disabled={!newName.trim() || !newSectionId || creating} onClick={createGroup}
                 style={{ padding: '10px 16px', borderRadius: 11, fontWeight: 650, fontSize: 13.5, color: 'var(--text-1)' }}>
                 {creating ? '…' : t('grp.create')}
               </button>
@@ -303,9 +250,7 @@ export default function GroupsPage() {
                 <div style={{ minWidth: 0 }}>
                   <div style={{ fontWeight: 700, fontSize: 15, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{name(g.nameEn, g.nameTh)}</div>
                   <div className="muted" style={{ fontSize: 12.5, marginTop: 3 }}>
-                    {g.scope === 'SECTION' && g.section
-                      ? `${g.section.subject.code} · ${t('grp.mySection')} ${g.section.sectionNo}`
-                      : <>{g.program?.code ?? t('grp.scope.central')}{g.yearLevel != null && ` · ${t('common.year')} ${g.yearLevel}`}</>}
+                    {g.program?.code ?? '—'}{g.yearLevel != null && ` · ${t('common.year')} ${g.yearLevel}`}
                   </div>
                 </div>
                 <span className="chip" style={{ background: 'var(--glass-hairline)', color: 'var(--text-1)' }}>{g._count.members}</span>
@@ -315,7 +260,7 @@ export default function GroupsPage() {
                   style={{ flex: 1, padding: '7px 10px', borderRadius: 10, fontSize: 12.5, fontWeight: 650, color: 'var(--text-1)' }}>
                   {t('grp.manage')}
                 </button>
-                {(isAdmin || (g.scope === 'SECTION' && g.section && mySectionIds.has(g.section.id))) && (
+                {isAdmin && (
                   <button onClick={() => deleteGroup(g.id)} className="btn-danger" aria-label={t('grp.delete')} title={t('grp.delete')}
                     style={{ padding: '7px 11px', borderRadius: 10, fontSize: 12.5 }}>🗑</button>
                 )}

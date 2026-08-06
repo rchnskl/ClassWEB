@@ -305,11 +305,15 @@ export class AssessmentService {
 
   // ---- evaluations ------------------------------------------------------
 
-  /** Non-admins must grade within a section they teach — no section, no cross-lecturer peeking. */
+  /**
+   * Non-admins must grade within a section they teach, or a section under a
+   * subject they manage as Course Manager — no section, no cross-lecturer
+   * peeking.
+   */
   private async assertGradingScope(user: AuthenticatedUser, sectionId?: string) {
     if (this.lecturerScope.isAdmin(user)) return;
     if (!sectionId) throw new ForbiddenException('A sectionId is required');
-    await this.lecturerScope.assertTeaches(user, sectionId);
+    await this.lecturerScope.assertTeachesOrManages(user, sectionId);
   }
 
   async getEvaluation(user: AuthenticatedUser, rubricId: string, studentId: string, sectionId?: string) {
@@ -382,7 +386,60 @@ export class AssessmentService {
     await this.prisma.auditLog.create({
       data: { universityId, userId, action: AuditAction.UPDATE, entityType: 'Evaluation', entityId: evaluation.id, metadata: { rubricId: dto.rubricId, studentId: dto.studentId, scorePercent, criticalFailed } },
     });
+    if (dto.sectionId) {
+      await this.notifyIfCrossSectionEdit(user, userName, dto.sectionId, dto.studentId, evaluation.id, scorePercent);
+    }
     return { id: evaluation.id, scorePercent, criticalFailed };
+  }
+
+  /**
+   * A Course Manager can grade any section under a subject they manage, not
+   * just sections they personally teach. When that happens — someone
+   * touching a grade sheet that isn't "theirs" — the section's own
+   * lecturer(s) must be told, and it gets a distinct audit trail entry from
+   * an ordinary self-grading save.
+   */
+  private async notifyIfCrossSectionEdit(
+    user: AuthenticatedUser, userName: string, sectionId: string, studentId: string, evaluationId: string, scorePercent: number,
+  ) {
+    if (this.lecturerScope.isAdmin(user)) return;
+    const me = await this.lecturerScope.myLecturerId(user);
+    if (!me || (await this.lecturerScope.teachesSection(me, sectionId))) return; // grading their own section — nothing to flag
+
+    const section = await this.prisma.section.findFirst({
+      where: { id: sectionId },
+      select: {
+        subject: { select: { code: true, nameEn: true } },
+        lecturer: { select: { userId: true } },
+        coLecturers: { select: { lecturer: { select: { userId: true } } } },
+      },
+    });
+    if (!section) return;
+
+    const recipientUserIds = [
+      section.lecturer?.userId,
+      ...section.coLecturers.map((c) => c.lecturer.userId),
+    ].filter((id): id is string => Boolean(id) && id !== user.id);
+    if (recipientUserIds.length === 0) return;
+
+    await this.prisma.notification.createMany({
+      data: recipientUserIds.map((recipientUserId) => ({
+        universityId: user.universityId,
+        userId: recipientUserId,
+        type: 'GRADE_EDITED_BY_MANAGER',
+        title: `${userName} แก้ไขเกรดในกลุ่มเรียนของคุณ`,
+        body: `วิชา ${section.subject.code} — คะแนนถูกปรับเป็น ${scorePercent}%`,
+        refType: 'Evaluation',
+        refId: evaluationId,
+      })),
+    });
+    await this.prisma.auditLog.create({
+      data: {
+        universityId: user.universityId, userId: user.id, action: AuditAction.UPDATE,
+        entityType: 'Evaluation', entityId: evaluationId,
+        metadata: { action: 'crossSectionGradeEdit', sectionId, studentId, byManagerLecturerId: me, scorePercent },
+      },
+    });
   }
 
   // ---- reports ----------------------------------------------------------
@@ -436,7 +493,7 @@ export class AssessmentService {
   /** Per-section table: every enrolled student with total + grade, using the section's subject rubric config. */
   async sectionSummary(user: AuthenticatedUser, sectionId: string) {
     const universityId = user.universityId;
-    await this.lecturerScope.assertTeaches(user, sectionId);
+    await this.lecturerScope.assertTeachesOrManages(user, sectionId);
     const section = await this.prisma.section.findFirst({
       where: { id: sectionId, universityId, deletedAt: null },
       select: { subjectId: true, sectionNo: true, subject: { select: { code: true, nameEn: true, nameTh: true } } },

@@ -16,21 +16,21 @@ export class TimetableController {
   @Permissions('timetable:read')
   @ApiOperation({ summary: 'Weekly timetable slots for a semester (defaults to current)' })
   get(@CurrentUser() user: AuthenticatedUser, @Query() query: TimetableQueryDto) {
-    return this.timetable.timetable(user.universityId, query.semesterId);
+    return this.timetable.timetable(user, query.semesterId);
   }
 
   @Post('schedules')
   @Permissions('timetable:create')
   @ApiOperation({ summary: 'Add a weekly schedule slot (room/teacher/section conflict-checked)' })
   createSchedule(@CurrentUser() user: AuthenticatedUser, @Body() dto: CreateScheduleDto) {
-    return this.timetable.createSchedule(user.universityId, dto);
+    return this.timetable.createSchedule(user, dto);
   }
 
   @Post('generate')
   @Permissions('timetable:create')
   @ApiOperation({ summary: 'Expand a section schedule into concrete class sessions' })
   generate(@CurrentUser() user: AuthenticatedUser, @Body() dto: GenerateSessionsDto) {
-    return this.timetable.generateSessions(user.universityId, dto);
+    return this.timetable.generateSessions(user, dto);
   }
 
   @Get('sessions')
@@ -41,6 +41,6 @@ export class TimetableController {
     @Query('sectionId') sectionId?: string,
     @Query('date') date?: string,
   ) {
-    return this.timetable.sessions(user.universityId, sectionId, date);
+    return this.timetable.sessions(user, sectionId, date);
   }
 }

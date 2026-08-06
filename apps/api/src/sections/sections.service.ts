@@ -37,8 +37,7 @@ export class SectionsService {
         : {}),
     };
     if (!this.lecturerScope.isAdmin(actingUser)) {
-      const me = await this.lecturerScope.myLecturerId(actingUser);
-      const sectionIds = me ? await this.lecturerScope.sectionIdsFor(me) : [];
+      const sectionIds = await this.lecturerScope.accessibleSectionIds(actingUser);
       where.id = { in: sectionIds };
     }
     const [items, total] = await this.prisma.$transaction([
@@ -55,12 +54,7 @@ export class SectionsService {
       select: this.select,
     });
     if (!section) throw new NotFoundException('Section not found');
-    if (!this.lecturerScope.isAdmin(actingUser)) {
-      const me = await this.lecturerScope.myLecturerId(actingUser);
-      if (!me || !(await this.lecturerScope.teachesSection(me, id))) {
-        throw new ForbiddenException('You can only view sections you teach');
-      }
-    }
+    await this.lecturerScope.assertTeachesOrManages(actingUser, id);
     return section;
   }
 
@@ -85,21 +79,24 @@ export class SectionsService {
     });
     if (!semester) throw new BadRequestException('Semester does not exist in this tenant');
 
-    // Lecturers can only create a section taught by themselves; admins may
-    // assign any lecturer (or leave it unassigned).
-    let lecturerId = dto.lecturerId;
+    // Creating a section is a course-manager action — it's how the manager
+    // organises the subject, not something every lecturer can do to any
+    // subject just by claiming themselves as the teacher. A manager may
+    // assign any lecturer (pulled from the central roster) as the primary
+    // lecturer, same as admin.
     if (!isAdmin) {
-      const me = await this.myLecturer(universityId, actingUser.id);
-      if (!me) throw new ForbiddenException('Your account is not linked to a lecturer record');
-      if (dto.lecturerId && dto.lecturerId !== me.id) {
-        throw new ForbiddenException('You can only create a section taught by yourself');
-      }
-      lecturerId = me.id;
-    } else if (dto.lecturerId) {
+      await this.lecturerScope.assertManagesSubject(actingUser, dto.subjectId);
+    }
+    let lecturerId = dto.lecturerId;
+    if (dto.lecturerId) {
       const lecturer = await this.prisma.lecturer.findFirst({
         where: { id: dto.lecturerId, universityId, deletedAt: null }, select: { id: true },
       });
       if (!lecturer) throw new BadRequestException('Lecturer does not exist in this tenant');
+    } else if (!isAdmin) {
+      // Default to the manager themself when they don't name a teacher.
+      const me = await this.myLecturer(universityId, actingUser.id);
+      lecturerId = me?.id;
     }
 
     if (dto.roomId) {
@@ -129,19 +126,21 @@ export class SectionsService {
     });
   }
 
-  /** Throws unless the caller is an admin or the section's own lecturer. */
+  /** Throws unless the caller is an admin, the section's own lecturer, or the course manager of its subject. */
   private async assertCanManage(actingUser: AuthenticatedUser, sectionId: string) {
     const universityId = actingUser.universityId;
     const section = await this.prisma.section.findFirst({
       where: { id: sectionId, universityId, deletedAt: null },
-      select: { id: true, lecturerId: true },
+      select: { id: true, lecturerId: true, subjectId: true },
     });
     if (!section) throw new NotFoundException('Section not found');
     if (actingUser.roleCodes.includes('ADMIN')) return section;
 
     const me = await this.myLecturer(universityId, actingUser.id);
-    if (!me || section.lecturerId !== me.id) {
-      throw new ForbiddenException('You can only manage sections you teach');
+    const isOwnSection = me && section.lecturerId === me.id;
+    const isManager = await this.lecturerScope.isSubjectManager(actingUser, section.subjectId);
+    if (!isOwnSection && !isManager) {
+      throw new ForbiddenException('You can only manage sections you teach or a subject you manage');
     }
     return section;
   }
@@ -149,13 +148,18 @@ export class SectionsService {
   async update(actingUser: AuthenticatedUser, id: string, dto: UpdateSectionDto) {
     const universityId = actingUser.universityId;
     const isAdmin = actingUser.roleCodes.includes('ADMIN');
-    await this.assertCanManage(actingUser, id);
+    const section = await this.assertCanManage(actingUser, id);
 
-    // Non-admins may not reassign the primary lecturer away from themselves.
+    // A course manager may reassign the primary lecturer to anyone; a
+    // lecturer acting on their own section (not as manager) may not hand it
+    // off to someone else.
     if (dto.lecturerId !== undefined && !isAdmin) {
-      const me = await this.myLecturer(universityId, actingUser.id);
-      if (!me || dto.lecturerId !== me.id) {
-        throw new ForbiddenException('You cannot reassign this section to another lecturer');
+      const isManager = await this.lecturerScope.isSubjectManager(actingUser, section.subjectId);
+      if (!isManager) {
+        const me = await this.myLecturer(universityId, actingUser.id);
+        if (!me || dto.lecturerId !== me.id) {
+          throw new ForbiddenException('You cannot reassign this section to another lecturer');
+        }
       }
     }
     if (dto.lecturerId) {

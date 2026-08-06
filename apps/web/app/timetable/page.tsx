@@ -18,7 +18,7 @@ interface Slot {
 }
 interface CalEntry {
   id: string; type: string; title: string; startAt: string; endAt: string;
-  color: string | null; room: { roomNumber: string } | null;
+  color: string | null; room: { roomNumber: string } | null; createdById?: string | null;
 }
 
 const DAYS = ['MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY'];
@@ -65,6 +65,7 @@ export default function TimetablePage() {
   const router = useRouter();
   const { t } = useI18n();
   const [email, setEmail] = useState('');
+  const [userId, setUserId] = useState('');
   const [slots, setSlots] = useState<Slot[]>([]);
   const [events, setEvents] = useState<CalEntry[]>([]);
   const [loading, setLoading] = useState(true);
@@ -86,7 +87,7 @@ export default function TimetablePage() {
   useEffect(() => {
     if (!localStorage.getItem('accessToken')) { router.replace('/login'); return; }
     const u = localStorage.getItem('user');
-    if (u) { try { setEmail(JSON.parse(u).email); } catch {} }
+    if (u) { try { const parsed = JSON.parse(u); setEmail(parsed.email); setUserId(parsed.id); } catch {} }
     apiFetch<{ slots: Slot[] }>('/timetable')
       .then((d) => setSlots(d.slots))
       .catch((e) => setError(e instanceof Error ? e.message : 'Failed to load timetable'))
@@ -110,6 +111,16 @@ export default function TimetablePage() {
     }
     return map;
   }, [events]);
+
+  async function removeEvent(id: string) {
+    if (!window.confirm(t('tt.confirmDelete'))) return;
+    try {
+      await apiFetch(`/calendar/entries/${id}`, { method: 'DELETE' });
+      await loadEvents();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to delete event');
+    }
+  }
 
   async function submitEvent(e: React.FormEvent) {
     e.preventDefault();
@@ -230,9 +241,16 @@ export default function TimetablePage() {
                     const color = ev.color ?? st.color;
                     const top = (toMin(ev._s) - START_HOUR * 60) * PX_PER_MIN;
                     const height = Math.max(28, (toMin(ev._e) - toMin(ev._s)) * PX_PER_MIN);
+                    const mine = ev.createdById === userId;
                     return (
                       <div key={ev.id} title={ev.title} style={{ position: 'absolute', top, height, right: 4, width: 'calc(45% - 6px)', borderRadius: 11, padding: '6px 8px', background: `${color}22`, border: `1px solid ${color}`, borderLeft: `3px solid ${color}`, color: 'var(--text-0)', overflow: 'hidden' }}>
-                        <div style={{ fontSize: 12 }}>{st.icon} <span style={{ fontWeight: 700, fontSize: 10.5 }}>{t(`tt.type.${ev.type}`)}</span></div>
+                        <div style={{ fontSize: 12, display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                          <span>{st.icon} <span style={{ fontWeight: 700, fontSize: 10.5 }}>{t(`tt.type.${ev.type}`)}</span></span>
+                          {mine && (
+                            <button onClick={() => removeEvent(ev.id)} aria-label={t('tt.delete')} title={t('tt.delete')}
+                              style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: 'var(--text-2)', fontSize: 11, padding: 0, lineHeight: 1 }}>✕</button>
+                          )}
+                        </div>
                         <div style={{ fontSize: 10.5, lineHeight: 1.25, marginTop: 2, fontWeight: 600 }}>{ev.title}</div>
                         <div className="muted" style={{ fontSize: 9.5, marginTop: 2 }}>{ev._s}–{ev._e}</div>
                       </div>
