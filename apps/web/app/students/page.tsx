@@ -42,7 +42,7 @@ function StudentsPageInner() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const { t } = useI18n();
-  const [email, setEmail] = useState('admin@nursing.au.edu');
+  const [email, setEmail] = useState('');
   const [rows, setRows] = useState<StudentRow[]>([]);
   const [total, setTotal] = useState(0);
   const [skip, setSkip] = useState(0);

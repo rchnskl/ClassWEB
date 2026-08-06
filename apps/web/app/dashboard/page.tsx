@@ -60,7 +60,7 @@ export default function DashboardPage() {
     })();
   }, [router]);
 
-  const email = me?.email ?? 'admin@nursing.au.edu';
+  const email = me?.email ?? '';
   const displayName = me
     ? (lang === 'th' ? me.lecturer?.nameTh ?? me.student?.nameTh : null) ??
       me.lecturer?.nameEn ?? me.student?.nameEn ??

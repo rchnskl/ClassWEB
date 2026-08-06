@@ -13,7 +13,7 @@ type Tab = 'subjects' | 'sections' | 'departments' | 'programs' | 'locations';
 export default function SectionsPage() {
   const router = useRouter();
   const { t } = useI18n();
-  const [email, setEmail] = useState('admin@nursing.au.edu');
+  const [email, setEmail] = useState('');
   const [tab, setTab] = useState<Tab>('sections');
   const [isAdmin, setIsAdmin] = useState(false);
   const [userId, setUserId] = useState('');

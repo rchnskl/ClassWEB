@@ -64,7 +64,7 @@ function weekRange(): { fromISO: string; toISO: string } {
 export default function TimetablePage() {
   const router = useRouter();
   const { t } = useI18n();
-  const [email, setEmail] = useState('admin@nursing.au.edu');
+  const [email, setEmail] = useState('');
   const [slots, setSlots] = useState<Slot[]>([]);
   const [events, setEvents] = useState<CalEntry[]>([]);
   const [loading, setLoading] = useState(true);

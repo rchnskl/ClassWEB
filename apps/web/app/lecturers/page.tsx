@@ -31,7 +31,7 @@ const PAGE = 10;
 export default function LecturersPage() {
   const router = useRouter();
   const { t } = useI18n();
-  const [email, setEmail] = useState('admin@nursing.au.edu');
+  const [email, setEmail] = useState('');
   const [rows, setRows] = useState<LecturerRow[]>([]);
   const [total, setTotal] = useState(0);
   const [skip, setSkip] = useState(0);

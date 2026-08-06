@@ -12,7 +12,7 @@ type Tab = 'general' | 'academic' | 'attendance' | 'users' | 'audit' | 'backup';
 export default function SettingsPage() {
   const router = useRouter();
   const { t } = useI18n();
-  const [email, setEmail] = useState('admin@nursing.au.edu');
+  const [email, setEmail] = useState('');
   const [tab, setTab] = useState<Tab>('general');
   const [checked, setChecked] = useState(false);
 

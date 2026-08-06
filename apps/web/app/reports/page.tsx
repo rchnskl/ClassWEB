@@ -29,7 +29,7 @@ const TIER_COLOR: Record<string, string> = {
 export default function ReportsPage() {
   const router = useRouter();
   const { t, lang } = useI18n();
-  const [email, setEmail] = useState('admin@nursing.au.edu');
+  const [email, setEmail] = useState('');
   const [data, setData] = useState<Overview | null>(null);
   const [loading, setLoading] = useState(true);
   const [exporting, setExporting] = useState<string | null>(null);
