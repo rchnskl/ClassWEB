@@ -195,9 +195,9 @@ describe('Central roster, Excel import and groups (integration, real Postgres)',
       expect(keys).not.toContain('birthDate');
     });
 
-    it('still hides those students from the lecturer\'s own /students list', async () => {
+    it('also finds them via the lecturer\'s own /students list (reads are tenant-wide, not section-scoped)', async () => {
       const res = await http.get('/api/v1/students?search=E2E-R-101').set(auth(lecturerToken)).expect(200);
-      expect(res.body.items).toHaveLength(0);
+      expect(res.body.items.map((s: { studentCode: string }) => s.studentCode)).toContain('E2E-R-101');
     });
 
     it('refuses an unfiltered call so it cannot be used to dump the roster', async () => {

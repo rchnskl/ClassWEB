@@ -1,0 +1,2 @@
+-- AlterEnum
+ALTER TYPE "CampusType" ADD VALUE 'UNIVERSITY';

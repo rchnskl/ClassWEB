@@ -822,7 +822,7 @@ function ProgramsTab({ isAdmin }: { isAdmin: boolean }) {
 // Locations tab — campuses (incl. external clinical sites) and buildings
 // ---------------------------------------------------------------------------
 
-const CAMPUS_TYPES = ['CAMPUS', 'HOSPITAL', 'HEALTH_PROMOTING_HOSPITAL', 'HEALTH_SERVICE_CENTER', 'CLINIC', 'MEDICAL_CENTER'] as const;
+const CAMPUS_TYPES = ['UNIVERSITY', 'CAMPUS', 'HOSPITAL', 'HEALTH_PROMOTING_HOSPITAL', 'HEALTH_SERVICE_CENTER', 'CLINIC', 'MEDICAL_CENTER'] as const;
 
 interface CampusRow {
   id: string; code: string; nameEn: string; nameTh: string | null; locationType: string; address: string | null; city: string | null;

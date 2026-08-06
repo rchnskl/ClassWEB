@@ -273,6 +273,7 @@ model University {
 /// hospital's wards are modelled the same way as an on-campus building, just
 /// under a Campus whose locationType says what kind of place it actually is.
 enum CampusType {
+  UNIVERSITY
   CAMPUS
   HOSPITAL
   HEALTH_PROMOTING_HOSPITAL

@@ -34,7 +34,7 @@ const ROLE_MATRIX: Record<string, (resource: string, action: string) => boolean>
     if (r === 'report' && ['read', 'export'].includes(a)) return true;
     if (r === 'section' && ['read', 'create', 'update'].includes(a)) return true;
     if (r === 'enrollment' && ['read', 'create', 'update'].includes(a)) return true;
-    if (['student', 'lecturer', 'subject', 'course', 'room', 'department'].includes(r) && a === 'read') return true;
+    if (['student', 'lecturer', 'subject', 'course', 'room', 'building', 'department', 'program'].includes(r) && a === 'read') return true;
     return false;
   },
   // Student — read their own academic surface only.

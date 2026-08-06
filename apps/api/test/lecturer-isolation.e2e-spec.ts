@@ -87,13 +87,18 @@ describe('Lecturer data isolation (integration, real Postgres)', () => {
   });
 
   describe('students', () => {
-    it("lecturer 1's student list never includes lecturer 2's student", async () => {
-      const res = await http.get('/api/v1/students').set(auth(lecturer1Token)).expect(200);
-      expect(res.body.items.map((s: { id: string }) => s.id)).not.toContain(student2Id);
+    // Reading the roster is deliberately NOT section-scoped: a lecturer needs
+    // to see the full 4-year cohort to find/enroll students and plan groups,
+    // even for students in a section they don't teach. Only sections,
+    // enrollment writes, and assessment/grading stay isolated per-lecturer.
+    it("lecturer 1's student list includes every student in the tenant, including lecturer 2's", async () => {
+      const res = await http.get('/api/v1/students?take=200').set(auth(lecturer1Token)).expect(200);
+      expect(res.body.items.map((s: { id: string }) => s.id)).toContain(student2Id);
     });
 
-    it("lecturer 1 gets 404 fetching lecturer 2's student directly by id (no existence leak)", async () => {
-      await http.get(`/api/v1/students/${student2Id}`).set(auth(lecturer1Token)).expect(404);
+    it("lecturer 1 can fetch lecturer 2's student directly by id", async () => {
+      const res = await http.get(`/api/v1/students/${student2Id}`).set(auth(lecturer1Token)).expect(200);
+      expect(res.body.id).toBe(student2Id);
     });
 
     it("lecturer 2 can fetch their own enrolled student", async () => {

@@ -20,22 +20,20 @@ export class StudentsService {
     private readonly lecturerScope: LecturerScopeService,
   ) {}
 
-  /** Non-admins only ever see students enrolled in a section they teach; resolves to `undefined` (no restriction) for admins. */
-  private async scopedSectionIds(user: AuthenticatedUser): Promise<string[] | undefined> {
-    if (this.lecturerScope.isAdmin(user)) return undefined;
-    const me = await this.lecturerScope.myLecturerId(user);
-    return me ? await this.lecturerScope.sectionIdsFor(me) : [];
-  }
-
+  /**
+   * Reading the roster (list/get) is open to every authenticated role within
+   * the tenant — a lecturer needs to see the full 4-year cohort, not just
+   * students already enrolled in a section they teach, to find/enroll
+   * students and to plan groups. Writes (create/update/delete/promoteYear)
+   * stay admin-only via the `student:create|update|delete` permission grants.
+   */
   async list(user: AuthenticatedUser, query: QueryStudentDto): Promise<Paginated<unknown>> {
-    const sectionIds = await this.scopedSectionIds(user);
-    const { items, total } = await this.repo.findMany(user.universityId, query, sectionIds);
+    const { items, total } = await this.repo.findMany(user.universityId, query, undefined);
     return { total, take: query.take, skip: query.skip, items };
   }
 
   async get(user: AuthenticatedUser, id: string) {
-    const sectionIds = await this.scopedSectionIds(user);
-    const student = await this.repo.findById(user.universityId, id, sectionIds);
+    const student = await this.repo.findById(user.universityId, id, undefined);
     if (!student) throw new NotFoundException('Student not found');
     return student;
   }
