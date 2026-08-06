@@ -228,6 +228,7 @@ body {
   border-radius: 999px;
   font-size: 12px;
   font-weight: 650;
+  white-space: nowrap;
 }
 .chip-danger { background: rgba(226, 86, 77, 0.15); color: var(--danger); }
 .chip-warning { background: rgba(224, 138, 43, 0.16); color: var(--warning); }

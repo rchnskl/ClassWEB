@@ -240,13 +240,13 @@ export default function StudentsPage() {
                   <tr key={s.id} style={{ borderTop: '1px solid var(--glass-hairline)' }}>
                     <Td><span style={{ fontFamily: 'ui-monospace, monospace', fontWeight: 600 }}>{s.studentCode}</span></Td>
                     <Td>
-                      <div style={{ fontWeight: 600 }}>{s.nameEn}</div>
-                      {s.nameTh && <div className="muted" style={{ fontSize: 12.5 }}>{s.nameTh}</div>}
+                      <div style={{ fontWeight: 600, whiteSpace: 'nowrap' }}>{s.nameEn}</div>
+                      {s.nameTh && <div className="muted" style={{ fontSize: 12.5, whiteSpace: 'nowrap' }}>{s.nameTh}</div>}
                     </Td>
                     <Td>{s.nickname || <span className="muted">—</span>}</Td>
                     <Td><span className="chip" style={{ background: 'var(--glass-hairline)', color: 'var(--text-1)' }}>{s.program.code}</span></Td>
                     <Td>{s.admissionYear ?? <span className="muted">—</span>}</Td>
-                    <Td><StatusChip status={s.status} /></Td>
+                    <Td><StatusChip status={s.status} t={t} /></Td>
                     <Td>
                       <div style={{ display: 'inline-flex', gap: 6, flexWrap: 'wrap' }}>
                         <button
@@ -341,7 +341,7 @@ function PagerBtn({ children, disabled, onClick }: { children: React.ReactNode; 
     </button>
   );
 }
-function StatusChip({ status }: { status: string }) {
+function StatusChip({ status, t }: { status: string; t: (key: string) => string }) {
   const cls = status === 'STUDYING' ? 'chip-success' : status === 'GRADUATED' ? 'chip' : 'chip-warning';
-  return <span className={`chip ${cls}`} style={cls === 'chip' ? { background: 'var(--glass-hairline)', color: 'var(--text-1)' } : undefined}>{status.toLowerCase()}</span>;
+  return <span className={`chip ${cls}`} style={cls === 'chip' ? { background: 'var(--glass-hairline)', color: 'var(--text-1)' } : undefined}>{t(`students.status.${status}`)}</span>;
 }

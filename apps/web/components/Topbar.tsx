@@ -34,10 +34,10 @@ export default function Topbar({ email }: { email: string }) {
 
       <div
         className="glass hairline hide-mobile"
-        style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '9px 14px', borderRadius: 14, flex: 1, maxWidth: 420, color: 'var(--text-2)' }}
+        style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '9px 14px', borderRadius: 14, flex: '1 1 180px', minWidth: 0, maxWidth: 420, color: 'var(--text-2)' }}
       >
-        <IconSearch />
-        <span style={{ fontSize: 14 }}>{t('top.search')}</span>
+        <IconSearch style={{ flexShrink: 0 }} />
+        <span style={{ fontSize: 14, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{t('top.search')}</span>
       </div>
 
       <div style={{ flex: 1 }} />

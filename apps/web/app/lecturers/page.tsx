@@ -254,15 +254,15 @@ export default function LecturersPage() {
                       <span className={`chip ${l.isActive ? 'chip-success' : 'chip-danger'}`}>{l.isActive ? t('lecturers.active') : t('lecturers.inactive')}</span>
                     </Td>
                     <Td>
-                      <div style={{ display: 'inline-flex', gap: 6 }}>
-                        <button onClick={() => openEdit(l)} className="glass hairline icon-btn" style={{ padding: '6px 12px', borderRadius: 10, fontSize: 12.5, fontWeight: 600, color: 'var(--text-1)' }}>
+                      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 6 }}>
+                        <button onClick={() => openEdit(l)} className="glass hairline icon-btn" style={{ padding: '6px 12px', borderRadius: 10, fontSize: 12.5, fontWeight: 600, color: 'var(--text-1)', whiteSpace: 'nowrap' }}>
                           ✏️ {t('lecturers.edit')}
                         </button>
                         <button
                           onClick={() => toggleActive(l)}
                           disabled={busyId === l.id}
                           className={l.isActive ? 'btn-danger' : 'glass hairline'}
-                          style={{ padding: '6px 12px', borderRadius: 10, fontSize: 12.5, fontWeight: 600, cursor: busyId === l.id ? 'wait' : 'pointer' }}
+                          style={{ padding: '6px 12px', borderRadius: 10, fontSize: 12.5, fontWeight: 600, cursor: busyId === l.id ? 'wait' : 'pointer', whiteSpace: 'nowrap' }}
                         >
                           {busyId === l.id ? '…' : l.isActive ? t('lecturers.deactivate') : t('lecturers.activate')}
                         </button>
