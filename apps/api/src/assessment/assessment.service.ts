@@ -1,13 +1,18 @@
-import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { AuditAction } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { SaveEvaluationDto, SaveRubricDto, UpdateGradeBandsDto, UpdateRubricWeightsDto, UpdateSubjectRubricsDto } from './dto/assessment.dto';
+import { AuthenticatedUser } from '../common/authenticated-user';
+import { LecturerScopeService } from '../common/lecturer-scope.service';
 
 interface GradeBand { grade: string; gpa: number; label: string; minScore: number }
 
 @Injectable()
 export class AssessmentService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly lecturerScope: LecturerScopeService,
+  ) {}
 
   private rubricInclude = {
     sections: {
@@ -300,7 +305,16 @@ export class AssessmentService {
 
   // ---- evaluations ------------------------------------------------------
 
-  async getEvaluation(universityId: string, rubricId: string, studentId: string, sectionId?: string) {
+  /** Non-admins must grade within a section they teach — no section, no cross-lecturer peeking. */
+  private async assertGradingScope(user: AuthenticatedUser, sectionId?: string) {
+    if (this.lecturerScope.isAdmin(user)) return;
+    if (!sectionId) throw new ForbiddenException('A sectionId is required');
+    await this.lecturerScope.assertTeaches(user, sectionId);
+  }
+
+  async getEvaluation(user: AuthenticatedUser, rubricId: string, studentId: string, sectionId?: string) {
+    const universityId = user.universityId;
+    await this.assertGradingScope(user, sectionId);
     const evaluation = await this.prisma.evaluation.findFirst({
       where: { universityId, rubricId, studentId, sectionId: sectionId ?? null },
       include: { scores: true },
@@ -315,7 +329,10 @@ export class AssessmentService {
     };
   }
 
-  async save(universityId: string, userId: string, userName: string, dto: SaveEvaluationDto) {
+  async save(user: AuthenticatedUser, userName: string, dto: SaveEvaluationDto) {
+    const universityId = user.universityId;
+    const userId = user.id;
+    await this.assertGradingScope(user, dto.sectionId);
     const rubric = await this.getRubric(universityId, dto.rubricId);
     const student = await this.prisma.student.findFirst({ where: { id: dto.studentId, universityId, deletedAt: null }, select: { id: true } });
     if (!student) throw new BadRequestException('Student does not exist in this tenant');
@@ -371,7 +388,9 @@ export class AssessmentService {
   // ---- reports ----------------------------------------------------------
 
   /** Per-student breakdown across the rubrics that apply to this section's subject + weighted total + grade. */
-  async studentSummary(universityId: string, studentId: string, sectionId?: string) {
+  async studentSummary(user: AuthenticatedUser, studentId: string, sectionId?: string) {
+    const universityId = user.universityId;
+    await this.assertGradingScope(user, sectionId);
     const student = await this.prisma.student.findFirst({
       where: { id: studentId, universityId, deletedAt: null },
       select: { studentCode: true, nameEn: true, nameTh: true, program: { select: { code: true } } },
@@ -415,7 +434,9 @@ export class AssessmentService {
   }
 
   /** Per-section table: every enrolled student with total + grade, using the section's subject rubric config. */
-  async sectionSummary(universityId: string, sectionId: string) {
+  async sectionSummary(user: AuthenticatedUser, sectionId: string) {
+    const universityId = user.universityId;
+    await this.lecturerScope.assertTeaches(user, sectionId);
     const section = await this.prisma.section.findFirst({
       where: { id: sectionId, universityId, deletedAt: null },
       select: { subjectId: true, sectionNo: true, subject: { select: { code: true, nameEn: true, nameTh: true } } },

@@ -8,6 +8,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { AnalyticsService } from '../analytics/analytics.service';
 import { AssessmentService } from '../assessment/assessment.service';
 import { FONT_TH, FONT_TH_BOLD, LOGO_FACULTY, LOGO_UNIVERSITY } from './report-assets';
+import { AuthenticatedUser } from '../common/authenticated-user';
 
 const WEB_BASE = process.env.WEB_BASE_URL ?? 'http://localhost:3000';
 
@@ -416,7 +417,8 @@ export class ReportsService {
 
   // ---- Grade reports: per-section grade sheet ----------------------------
 
-  private async gatherSectionGrades(universityId: string, sectionId: string) {
+  private async gatherSectionGrades(user: AuthenticatedUser, sectionId: string) {
+    const universityId = user.universityId;
     const [university, faculty, section] = await Promise.all([
       this.prisma.university.findUnique({ where: { id: universityId }, select: { nameEn: true, nameTh: true } }),
       this.prisma.faculty.findFirst({ where: { universityId, code: 'NURSING' }, select: { nameEn: true, nameTh: true } }),
@@ -429,7 +431,7 @@ export class ReportsService {
 
     const [rubrics, summary, evaluations] = await Promise.all([
       this.assessment.activeRubricsForSubject(universityId, section.subjectId),
-      this.assessment.sectionSummary(universityId, sectionId),
+      this.assessment.sectionSummary(user, sectionId),
       this.prisma.evaluation.findMany({ where: { universityId, sectionId }, select: { studentId: true, rubricId: true, scorePercent: true } }),
     ]);
     const scoreMap = new Map(evaluations.map((e) => [`${e.studentId}:${e.rubricId}`, e.scorePercent]));
@@ -438,8 +440,9 @@ export class ReportsService {
     return { university, faculty, section, rubrics, students };
   }
 
-  async sectionGradesPdf(universityId: string, sectionId: string, byId?: string, byName?: string): Promise<{ buffer: Buffer; reportNumber: string }> {
-    const d = await this.gatherSectionGrades(universityId, sectionId);
+  async sectionGradesPdf(user: AuthenticatedUser, sectionId: string, byId?: string, byName?: string): Promise<{ buffer: Buffer; reportNumber: string }> {
+    const universityId = user.universityId;
+    const d = await this.gatherSectionGrades(user, sectionId);
     const checksum = createHash('sha256').update(JSON.stringify({ sectionId, students: d.students.map((s) => [s.studentId, s.total]) })).digest('hex');
     const reportNumber = await this.register(universityId, 'PDF', checksum, byId, byName, 'SECTION_GRADES', `Grade report — ${d.section.subject.code}`);
     const verifyUrl = `${WEB_BASE}/verify/${reportNumber}`;
@@ -540,8 +543,9 @@ export class ReportsService {
     return { buffer: await done, reportNumber };
   }
 
-  async sectionGradesCsv(universityId: string, sectionId: string, byId?: string, byName?: string): Promise<{ content: string; reportNumber: string }> {
-    const d = await this.gatherSectionGrades(universityId, sectionId);
+  async sectionGradesCsv(user: AuthenticatedUser, sectionId: string, byId?: string, byName?: string): Promise<{ content: string; reportNumber: string }> {
+    const universityId = user.universityId;
+    const d = await this.gatherSectionGrades(user, sectionId);
     const checksum = createHash('sha256').update(JSON.stringify({ sectionId, n: d.students.length })).digest('hex');
     const reportNumber = await this.register(universityId, 'CSV', checksum, byId, byName, 'SECTION_GRADES', `Grade report — ${d.section.subject.code}`);
     const esc = (v: string) => (/[",\n]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v);
@@ -560,8 +564,9 @@ export class ReportsService {
     return { content: '﻿' + rows.map((r) => r.map((c) => esc(String(c))).join(',')).join('\n'), reportNumber };
   }
 
-  async sectionGradesXlsx(universityId: string, sectionId: string, byId?: string, byName?: string): Promise<{ buffer: Buffer; reportNumber: string }> {
-    const d = await this.gatherSectionGrades(universityId, sectionId);
+  async sectionGradesXlsx(user: AuthenticatedUser, sectionId: string, byId?: string, byName?: string): Promise<{ buffer: Buffer; reportNumber: string }> {
+    const universityId = user.universityId;
+    const d = await this.gatherSectionGrades(user, sectionId);
     const checksum = createHash('sha256').update(JSON.stringify({ sectionId, n: d.students.length })).digest('hex');
     const reportNumber = await this.register(universityId, 'XLSX', checksum, byId, byName, 'SECTION_GRADES', `Grade report — ${d.section.subject.code}`);
     const wb = new ExcelJS.Workbook();
@@ -582,12 +587,13 @@ export class ReportsService {
 
   // ---- Grade reports: per-student breakdown -------------------------------
 
-  async studentGradePdf(universityId: string, studentId: string, sectionId: string, byId?: string, byName?: string): Promise<{ buffer: Buffer; reportNumber: string }> {
+  async studentGradePdf(user: AuthenticatedUser, studentId: string, sectionId: string, byId?: string, byName?: string): Promise<{ buffer: Buffer; reportNumber: string }> {
+    const universityId = user.universityId;
     const [university, faculty, section, summary] = await Promise.all([
       this.prisma.university.findUnique({ where: { id: universityId }, select: { nameEn: true, nameTh: true } }),
       this.prisma.faculty.findFirst({ where: { universityId, code: 'NURSING' }, select: { nameEn: true, nameTh: true } }),
       this.prisma.section.findFirst({ where: { id: sectionId, universityId, deletedAt: null }, select: { sectionNo: true, subject: { select: { code: true, nameEn: true, nameTh: true } } } }),
-      this.assessment.studentSummary(universityId, studentId, sectionId),
+      this.assessment.studentSummary(user, studentId, sectionId),
     ]);
     if (!section) throw new NotFoundException('Section not found in this tenant');
 
@@ -673,8 +679,9 @@ export class ReportsService {
     return { buffer: await done, reportNumber };
   }
 
-  async studentGradeCsv(universityId: string, studentId: string, sectionId: string, byId?: string, byName?: string): Promise<{ content: string; reportNumber: string }> {
-    const summary = await this.assessment.studentSummary(universityId, studentId, sectionId);
+  async studentGradeCsv(user: AuthenticatedUser, studentId: string, sectionId: string, byId?: string, byName?: string): Promise<{ content: string; reportNumber: string }> {
+    const universityId = user.universityId;
+    const summary = await this.assessment.studentSummary(user, studentId, sectionId);
     const checksum = createHash('sha256').update(JSON.stringify({ studentId, sectionId, total: summary.total })).digest('hex');
     const reportNumber = await this.register(universityId, 'CSV', checksum, byId, byName, 'STUDENT_GRADE', `Grade report ${summary.student.studentCode}`);
     const esc = (v: string) => (/[",\n]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v);
@@ -691,8 +698,9 @@ export class ReportsService {
     return { content: '﻿' + rows.map((r) => r.map((c) => esc(String(c))).join(',')).join('\n'), reportNumber };
   }
 
-  async studentGradeXlsx(universityId: string, studentId: string, sectionId: string, byId?: string, byName?: string): Promise<{ buffer: Buffer; reportNumber: string }> {
-    const summary = await this.assessment.studentSummary(universityId, studentId, sectionId);
+  async studentGradeXlsx(user: AuthenticatedUser, studentId: string, sectionId: string, byId?: string, byName?: string): Promise<{ buffer: Buffer; reportNumber: string }> {
+    const universityId = user.universityId;
+    const summary = await this.assessment.studentSummary(user, studentId, sectionId);
     const checksum = createHash('sha256').update(JSON.stringify({ studentId, sectionId, total: summary.total })).digest('hex');
     const reportNumber = await this.register(universityId, 'XLSX', checksum, byId, byName, 'STUDENT_GRADE', `Grade report ${summary.student.studentCode}`);
     const wb = new ExcelJS.Workbook();

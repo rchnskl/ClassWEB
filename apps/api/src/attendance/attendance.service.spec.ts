@@ -6,7 +6,7 @@ import { AttendanceService } from './attendance.service';
  * touched by these pure methods, so stub them out entirely.
  */
 describe('AttendanceService (rule engine)', () => {
-  const service = new AttendanceService({} as any, {} as any) as any;
+  const service = new AttendanceService({} as any, {} as any, {} as any) as any;
   const rule = { lateAfterMinutes: 15, autoAbsentAfterMinutes: 60 };
 
   describe('evaluate', () => {

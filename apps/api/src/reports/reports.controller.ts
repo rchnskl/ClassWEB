@@ -85,7 +85,7 @@ export class ReportsController {
   @Permissions('report:export')
   @ApiOperation({ summary: 'Section grade sheet — landscape PDF (per-rubric scores + total + grade for every student)' })
   async sectionGradesPdf(@CurrentUser() user: AuthenticatedUser, @Param('sectionId') sectionId: string, @Res() res: Response) {
-    const { buffer, reportNumber } = await this.reports.sectionGradesPdf(user.universityId, sectionId, user.id, user.email);
+    const { buffer, reportNumber } = await this.reports.sectionGradesPdf(user, sectionId, user.id, user.email);
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', `attachment; filename="${reportNumber}.pdf"`);
     res.send(buffer);
@@ -96,7 +96,7 @@ export class ReportsController {
   @Permissions('report:export')
   @ApiOperation({ summary: 'Section grade sheet — CSV' })
   async sectionGradesCsv(@CurrentUser() user: AuthenticatedUser, @Param('sectionId') sectionId: string, @Res() res: Response) {
-    const { content, reportNumber } = await this.reports.sectionGradesCsv(user.universityId, sectionId, user.id, user.email);
+    const { content, reportNumber } = await this.reports.sectionGradesCsv(user, sectionId, user.id, user.email);
     res.setHeader('Content-Type', 'text/csv; charset=utf-8');
     res.setHeader('Content-Disposition', `attachment; filename="${reportNumber}.csv"`);
     res.send(content);
@@ -107,7 +107,7 @@ export class ReportsController {
   @Permissions('report:export')
   @ApiOperation({ summary: 'Section grade sheet — Excel' })
   async sectionGradesXlsx(@CurrentUser() user: AuthenticatedUser, @Param('sectionId') sectionId: string, @Res() res: Response) {
-    const { buffer, reportNumber } = await this.reports.sectionGradesXlsx(user.universityId, sectionId, user.id, user.email);
+    const { buffer, reportNumber } = await this.reports.sectionGradesXlsx(user, sectionId, user.id, user.email);
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
     res.setHeader('Content-Disposition', `attachment; filename="${reportNumber}.xlsx"`);
     res.send(buffer);
@@ -121,7 +121,7 @@ export class ReportsController {
   @ApiOperation({ summary: 'Individual student grade report — PDF (rubric breakdown + total + grade, signature, QR verify)' })
   async studentGradePdf(@CurrentUser() user: AuthenticatedUser, @Param('studentId') studentId: string, @Query('sectionId') sectionId: string, @Res() res: Response) {
     if (!sectionId) throw new BadRequestException('sectionId is required');
-    const { buffer, reportNumber } = await this.reports.studentGradePdf(user.universityId, studentId, sectionId, user.id, user.email);
+    const { buffer, reportNumber } = await this.reports.studentGradePdf(user, studentId, sectionId, user.id, user.email);
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', `attachment; filename="${reportNumber}.pdf"`);
     res.send(buffer);
@@ -133,7 +133,7 @@ export class ReportsController {
   @ApiOperation({ summary: 'Individual student grade report — CSV' })
   async studentGradeCsv(@CurrentUser() user: AuthenticatedUser, @Param('studentId') studentId: string, @Query('sectionId') sectionId: string, @Res() res: Response) {
     if (!sectionId) throw new BadRequestException('sectionId is required');
-    const { content, reportNumber } = await this.reports.studentGradeCsv(user.universityId, studentId, sectionId, user.id, user.email);
+    const { content, reportNumber } = await this.reports.studentGradeCsv(user, studentId, sectionId, user.id, user.email);
     res.setHeader('Content-Type', 'text/csv; charset=utf-8');
     res.setHeader('Content-Disposition', `attachment; filename="${reportNumber}.csv"`);
     res.send(content);
@@ -145,7 +145,7 @@ export class ReportsController {
   @ApiOperation({ summary: 'Individual student grade report — Excel' })
   async studentGradeXlsx(@CurrentUser() user: AuthenticatedUser, @Param('studentId') studentId: string, @Query('sectionId') sectionId: string, @Res() res: Response) {
     if (!sectionId) throw new BadRequestException('sectionId is required');
-    const { buffer, reportNumber } = await this.reports.studentGradeXlsx(user.universityId, studentId, sectionId, user.id, user.email);
+    const { buffer, reportNumber } = await this.reports.studentGradeXlsx(user, studentId, sectionId, user.id, user.email);
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
     res.setHeader('Content-Disposition', `attachment; filename="${reportNumber}.xlsx"`);
     res.send(buffer);

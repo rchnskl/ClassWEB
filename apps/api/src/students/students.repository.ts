@@ -29,7 +29,7 @@ export class StudentsRepository {
     program: { select: { id: true, code: true, nameEn: true } },
   } satisfies Prisma.StudentSelect;
 
-  private buildWhere(universityId: string, query: QueryStudentDto): Prisma.StudentWhereInput {
+  private buildWhere(universityId: string, query: QueryStudentDto, sectionIds?: string[]): Prisma.StudentWhereInput {
     const where: Prisma.StudentWhereInput = { universityId, deletedAt: null };
     if (query.programId) where.programId = query.programId;
     if (query.status) where.status = query.status;
@@ -41,11 +41,14 @@ export class StudentsRepository {
         { nickname: { contains: query.search, mode: 'insensitive' } },
       ];
     }
+    // Non-admin callers pass their taught section ids here to restrict the
+    // result to students actually enrolled in a section they teach.
+    if (sectionIds) where.enrollments = { some: { sectionId: { in: sectionIds } } };
     return where;
   }
 
-  async findMany(universityId: string, query: QueryStudentDto) {
-    const where = this.buildWhere(universityId, query);
+  async findMany(universityId: string, query: QueryStudentDto, sectionIds?: string[]) {
+    const where = this.buildWhere(universityId, query, sectionIds);
     const [items, total] = await this.prisma.$transaction([
       this.prisma.student.findMany({
         where,
@@ -59,9 +62,12 @@ export class StudentsRepository {
     return { items, total };
   }
 
-  findById(universityId: string, id: string) {
+  findById(universityId: string, id: string, sectionIds?: string[]) {
     return this.prisma.student.findFirst({
-      where: { id, universityId, deletedAt: null },
+      where: {
+        id, universityId, deletedAt: null,
+        ...(sectionIds ? { enrollments: { some: { sectionId: { in: sectionIds } } } } : {}),
+      },
       select: this.selection,
     });
   }

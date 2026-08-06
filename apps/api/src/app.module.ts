@@ -6,6 +6,7 @@ import { ScheduleModule } from '@nestjs/schedule';
 import configuration from './config/configuration';
 import { validateEnv } from './config/env.validation';
 import { PrismaModule } from './prisma/prisma.module';
+import { LecturerScopeModule } from './common/lecturer-scope.module';
 import { AuthModule } from './auth/auth.module';
 import { UsersModule } from './users/users.module';
 import { DashboardModule } from './dashboard/dashboard.module';
@@ -44,6 +45,7 @@ import { AllExceptionsFilter } from './common/filters/all-exceptions.filter';
     ThrottlerModule.forRoot([{ ttl: 60_000, limit: 100 }]),
     ScheduleModule.forRoot(),
     PrismaModule,
+    LecturerScopeModule,
     AuthModule,
     UsersModule,
     DashboardModule,

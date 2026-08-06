@@ -16,13 +16,13 @@ export class SectionsController {
   @Permissions('section:read')
   @ApiOperation({ summary: 'List sections with subject/lecturer/room/enrolment (tenant-scoped)' })
   list(@CurrentUser() user: AuthenticatedUser, @Query() query: QuerySectionDto) {
-    return this.sections.list(user.universityId, query);
+    return this.sections.list(user, query);
   }
 
   @Get(':id')
   @Permissions('section:read')
   get(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string) {
-    return this.sections.get(user.universityId, id);
+    return this.sections.get(user, id);
   }
 
   @Post()

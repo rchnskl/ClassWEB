@@ -97,27 +97,27 @@ export class AssessmentController {
     @Query('studentId') studentId: string,
     @Query('sectionId') sectionId?: string,
   ) {
-    return this.assessment.getEvaluation(user.universityId, rubricId, studentId, sectionId);
+    return this.assessment.getEvaluation(user, rubricId, studentId, sectionId);
   }
 
   @Post('evaluation')
   @Permissions('assessment:create')
   @ApiOperation({ summary: 'Save an evaluation (rate items 1–5); computes the rubric score' })
   save(@CurrentUser() user: AuthenticatedUser, @Body() dto: SaveEvaluationDto) {
-    return this.assessment.save(user.universityId, user.id, user.email, dto);
+    return this.assessment.save(user, user.email, dto);
   }
 
   @Get('students/:studentId/summary')
   @Permissions('assessment:read')
   @ApiOperation({ summary: 'Per-student breakdown across rubrics + total + grade' })
   studentSummary(@CurrentUser() user: AuthenticatedUser, @Param('studentId') studentId: string, @Query('sectionId') sectionId?: string) {
-    return this.assessment.studentSummary(user.universityId, studentId, sectionId);
+    return this.assessment.studentSummary(user, studentId, sectionId);
   }
 
   @Get('sections/:sectionId/summary')
   @Permissions('assessment:read')
   @ApiOperation({ summary: 'Per-section grade sheet: every student with total + grade' })
   sectionSummary(@CurrentUser() user: AuthenticatedUser, @Param('sectionId') sectionId: string) {
-    return this.assessment.sectionSummary(user.universityId, sectionId);
+    return this.assessment.sectionSummary(user, sectionId);
   }
 }

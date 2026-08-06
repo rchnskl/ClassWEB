@@ -8,7 +8,7 @@ import { AssessmentService } from './assessment.service';
 describe('AssessmentService (pure scoring logic)', () => {
   // scoreRubric/gradeFor are private; tests call them via a typed cast,
   // same technique used elsewhere in this codebase for direct verification.
-  const service = new AssessmentService({} as any) as any;
+  const service = new AssessmentService({} as any, {} as any) as any;
 
   function rubric(sections: { weightPercent: number; items: { id: string; weightPercent: number; maxRating: number; isCritical?: boolean }[] }[]) {
     return { sections };

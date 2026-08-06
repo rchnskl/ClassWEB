@@ -4,10 +4,14 @@ import { PrismaService } from '../prisma/prisma.service';
 import { CreateSectionDto, QuerySectionDto, UpdateSectionDto } from './dto/section.dto';
 import { Paginated } from '../common/dto/pagination.dto';
 import { AuthenticatedUser } from '../common/authenticated-user';
+import { LecturerScopeService } from '../common/lecturer-scope.service';
 
 @Injectable()
 export class SectionsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly lecturerScope: LecturerScopeService,
+  ) {}
 
   private select = {
     id: true, sectionNo: true, capacity: true, currentEnrollment: true, isActive: true,
@@ -18,7 +22,8 @@ export class SectionsService {
     _count: { select: { enrollments: true } },
   } satisfies Prisma.SectionSelect;
 
-  async list(universityId: string, query: QuerySectionDto): Promise<Paginated<unknown>> {
+  async list(actingUser: AuthenticatedUser, query: QuerySectionDto): Promise<Paginated<unknown>> {
+    const universityId = actingUser.universityId;
     const where: Prisma.SectionWhereInput = {
       universityId, deletedAt: null,
       ...(query.semesterId ? { semesterId: query.semesterId } : {}),
@@ -31,6 +36,11 @@ export class SectionsService {
           ] } }
         : {}),
     };
+    if (!this.lecturerScope.isAdmin(actingUser)) {
+      const me = await this.lecturerScope.myLecturerId(actingUser);
+      const sectionIds = me ? await this.lecturerScope.sectionIdsFor(me) : [];
+      where.id = { in: sectionIds };
+    }
     const [items, total] = await this.prisma.$transaction([
       this.prisma.section.findMany({ where, select: this.select, orderBy: [{ subject: { code: 'asc' } }, { sectionNo: 'asc' }], take: query.take, skip: query.skip }),
       this.prisma.section.count({ where }),
@@ -38,12 +48,19 @@ export class SectionsService {
     return { total, take: query.take, skip: query.skip, items };
   }
 
-  async get(universityId: string, id: string) {
+  async get(actingUser: AuthenticatedUser, id: string) {
+    const universityId = actingUser.universityId;
     const section = await this.prisma.section.findFirst({
       where: { id, universityId, deletedAt: null },
       select: this.select,
     });
     if (!section) throw new NotFoundException('Section not found');
+    if (!this.lecturerScope.isAdmin(actingUser)) {
+      const me = await this.lecturerScope.myLecturerId(actingUser);
+      if (!me || !(await this.lecturerScope.teachesSection(me, id))) {
+        throw new ForbiddenException('You can only view sections you teach');
+      }
+    }
     return section;
   }
 

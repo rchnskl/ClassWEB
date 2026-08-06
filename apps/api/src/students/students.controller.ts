@@ -18,14 +18,14 @@ export class StudentsController {
   @Permissions('student:read')
   @ApiOperation({ summary: 'List students (tenant-scoped, searchable, paginated)' })
   list(@CurrentUser() user: AuthenticatedUser, @Query() query: QueryStudentDto) {
-    return this.students.list(user.universityId, query);
+    return this.students.list(user, query);
   }
 
   @Get(':id')
   @Permissions('student:read')
   @ApiOperation({ summary: 'Get a student by id' })
   get(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string) {
-    return this.students.get(user.universityId, id);
+    return this.students.get(user, id);
   }
 
   @Post()

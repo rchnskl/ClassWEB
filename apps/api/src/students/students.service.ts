@@ -5,6 +5,8 @@ import { CreateStudentDto } from './dto/create-student.dto';
 import { UpdateStudentDto } from './dto/update-student.dto';
 import { QueryStudentDto } from './dto/query-student.dto';
 import { Paginated } from '../common/dto/pagination.dto';
+import { AuthenticatedUser } from '../common/authenticated-user';
+import { LecturerScopeService } from '../common/lecturer-scope.service';
 
 /**
  * Business rules for students: tenant integrity, unique student code, and the
@@ -12,15 +14,27 @@ import { Paginated } from '../common/dto/pagination.dto';
  */
 @Injectable()
 export class StudentsService {
-  constructor(private readonly repo: StudentsRepository) {}
+  constructor(
+    private readonly repo: StudentsRepository,
+    private readonly lecturerScope: LecturerScopeService,
+  ) {}
 
-  async list(universityId: string, query: QueryStudentDto): Promise<Paginated<unknown>> {
-    const { items, total } = await this.repo.findMany(universityId, query);
+  /** Non-admins only ever see students enrolled in a section they teach; resolves to `undefined` (no restriction) for admins. */
+  private async scopedSectionIds(user: AuthenticatedUser): Promise<string[] | undefined> {
+    if (this.lecturerScope.isAdmin(user)) return undefined;
+    const me = await this.lecturerScope.myLecturerId(user);
+    return me ? await this.lecturerScope.sectionIdsFor(me) : [];
+  }
+
+  async list(user: AuthenticatedUser, query: QueryStudentDto): Promise<Paginated<unknown>> {
+    const sectionIds = await this.scopedSectionIds(user);
+    const { items, total } = await this.repo.findMany(user.universityId, query, sectionIds);
     return { total, take: query.take, skip: query.skip, items };
   }
 
-  async get(universityId: string, id: string) {
-    const student = await this.repo.findById(universityId, id);
+  async get(user: AuthenticatedUser, id: string) {
+    const sectionIds = await this.scopedSectionIds(user);
+    const student = await this.repo.findById(user.universityId, id, sectionIds);
     if (!student) throw new NotFoundException('Student not found');
     return student;
   }
@@ -52,7 +66,7 @@ export class StudentsService {
   }
 
   async update(universityId: string, id: string, dto: UpdateStudentDto) {
-    await this.get(universityId, id); // ensures existence + tenant ownership
+    await this.assertExists(universityId, id); // ensures existence + tenant ownership
     if (dto.programId) await this.assertProgram(universityId, dto.programId);
     if (dto.studentCode) {
       const clash = await this.repo.findByCode(universityId, dto.studentCode);
@@ -80,9 +94,16 @@ export class StudentsService {
   }
 
   async remove(universityId: string, id: string) {
-    await this.get(universityId, id);
+    await this.assertExists(universityId, id);
     await this.repo.softDelete(id);
     return { id, deleted: true };
+  }
+
+  /** Admin-only paths (create/update/delete): existence + tenant ownership, no lecturer-section scoping. */
+  private async assertExists(universityId: string, id: string) {
+    const student = await this.repo.findById(universityId, id);
+    if (!student) throw new NotFoundException('Student not found');
+    return student;
   }
 
   private async assertProgram(universityId: string, programId: string) {

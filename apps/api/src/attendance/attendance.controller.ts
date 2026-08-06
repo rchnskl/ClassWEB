@@ -20,7 +20,7 @@ export class AttendanceController {
   @Permissions('attendance:create')
   @ApiOperation({ summary: 'Open attendance for a class session and mint a QR token' })
   open(@CurrentUser() user: AuthenticatedUser, @Param('classSessionId') id: string) {
-    return this.attendance.open(user.universityId, user.id, id);
+    return this.attendance.open(user, id);
   }
 
   @Post('sessions/:classSessionId/close')
@@ -28,7 +28,7 @@ export class AttendanceController {
   @Permissions('attendance:update')
   @ApiOperation({ summary: 'Close attendance for a class session' })
   close(@CurrentUser() user: AuthenticatedUser, @Param('classSessionId') id: string) {
-    return this.attendance.close(user.universityId, id);
+    return this.attendance.close(user, id);
   }
 
   @Get('sessions/:classSessionId')
@@ -36,7 +36,7 @@ export class AttendanceController {
   @Permissions('attendance:read')
   @ApiOperation({ summary: 'Attendance state: roster, counts, open token, pending check-ins' })
   state(@CurrentUser() user: AuthenticatedUser, @Param('classSessionId') id: string) {
-    return this.attendance.state(user.universityId, id);
+    return this.attendance.state(user, id);
   }
 
   @Post('records')
@@ -44,7 +44,7 @@ export class AttendanceController {
   @Permissions('attendance:update')
   @ApiOperation({ summary: 'Manually mark a student present/late/absent' })
   manual(@CurrentUser() user: AuthenticatedUser, @Body() dto: ManualMarkDto) {
-    return this.attendance.manualMark(user.universityId, user.id, dto);
+    return this.attendance.manualMark(user, dto);
   }
 
   @Post('checkins/:id/resolve')
@@ -52,7 +52,7 @@ export class AttendanceController {
   @Permissions('attendance:update')
   @ApiOperation({ summary: 'Resolve a pending check-in with a reason' })
   resolve(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string, @Body() dto: ResolveCheckInDto) {
-    return this.attendance.resolve(user.universityId, user.id, id, dto);
+    return this.attendance.resolve(user, id, dto);
   }
 
   // ---- student self check-in (public, authorised by the QR token) ------

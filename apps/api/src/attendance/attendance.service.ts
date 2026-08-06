@@ -4,6 +4,8 @@ import { AttendanceStatus, AuditAction } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { ManualMarkDto, ResolveCheckInDto } from './dto/attendance.dto';
+import { AuthenticatedUser } from '../common/authenticated-user';
+import { LecturerScopeService } from '../common/lecturer-scope.service';
 
 interface RuleConfig {
   lateAfterMinutes: number;
@@ -15,6 +17,7 @@ export class AttendanceService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly notifications: NotificationsService,
+    private readonly lecturerScope: LecturerScopeService,
   ) {}
 
   // --- helpers -----------------------------------------------------------
@@ -66,9 +69,12 @@ export class AttendanceService {
 
   // --- lecturer: open / close / state -----------------------------------
 
-  async open(universityId: string, userId: string, classSessionId: string) {
+  async open(user: AuthenticatedUser, classSessionId: string) {
+    const universityId = user.universityId;
+    const userId = user.id;
     // Validates the session exists / belongs to this tenant (throws if not).
-    await this.loadSession(universityId, classSessionId);
+    const session = await this.loadSession(universityId, classSessionId);
+    await this.lecturerScope.assertTeaches(user, session.section.id);
     // Reuse an existing open, unexpired window if present.
     const existing = await this.prisma.attendanceSession.findFirst({
       where: { classSessionId, isOpen: true, expiresAt: { gt: new Date() } },
@@ -87,8 +93,10 @@ export class AttendanceService {
     return { token: created.token, expiresAt: created.expiresAt, sessionId: created.id };
   }
 
-  async close(universityId: string, classSessionId: string) {
-    await this.loadSession(universityId, classSessionId);
+  async close(user: AuthenticatedUser, classSessionId: string) {
+    const universityId = user.universityId;
+    const session = await this.loadSession(universityId, classSessionId);
+    await this.lecturerScope.assertTeaches(user, session.section.id);
     await this.prisma.attendanceSession.updateMany({
       where: { classSessionId, isOpen: true },
       data: { isOpen: false, closedAt: new Date() },
@@ -96,8 +104,10 @@ export class AttendanceService {
     return { closed: true };
   }
 
-  async state(universityId: string, classSessionId: string) {
+  async state(user: AuthenticatedUser, classSessionId: string) {
+    const universityId = user.universityId;
     const session = await this.loadSession(universityId, classSessionId);
+    await this.lecturerScope.assertTeaches(user, session.section.id);
     const openWindow = await this.prisma.attendanceSession.findFirst({
       where: { classSessionId, isOpen: true, expiresAt: { gt: new Date() } },
       select: { id: true, token: true, expiresAt: true },
@@ -152,8 +162,11 @@ export class AttendanceService {
 
   // --- lecturer: manual mark --------------------------------------------
 
-  async manualMark(universityId: string, userId: string, dto: ManualMarkDto) {
+  async manualMark(user: AuthenticatedUser, dto: ManualMarkDto) {
+    const universityId = user.universityId;
+    const userId = user.id;
     const session = await this.loadSession(universityId, dto.classSessionId);
+    await this.lecturerScope.assertTeaches(user, session.section.id);
     const enrollment = await this.prisma.enrollment.findFirst({
       where: { sectionId: session.section.id, studentId: dto.studentId, status: 'ENROLLED' },
       select: { id: true },
@@ -272,16 +285,19 @@ export class AttendanceService {
 
   // --- lecturer: resolve a pending check-in -----------------------------
 
-  async resolve(universityId: string, userId: string, checkInId: string, dto: ResolveCheckInDto) {
+  async resolve(user: AuthenticatedUser, checkInId: string, dto: ResolveCheckInDto) {
+    const universityId = user.universityId;
+    const userId = user.id;
     // Verify the check-in belongs to the caller's tenant via its session → section.
     const ci = await this.prisma.attendanceCheckIn.findFirst({
       where: {
         id: checkInId,
         attendanceSession: { classSession: { section: { universityId } } },
       },
-      select: { id: true },
+      select: { id: true, attendanceSession: { select: { classSession: { select: { section: { select: { id: true } } } } } } },
     });
     if (!ci) throw new NotFoundException('Check-in not found');
+    await this.lecturerScope.assertTeaches(user, ci.attendanceSession.classSession.section.id);
 
     const updated = await this.prisma.attendanceCheckIn.update({
       where: { id: checkInId },
