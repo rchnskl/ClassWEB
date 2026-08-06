@@ -4,11 +4,12 @@ import { use, useEffect, useState } from 'react';
 import Logo from '@/components/Logo';
 import ThemeToggle from '@/components/ThemeToggle';
 import LanguageToggle from '@/components/LanguageToggle';
-import { apiFetch } from '@/lib/api';
+import { API_BASE, apiFetch } from '@/lib/api';
 import { useI18n } from '@/lib/i18n';
 
 interface VerifyResult {
   valid: boolean;
+  hasFile: boolean;
   reportNumber: string;
   title: string;
   format: string;
@@ -32,13 +33,15 @@ export default function VerifyPage({ params }: { params: Promise<{ reportNumber:
       .finally(() => setLoading(false));
   }, [reportNumber]);
 
+  const fileUrl = `${API_BASE}/reports/file/${reportNumber}`;
+
   return (
-    <main style={{ minHeight: '100vh', display: 'grid', placeItems: 'center', padding: 20 }}>
-      <div style={{ position: 'fixed', top: 20, right: 20, display: 'flex', gap: 10 }}>
+    <main style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '20px 16px 40px', gap: 20 }}>
+      <div style={{ position: 'fixed', top: 20, right: 20, display: 'flex', gap: 10, zIndex: 10 }}>
         <LanguageToggle /><ThemeToggle />
       </div>
 
-      <div className="glass glass-strong rise" style={{ width: '100%', maxWidth: 440, padding: 32, textAlign: 'center' }}>
+      <div className="glass glass-strong rise" style={{ width: '100%', maxWidth: result?.hasFile ? 760 : 440, padding: 32, textAlign: 'center', marginTop: 8 }}>
         <Logo size={54} float />
         <h1 style={{ fontSize: 19, fontWeight: 750, margin: '12px 0 18px' }}>{t('verify.title')}</h1>
 
@@ -56,13 +59,33 @@ export default function VerifyPage({ params }: { params: Promise<{ reportNumber:
               <div style={{ fontSize: 36 }}>✅</div>
               {t('verify.valid')}
             </div>
-            <div style={{ textAlign: 'left', display: 'flex', flexDirection: 'column', gap: 10 }}>
+            <div style={{ textAlign: 'left', display: 'flex', flexDirection: 'column', gap: 10, marginBottom: result.hasFile ? 20 : 0 }}>
               <Row label={t('verify.reportNo')} value={result.reportNumber} mono />
               <Row label="University" value={lang === 'th' ? result.university.nameTh ?? result.university.nameEn : result.university.nameEn} />
               <Row label={t('verify.generatedBy')} value={result.generatedByName ?? '—'} />
               <Row label={t('verify.generatedAt')} value={new Intl.DateTimeFormat(lang === 'th' ? 'th-TH' : 'en-GB', { dateStyle: 'long', timeStyle: 'short' }).format(new Date(result.createdAt))} />
               {result.checksum && <Row label={t('verify.checksum')} value={result.checksum.slice(0, 24) + '…'} mono />}
             </div>
+
+            {result.hasFile ? (
+              <div style={{ textAlign: 'left' }}>
+                <div className="muted" style={{ fontSize: 12, fontWeight: 600, marginBottom: 8 }}>{t('verify.document')}</div>
+                <div className="hairline" style={{ borderRadius: 14, overflow: 'hidden', border: '1px solid var(--glass-hairline)' }}>
+                  <iframe src={fileUrl} title={result.title} style={{ width: '100%', height: '70vh', minHeight: 420, border: 'none', display: 'block' }} />
+                </div>
+                <a
+                  href={fileUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="btn-primary"
+                  style={{ display: 'inline-block', marginTop: 14, padding: '11px 20px', fontSize: 14, textDecoration: 'none' }}
+                >
+                  ⬇ {t('verify.downloadFile')}
+                </a>
+              </div>
+            ) : (
+              <p className="muted" style={{ fontSize: 12.5, marginTop: 4 }}>{t('verify.noFile')}</p>
+            )}
           </>
         )}
       </div>

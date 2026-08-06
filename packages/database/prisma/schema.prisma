@@ -1389,6 +1389,12 @@ model Report {
   generatedById   String?
   generatedByName String?
   createdAt       DateTime     @default(now())
+  /// The exact generated file (PDF only, watermarked). Scanning a report's QR
+  /// opens this file directly rather than a bare "yes it's valid" page — a
+  /// page that only confirms authenticity without showing the document is
+  /// not something anyone can actually check against.
+  content         Bytes?
+  contentType     String?
 
   university University @relation(fields: [universityId], references: [id])
 

@@ -157,4 +157,14 @@ export class ReportsController {
   verify(@Param('reportNumber') reportNumber: string) {
     return this.reports.verify(reportNumber);
   }
+
+  @Public()
+  @Get('file/:reportNumber')
+  @ApiOperation({ summary: 'The actual generated file behind a report — what the QR code opens' })
+  async file(@Param('reportNumber') reportNumber: string, @Res() res: Response) {
+    const { content, contentType } = await this.reports.file(reportNumber);
+    res.setHeader('Content-Type', contentType);
+    res.setHeader('Content-Disposition', `inline; filename="${reportNumber}.pdf"`);
+    res.send(content);
+  }
 }
