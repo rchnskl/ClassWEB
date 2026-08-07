@@ -120,12 +120,17 @@ export class ReportsService {
    */
   private watermark(doc: PDFKit.PDFDocument, font: string) {
     const text = 'สำหรับตรวจสอบและใช้ภายในคณะฯ เท่านั้น · FOR VERIFICATION / FACULTY-INTERNAL USE ONLY';
+    const fontSize = 13;
     const { width, height } = doc.page;
     doc.save();
     doc.rotate(-30, { origin: [width / 2, height / 2] });
-    doc.font(font).fontSize(11).fillColor('#0e2a4a', 0.06);
-    const stepX = 260;
-    const stepY = 70;
+    doc.font(font).fontSize(fontSize).fillColor('#0e2a4a', 0.09);
+    // Tile spacing was a fixed 260px guess against a ~90-character string — far
+    // narrower than the text itself, so consecutive tiles overwrote each other
+    // into an unreadable smear. Measure the real width and pad from that instead.
+    const textWidth = doc.widthOfString(text);
+    const stepX = textWidth + 90;
+    const stepY = fontSize * 6.5;
     for (let y = -height; y < height * 2; y += stepY) {
       for (let x = -width; x < width * 2; x += stepX) {
         doc.text(text, x, y, { lineBreak: false });
@@ -180,16 +185,20 @@ export class ReportsService {
     const pageW = doc.page.width;
     const left = 40; const right = pageW - 40;
 
-    // Header: logos + titles
+    // Header: logos + titles. QR lives up here (not near the signature at the
+    // bottom) so a long at-risk table pushing content onto extra pages can
+    // never separate the QR from page 1.
     const uniLogo = LOGO_UNIVERSITY(); const facLogo = LOGO_FACULTY();
     if (uniLogo) doc.image(uniLogo, left, 38, { width: 54 });
-    if (facLogo) doc.image(facLogo, right - 54, 36, { width: 54 });
+    doc.image(qrPng, right - 46, 36, { width: 46 });
+    doc.font(F).fontSize(7).fillColor('#7c8798').text(L(lang, 'สแกนตรวจสอบ', 'Scan to verify'), right - 60, 84, { width: 74, align: 'center', lineBreak: false });
+    if (facLogo) doc.image(facLogo, right - 108, 36, { width: 54 });
     doc.font(FB).fontSize(20).fillColor('#26303f')
-      .text((lang === 'en' ? university?.nameEn : university?.nameTh) ?? university?.nameEn ?? 'University', 100, 42, { width: pageW - 200, align: 'center' });
+      .text((lang === 'en' ? university?.nameEn : university?.nameTh) ?? university?.nameEn ?? 'University', 100, 42, { width: pageW - 240, align: 'center' });
     doc.font(FB).fontSize(17).fillColor('#0e2a4a')
-      .text((lang === 'en' ? faculty?.nameEn : faculty?.nameTh) ?? faculty?.nameEn ?? 'Faculty of Nursing', 100, 68, { width: pageW - 200, align: 'center' });
+      .text((lang === 'en' ? faculty?.nameEn : faculty?.nameTh) ?? faculty?.nameEn ?? 'Faculty of Nursing', 100, 68, { width: pageW - 240, align: 'center' });
     doc.font(F).fontSize(15).fillColor('#4a5666')
-      .text(L(lang, 'รายงานสรุปการเข้าเรียน', 'Attendance Summary Report'), 100, 92, { width: pageW - 200, align: 'center' });
+      .text(L(lang, 'รายงานสรุปการเข้าเรียน', 'Attendance Summary Report'), 100, 92, { width: pageW - 240, align: 'center' });
 
     doc.moveTo(left, 122).lineTo(right, 122).strokeColor('#ff8a4c').lineWidth(2).stroke();
 
@@ -243,16 +252,14 @@ export class ReportsService {
       });
     }
 
-    // Signature + QR at the bottom (fixed positions; lineBreak:false avoids
-    // accidental pagination when text sits near the bottom margin).
-    const footY = doc.page.height - 168;
-    doc.image(qrPng, left, footY, { width: 80 });
-    doc.font(F).fontSize(10).fillColor('#7c8798')
-      .text(L(lang, 'สแกนเพื่อตรวจสอบ', 'Scan to verify'), left - 15, footY + 82, { width: 110, align: 'center', lineBreak: false });
+    // Signature — centered; QR moved to the header so this block no longer
+    // needs to share the footer with it (lineBreak:false avoids accidental
+    // pagination when text sits near the bottom margin).
+    const footY = doc.page.height - 120;
     doc.font(F).fontSize(14).fillColor('#26303f');
-    doc.text('.................................................', right - 220, footY + 30, { width: 220, align: 'center', lineBreak: false });
-    doc.text(L(lang, 'ผู้รับรอง', 'Authorised signature'), right - 220, footY + 50, { width: 220, align: 'center', lineBreak: false });
-    if (byName) doc.text(`(${byName})`, right - 220, footY + 68, { width: 220, align: 'center', lineBreak: false });
+    doc.text('.................................................', left, footY, { width: right - left, align: 'center', lineBreak: false });
+    doc.text(L(lang, 'ผู้รับรอง', 'Authorised signature'), left, footY + 20, { width: right - left, align: 'center', lineBreak: false });
+    if (byName) doc.font(F).fontSize(11).text(`(${byName})`, left, footY + 40, { width: right - left, align: 'center', lineBreak: false });
 
     // Footer line (kept above the bottom margin to avoid an extra page)
     doc.font(F).fontSize(9).fillColor('#a0aab8')
@@ -375,13 +382,17 @@ export class ReportsService {
     const F = th ? 'TH' : 'Helvetica'; const FB = thBold ? 'THB' : 'Helvetica-Bold';
     const pageW = doc.page.width; const left = 40; const right = pageW - 40;
 
-    // Header
+    // Header. QR sits up here rather than after the (variable-length) session
+    // log, so it's always on page 1 regardless of how many terms of history
+    // this student has.
     const uniLogo = LOGO_UNIVERSITY(); const facLogo = LOGO_FACULTY();
     if (uniLogo) doc.image(uniLogo, left, 38, { width: 50 });
-    if (facLogo) doc.image(facLogo, right - 50, 36, { width: 50 });
-    doc.font(FB).fontSize(18).fillColor('#26303f').text((lang === 'en' ? d.university?.nameEn : d.university?.nameTh) ?? 'University', 100, 44, { width: pageW - 200, align: 'center' });
-    doc.font(FB).fontSize(15).fillColor('#0e2a4a').text((lang === 'en' ? d.faculty?.nameEn : d.faculty?.nameTh) ?? 'Faculty of Nursing', 100, 66, { width: pageW - 200, align: 'center' });
-    doc.font(F).fontSize(14).fillColor('#4a5666').text(L(lang, 'รายงานการเข้าเรียนรายบุคคล', 'Individual Attendance Report'), 100, 86, { width: pageW - 200, align: 'center' });
+    doc.image(qrPng, right - 44, 36, { width: 44 });
+    doc.font(F).fontSize(7).fillColor('#7c8798').text(L(lang, 'สแกนตรวจสอบ', 'Scan to verify'), right - 58, 82, { width: 72, align: 'center', lineBreak: false });
+    if (facLogo) doc.image(facLogo, right - 102, 36, { width: 50 });
+    doc.font(FB).fontSize(18).fillColor('#26303f').text((lang === 'en' ? d.university?.nameEn : d.university?.nameTh) ?? 'University', 100, 44, { width: pageW - 230, align: 'center' });
+    doc.font(FB).fontSize(15).fillColor('#0e2a4a').text((lang === 'en' ? d.faculty?.nameEn : d.faculty?.nameTh) ?? 'Faculty of Nursing', 100, 66, { width: pageW - 230, align: 'center' });
+    doc.font(F).fontSize(14).fillColor('#4a5666').text(L(lang, 'รายงานการเข้าเรียนรายบุคคล', 'Individual Attendance Report'), 100, 86, { width: pageW - 230, align: 'center' });
     doc.moveTo(left, 112).lineTo(right, 112).strokeColor('#ff8a4c').lineWidth(2).stroke();
 
     // Student info + summary box
@@ -443,14 +454,13 @@ export class ReportsService {
       y += 18;
     });
 
-    // Signature + QR (flow after content)
-    if (y > doc.page.height - 170) { doc.addPage(); y = 60; }
+    // Signature (flow after content) — centered now that the QR lives in the header.
+    if (y > doc.page.height - 110) { doc.addPage(); y = 60; }
     const sy = y + 20;
-    doc.image(qrPng, left, sy, { width: 78 });
-    doc.font(F).fontSize(10).fillColor('#7c8798').text(L(lang, 'สแกนเพื่อตรวจสอบ', 'Scan to verify'), left - 15, sy + 80, { width: 108, align: 'center', lineBreak: false });
     doc.font(F).fontSize(13).fillColor('#26303f');
-    doc.text('.................................................', right - 220, sy + 28, { width: 220, align: 'center', lineBreak: false });
-    doc.text(L(lang, 'ผู้รับรอง', 'Authorised signature'), right - 220, sy + 46, { width: 220, align: 'center', lineBreak: false });
+    doc.text('.................................................', left, sy, { width: right - left, align: 'center', lineBreak: false });
+    doc.text(L(lang, 'ผู้รับรอง', 'Authorised signature'), left, sy + 18, { width: right - left, align: 'center', lineBreak: false });
+    if (byName) doc.font(F).fontSize(10).text(`(${byName})`, left, sy + 36, { width: right - left, align: 'center', lineBreak: false });
 
     // Footer on every page. Zero the bottom margin while stamping so writing
     // near the page edge never auto-appends a blank page.
@@ -552,15 +562,20 @@ export class ReportsService {
     const F = th ? 'TH' : 'Helvetica'; const FB = thBold ? 'THB' : 'Helvetica-Bold';
     const pageW = doc.page.width; const left = 36; const right = pageW - 36;
 
+    // QR lives in the header, not the footer — a long student roster or rubric
+    // legend used to push the QR/signature block onto its own extra page. Up
+    // here it's guaranteed to land on page 1 no matter how the table paginates.
     const uniLogo = LOGO_UNIVERSITY(); const facLogo = LOGO_FACULTY();
     if (uniLogo) doc.image(uniLogo, left, 30, { width: 44 });
-    if (facLogo) doc.image(facLogo, right - 44, 28, { width: 44 });
-    doc.font(FB).fontSize(16).fillColor('#26303f').text((lang === 'en' ? d.university?.nameEn : d.university?.nameTh) ?? 'University', 88, 34, { width: pageW - 176, align: 'center' });
-    doc.font(FB).fontSize(13).fillColor('#0e2a4a').text((lang === 'en' ? d.faculty?.nameEn : d.faculty?.nameTh) ?? 'Faculty of Nursing', 88, 53, { width: pageW - 176, align: 'center' });
+    doc.image(qrPng, right - 40, 26, { width: 40 });
+    doc.font(F).fontSize(6.5).fillColor('#7c8798').text(L(lang, 'สแกนตรวจสอบ', 'Scan to verify'), right - 52, 67, { width: 64, align: 'center', lineBreak: false });
+    if (facLogo) doc.image(facLogo, right - 96, 28, { width: 44 });
+    doc.font(FB).fontSize(16).fillColor('#26303f').text((lang === 'en' ? d.university?.nameEn : d.university?.nameTh) ?? 'University', 88, 34, { width: pageW - 236, align: 'center' });
+    doc.font(FB).fontSize(13).fillColor('#0e2a4a').text((lang === 'en' ? d.faculty?.nameEn : d.faculty?.nameTh) ?? 'Faculty of Nursing', 88, 53, { width: pageW - 236, align: 'center' });
     doc.font(F).fontSize(12).fillColor('#4a5666')
       .text(
         `${L(lang, 'รายงานผลการเรียนราย Section', 'Section Grade Report')} — ${d.section.subject.code} ${(lang === 'en' ? d.section.subject.nameEn : d.section.subject.nameTh) ?? d.section.subject.nameEn} · Sec ${d.section.sectionNo}`,
-        88, 71, { width: pageW - 176, align: 'center' },
+        88, 71, { width: pageW - 236, align: 'center' },
       );
     doc.moveTo(left, 94).lineTo(right, 94).strokeColor('#ff8a4c').lineWidth(1.5).stroke();
     doc.font(F).fontSize(10).fillColor('#4a5666').text(`${L(lang, 'เลขที่รายงาน', 'Report No.')}: ${reportNumber}    ${L(lang, 'ออกเมื่อ', 'Generated')}: ${this.formatDateTime(new Date(), lang)}`, left, 100);
@@ -584,16 +599,16 @@ export class ReportsService {
 
     const headerLabels = ['#', L(lang, 'รหัส', 'Code'), L(lang, 'ชื่อ-สกุล', 'Name'), ...d.rubrics.map((_, i) => `R${i + 1}`), L(lang, 'รวม', 'Total'), L(lang, 'เกรด', 'Grade')];
     const drawHeader = (yy: number) => {
-      doc.roundedRect(left, yy - 4, right - left, 20, 3).fill('#0e7c7b');
-      doc.font(FB).fontSize(9).fillColor('#fff');
+      doc.roundedRect(left, yy - 4, right - left, 21, 3).fill('#0e7c7b');
+      doc.font(FB).fontSize(10).fillColor('#fff');
       headerLabels.forEach((h, i) => doc.text(h, colX[i] + 3, yy, { width: colX[i + 1] - colX[i] - 5, align: i >= rubricStart ? 'center' : 'left' }));
-      return yy + 20;
+      return yy + 21;
     };
     y = drawHeader(y);
-    doc.font(F).fontSize(9);
+    doc.font(F).fontSize(10);
     d.students.forEach((s, i) => {
-      if (y > doc.page.height - 100) { doc.addPage(); y = drawHeader(40); doc.font(F).fontSize(9); }
-      if (i % 2 === 1) { doc.rect(left, y - 3, right - left, 17).fill('#f6f8fb'); }
+      if (y > doc.page.height - 100) { doc.addPage(); y = drawHeader(40); doc.font(F).fontSize(10); }
+      if (i % 2 === 1) { doc.rect(left, y - 3, right - left, 18).fill('#f6f8fb'); }
       doc.fillColor('#26303f');
       doc.text(String(i + 1), colX[0] + 3, y, { width: colX[1] - colX[0] - 5 });
       doc.text(s.studentCode, colX[1] + 3, y, { width: colX[2] - colX[1] - 5 });
@@ -605,31 +620,30 @@ export class ReportsService {
       doc.font(FB).text(String(s.total), colX[totalCol] + 3, y, { width: colX[totalCol + 1] - colX[totalCol] - 5, align: 'center' });
       doc.text(s.grade ?? '—', colX[gradeCol] + 3, y, { width: colX[gradeCol + 1] - colX[gradeCol] - 5, align: 'center' });
       doc.font(F);
-      y += 17;
+      y += 18;
     });
 
     // Legend
     y += 12;
     if (y > doc.page.height - 70) { doc.addPage(); y = 40; }
-    doc.font(FB).fontSize(10).fillColor('#26303f').text(L(lang, 'แบบประเมิน', 'Rubrics') + ':', left, y); y += 15;
-    doc.font(F).fontSize(9).fillColor('#4a5666');
-    d.rubrics.forEach((r, i) => { doc.text(`R${i + 1} = ${(lang === 'en' ? r.nameEn : r.nameTh) ?? r.nameEn} (${r.weightPercent}%)`, left, y, { width: right - left }); y += 13; });
+    doc.font(FB).fontSize(11).fillColor('#26303f').text(L(lang, 'แบบประเมิน', 'Rubrics') + ':', left, y); y += 16;
+    doc.font(F).fontSize(10).fillColor('#4a5666');
+    d.rubrics.forEach((r, i) => { doc.text(`R${i + 1} = ${(lang === 'en' ? r.nameEn : r.nameTh) ?? r.nameEn} (${r.weightPercent}%)`, left, y, { width: right - left }); y += 14; });
 
-    // Signature + QR
-    if (y > doc.page.height - 130) { doc.addPage(); y = 40; }
+    // Signature — QR already sits in the header, out of pagination's way.
+    if (y > doc.page.height - 90) { doc.addPage(); y = 40; }
     const sy = y + 16;
-    doc.image(qrPng, left, sy, { width: 66 });
-    doc.font(F).fontSize(9).fillColor('#7c8798').text(L(lang, 'สแกนเพื่อตรวจสอบ', 'Scan to verify'), left - 12, sy + 68, { width: 92, align: 'center', lineBreak: false });
     doc.font(F).fontSize(12).fillColor('#26303f');
-    doc.text('.................................................', right - 200, sy + 22, { width: 200, align: 'center', lineBreak: false });
-    doc.text(L(lang, 'ผู้รับรอง', 'Authorised signature'), right - 200, sy + 40, { width: 200, align: 'center', lineBreak: false });
+    doc.text('.................................................', right - 200, sy, { width: 200, align: 'center', lineBreak: false });
+    doc.text(L(lang, 'ผู้รับรอง', 'Authorised signature'), right - 200, sy + 18, { width: 200, align: 'center', lineBreak: false });
+    if (byName) doc.font(F).fontSize(10).text(`(${byName})`, right - 200, sy + 34, { width: 200, align: 'center', lineBreak: false });
 
     const range = doc.bufferedPageRange();
     for (let i = range.start; i < range.start + range.count; i++) {
       doc.switchToPage(i);
       this.watermark(doc, F);
       doc.page.margins.bottom = 0;
-      doc.font(F).fontSize(8).fillColor('#a0aab8')
+      doc.font(F).fontSize(9).fillColor('#a0aab8')
         .text(`Generated by ClassWeb · ${reportNumber} · verify at ${verifyUrl} · ${L(lang, 'หน้า', 'Page')} ${i + 1}/${range.count}`, left, doc.page.height - 30, { width: right - left, align: 'center', lineBreak: false });
     }
     doc.flushPages();
@@ -712,10 +726,12 @@ export class ReportsService {
 
     const uniLogo = LOGO_UNIVERSITY(); const facLogo = LOGO_FACULTY();
     if (uniLogo) doc.image(uniLogo, left, 38, { width: 50 });
-    if (facLogo) doc.image(facLogo, right - 50, 36, { width: 50 });
-    doc.font(FB).fontSize(18).fillColor('#26303f').text((lang === 'en' ? university?.nameEn : university?.nameTh) ?? 'University', 100, 44, { width: pageW - 200, align: 'center' });
-    doc.font(FB).fontSize(15).fillColor('#0e2a4a').text((lang === 'en' ? faculty?.nameEn : faculty?.nameTh) ?? 'Faculty of Nursing', 100, 66, { width: pageW - 200, align: 'center' });
-    doc.font(F).fontSize(14).fillColor('#4a5666').text(L(lang, 'รายงานผลการเรียนรายบุคคล', 'Individual Grade Report'), 100, 86, { width: pageW - 200, align: 'center' });
+    doc.image(qrPng, right - 44, 36, { width: 44 });
+    doc.font(F).fontSize(7).fillColor('#7c8798').text(L(lang, 'สแกนตรวจสอบ', 'Scan to verify'), right - 58, 82, { width: 72, align: 'center', lineBreak: false });
+    if (facLogo) doc.image(facLogo, right - 102, 36, { width: 50 });
+    doc.font(FB).fontSize(18).fillColor('#26303f').text((lang === 'en' ? university?.nameEn : university?.nameTh) ?? 'University', 100, 44, { width: pageW - 230, align: 'center' });
+    doc.font(FB).fontSize(15).fillColor('#0e2a4a').text((lang === 'en' ? faculty?.nameEn : faculty?.nameTh) ?? 'Faculty of Nursing', 100, 66, { width: pageW - 230, align: 'center' });
+    doc.font(F).fontSize(14).fillColor('#4a5666').text(L(lang, 'รายงานผลการเรียนรายบุคคล', 'Individual Grade Report'), 100, 86, { width: pageW - 230, align: 'center' });
     doc.moveTo(left, 112).lineTo(right, 112).strokeColor('#ff8a4c').lineWidth(2).stroke();
 
     let y = 122;
@@ -758,14 +774,13 @@ export class ReportsService {
     y += 6;
     doc.font(FB).fontSize(12).fillColor('#26303f').text(`${L(lang, 'รวม', 'Total')}: ${summary.total}/100`, left, y); y += 20;
 
-    // Signature + QR
-    if (y > doc.page.height - 170) { doc.addPage(); y = 60; }
+    // Signature — centered; QR is up in the header.
+    if (y > doc.page.height - 110) { doc.addPage(); y = 60; }
     const sy = y + 20;
-    doc.image(qrPng, left, sy, { width: 78 });
-    doc.font(F).fontSize(10).fillColor('#7c8798').text(L(lang, 'สแกนเพื่อตรวจสอบ', 'Scan to verify'), left - 15, sy + 80, { width: 108, align: 'center', lineBreak: false });
     doc.font(F).fontSize(13).fillColor('#26303f');
-    doc.text('.................................................', right - 220, sy + 28, { width: 220, align: 'center', lineBreak: false });
-    doc.text(L(lang, 'ผู้รับรอง', 'Authorised signature'), right - 220, sy + 46, { width: 220, align: 'center', lineBreak: false });
+    doc.text('.................................................', left, sy, { width: right - left, align: 'center', lineBreak: false });
+    doc.text(L(lang, 'ผู้รับรอง', 'Authorised signature'), left, sy + 18, { width: right - left, align: 'center', lineBreak: false });
+    if (byName) doc.font(F).fontSize(10).text(`(${byName})`, left, sy + 36, { width: right - left, align: 'center', lineBreak: false });
 
     const range = doc.bufferedPageRange();
     for (let i = range.start; i < range.start + range.count; i++) {

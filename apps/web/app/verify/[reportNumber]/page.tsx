@@ -1,6 +1,6 @@
 'use client';
 
-import { use, useEffect, useState } from 'react';
+import { use, useEffect, useRef, useState } from 'react';
 import Logo from '@/components/Logo';
 import ThemeToggle from '@/components/ThemeToggle';
 import LanguageToggle from '@/components/LanguageToggle';
@@ -25,6 +25,9 @@ export default function VerifyPage({ params }: { params: Promise<{ reportNumber:
   const [result, setResult] = useState<VerifyResult | null>(null);
   const [invalid, setInvalid] = useState(false);
   const [loading, setLoading] = useState(true);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [docLoading, setDocLoading] = useState(true);
+  const [docError, setDocError] = useState<string | null>(null);
 
   useEffect(() => {
     apiFetch<VerifyResult>(`/reports/verify/${reportNumber}`)
@@ -34,6 +37,64 @@ export default function VerifyPage({ params }: { params: Promise<{ reportNumber:
   }, [reportNumber]);
 
   const fileUrl = `${API_BASE}/reports/file/${reportNumber}`;
+
+  // Rendered with PDF.js to <canvas>, never handed to the browser as a file —
+  // this page exists so someone can confirm a document against what's on
+  // record, not to hand out another copy of it. An <iframe>/<object> embed
+  // would also fail silently on iOS Safari, which has no built-in PDF
+  // viewer for embedded content (it just shows a blank frame).
+  useEffect(() => {
+    if (!result?.hasFile) return;
+    let cancelled = false;
+    let objectUrl: string | null = null;
+    (async () => {
+      try {
+        const res = await fetch(fileUrl);
+        if (!res.ok) throw new Error('Failed to load document');
+        const blob = await res.blob();
+        objectUrl = URL.createObjectURL(blob);
+
+        const pdfjsLib = await import('pdfjs-dist');
+        pdfjsLib.GlobalWorkerOptions.workerSrc = new URL('pdfjs-dist/build/pdf.worker.min.mjs', import.meta.url).toString();
+
+        const pdf = await pdfjsLib.getDocument({ url: objectUrl }).promise;
+        if (cancelled || !containerRef.current) return;
+        containerRef.current.innerHTML = '';
+
+        for (let pageNum = 1; pageNum <= pdf.numPages; pageNum++) {
+          if (cancelled) return;
+          const page = await pdf.getPage(pageNum);
+          const viewport = page.getViewport({ scale: 1.6 });
+          const canvas = document.createElement('canvas');
+          canvas.width = viewport.width;
+          canvas.height = viewport.height;
+          canvas.style.display = 'block';
+          canvas.style.margin = '0 auto 10px';
+          canvas.style.maxWidth = '100%';
+          canvas.style.height = 'auto';
+          canvas.style.borderRadius = '10px';
+          canvas.style.boxShadow = '0 2px 12px rgba(0,0,0,0.15)';
+          // Right-click "Save image as…" is a browser affordance we can't fully
+          // suppress, but this at least removes the obvious copy shortcut.
+          canvas.oncontextmenu = (e) => e.preventDefault();
+          const ctx = canvas.getContext('2d');
+          if (!ctx) continue;
+          containerRef.current.appendChild(canvas);
+          await page.render({ canvasContext: ctx, viewport, canvas }).promise;
+        }
+        if (!cancelled) setDocLoading(false);
+      } catch (err) {
+        if (!cancelled) {
+          setDocError(err instanceof Error ? err.message : 'Failed to render document');
+          setDocLoading(false);
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [result?.hasFile, fileUrl]);
 
   return (
     <main style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '20px 16px 40px', gap: 20 }}>
@@ -70,18 +131,12 @@ export default function VerifyPage({ params }: { params: Promise<{ reportNumber:
             {result.hasFile ? (
               <div style={{ textAlign: 'left' }}>
                 <div className="muted" style={{ fontSize: 12, fontWeight: 600, marginBottom: 8 }}>{t('verify.document')}</div>
-                <div className="hairline" style={{ borderRadius: 14, overflow: 'hidden', border: '1px solid var(--glass-hairline)' }}>
-                  <iframe src={fileUrl} title={result.title} style={{ width: '100%', height: '70vh', minHeight: 420, border: 'none', display: 'block' }} />
+                <div className="hairline" style={{ borderRadius: 14, overflow: 'hidden', border: '1px solid var(--glass-hairline)', background: '#525659', padding: 14, maxHeight: '75vh', overflowY: 'auto' }}>
+                  {docLoading && <div style={{ color: '#fff', textAlign: 'center', padding: 30, fontSize: 13 }}>{t('common.loading')}</div>}
+                  {docError && <div className="chip chip-danger" style={{ display: 'block' }}>{docError}</div>}
+                  <div ref={containerRef} />
                 </div>
-                <a
-                  href={fileUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="btn-primary"
-                  style={{ display: 'inline-block', marginTop: 14, padding: '11px 20px', fontSize: 14, textDecoration: 'none' }}
-                >
-                  ⬇ {t('verify.downloadFile')}
-                </a>
+                <p className="muted" style={{ fontSize: 11.5, marginTop: 10, textAlign: 'center' }}>{t('verify.viewOnly')}</p>
               </div>
             ) : (
               <p className="muted" style={{ fontSize: 12.5, marginTop: 4 }}>{t('verify.noFile')}</p>
