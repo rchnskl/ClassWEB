@@ -87,7 +87,15 @@ export class StudentsRepository {
       // Someone who has left the faculty should not turn up when building a class.
       status: { in: ['STUDYING', 'ON_LEAVE'] },
       ...(query.programId ? { programId: query.programId } : {}),
-      ...(query.yearLevel !== undefined ? { yearLevel: query.yearLevel } : {}),
+      // Year level narrows a cohort *browse*, but must never exclude someone
+      // the caller searched for by code/name. A student whose year was never
+      // recorded (yearLevel null — common for imported rosters), or who sits
+      // in a different year, still exists: hiding them makes the picker
+      // report "no matching student" for someone the roster page lists two
+      // clicks away. When there's a search term the year becomes a display
+      // hint only — the picker shows each hit's year so the caller can see
+      // who they're adding.
+      ...(query.yearLevel !== undefined && !query.q ? { yearLevel: query.yearLevel } : {}),
       ...(query.q
         ? { OR: [
             { studentCode: { contains: query.q, mode: 'insensitive' } },

@@ -204,6 +204,38 @@ describe('Central roster, Excel import and groups (integration, real Postgres)',
       await http.get('/api/v1/students/lookup').set(auth(lecturerToken)).expect(400);
       await http.get('/api/v1/students/lookup?q=a').set(auth(lecturerToken)).expect(400);
     });
+
+    // Regression: the group-member picker passes the group's yearLevel
+    // alongside the search term. A student whose year was never recorded (or
+    // who sits in another year) was silently filtered out, so the picker said
+    // "no matching student" for someone the roster page found instantly.
+    it('still finds an explicitly searched student whose year level is unset, even when a yearLevel filter is passed', async () => {
+      const created = await http.post('/api/v1/students').set(auth(adminToken)).send({
+        studentCode: 'E2E-R-NOYEAR', nameEn: 'No Year Recorded', programId,
+      }).expect(201);
+      expect(created.body.yearLevel).toBeNull();
+
+      const res = await http.get('/api/v1/students/lookup?q=E2E-R-NOYEAR&yearLevel=2').set(auth(lecturerToken)).expect(200);
+      expect(res.body.map((s: { studentCode: string }) => s.studentCode)).toContain('E2E-R-NOYEAR');
+    });
+
+    it('still finds an explicitly searched student sitting in a different year', async () => {
+      await http.post('/api/v1/students').set(auth(adminToken)).send({
+        studentCode: 'E2E-R-YEAR4', nameEn: 'Fourth Year Student', programId, yearLevel: 4,
+      }).expect(201);
+
+      const res = await http.get('/api/v1/students/lookup?q=E2E-R-YEAR4&yearLevel=2').set(auth(lecturerToken)).expect(200);
+      expect(res.body.map((s: { studentCode: string }) => s.studentCode)).toContain('E2E-R-YEAR4');
+    });
+
+    // The year filter must still work as a cohort browse when there's no
+    // search term — that's what the roster-by-year view relies on.
+    it('still narrows by year level when browsing without a search term', async () => {
+      const res = await http.get('/api/v1/students/lookup?yearLevel=4').set(auth(lecturerToken)).expect(200);
+      const codes = res.body.map((s: { studentCode: string }) => s.studentCode);
+      expect(codes).toContain('E2E-R-YEAR4');
+      expect(codes).not.toContain('E2E-R-NOYEAR');
+    });
   });
 
   // ---- groups ------------------------------------------------------------

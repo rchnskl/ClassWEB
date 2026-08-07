@@ -38,9 +38,19 @@ describe('Lecturer data isolation (integration, real Postgres)', () => {
     const auth = (token: string) => ({ Authorization: `Bearer ${token}` });
 
     // A second lecturer, with their own section/student, that lecturer 1 has
-    // no relationship to at all.
-    const subjects = await http.get('/api/v1/subjects').set(auth(adminToken)).expect(200);
-    const subjectId: string = subjects.body.items[0].id;
+    // no relationship to at all. The subject is created fresh rather than
+    // reusing items[0] of the shared list: another spec file adding a subject
+    // that happens to sort first would otherwise silently re-point this whole
+    // suite at a subject lecturer 1 legitimately manages, and every isolation
+    // assertion below would flip.
+    const existing = await http.get('/api/v1/subjects').set(auth(adminToken)).expect(200);
+    const programId: string = existing.body.items[0].program.id;
+    const courseId: string = existing.body.items[0].course.id;
+    const subject = await http.post('/api/v1/subjects').set(auth(adminToken)).send({
+      programId, courseId, code: 'E2E-ISO-SUBJ', nameEn: 'E2E Isolation Subject',
+    }).expect(201);
+    const subjectId: string = subject.body.id;
+
     const semesters = await http.get('/api/v1/semesters').set(auth(adminToken));
     const semesterId: string = semesters.body.find((s: { isCurrent: boolean }) => s.isCurrent)?.id ?? semesters.body[0].id;
 
@@ -55,7 +65,7 @@ describe('Lecturer data isolation (integration, real Postgres)', () => {
     section2Id = section2.body.id;
 
     const student2 = await http.post('/api/v1/students').set(auth(adminToken)).send({
-      studentCode: 'E2E-ISO-01', nameEn: 'Isolation Test Student', programId: subjects.body.items[0].program.id,
+      studentCode: 'E2E-ISO-01', nameEn: 'Isolation Test Student', programId,
     }).expect(201);
     student2Id = student2.body.id;
 
