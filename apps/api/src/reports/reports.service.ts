@@ -66,6 +66,22 @@ export class ReportsService {
     return nameTh ? `${nameTh} (${nameEn})` : nameEn;
   }
 
+  /**
+   * The name printed under "Authorised signature" and stored as a report's
+   * generatedByName — resolved from the caller's Lecturer profile rather
+   * than their login email, which isn't something you'd want on an official
+   * document a student or auditor sees. Admin accounts have no Lecturer
+   * profile to resolve, so they fall back to a role label instead of email.
+   */
+  async resolveGeneratorName(userId?: string, isAdmin?: boolean): Promise<string | undefined> {
+    if (!userId) return undefined;
+    const lecturer = await this.prisma.lecturer.findFirst({
+      where: { userId }, select: { nameEn: true, nameTh: true },
+    });
+    if (lecturer) return this.personName(lecturer.nameEn, lecturer.nameTh);
+    return isAdmin ? 'System Administrator' : undefined;
+  }
+
   private newReportNumber(): string {
     const d = new Date();
     const ymd = `${d.getUTCFullYear()}${String(d.getUTCMonth() + 1).padStart(2, '0')}${String(d.getUTCDate()).padStart(2, '0')}`;
@@ -255,11 +271,10 @@ export class ReportsService {
     // Signature — centered; QR moved to the header so this block no longer
     // needs to share the footer with it (lineBreak:false avoids accidental
     // pagination when text sits near the bottom margin).
-    const footY = doc.page.height - 120;
+    const footY = doc.page.height - 100;
     doc.font(F).fontSize(14).fillColor('#26303f');
-    doc.text('.................................................', left, footY, { width: right - left, align: 'center', lineBreak: false });
-    doc.text(L(lang, 'ผู้รับรอง', 'Authorised signature'), left, footY + 20, { width: right - left, align: 'center', lineBreak: false });
-    if (byName) doc.font(F).fontSize(11).text(`(${byName})`, left, footY + 40, { width: right - left, align: 'center', lineBreak: false });
+    doc.text(L(lang, 'ผู้รับรอง', 'Authorised signature'), left, footY, { width: right - left, align: 'center', lineBreak: false });
+    if (byName) doc.font(FB).fontSize(13).text(byName, left, footY + 20, { width: right - left, align: 'center', lineBreak: false });
 
     // Footer line (kept above the bottom margin to avoid an extra page)
     doc.font(F).fontSize(9).fillColor('#a0aab8')
@@ -458,9 +473,8 @@ export class ReportsService {
     if (y > doc.page.height - 110) { doc.addPage(); y = 60; }
     const sy = y + 20;
     doc.font(F).fontSize(13).fillColor('#26303f');
-    doc.text('.................................................', left, sy, { width: right - left, align: 'center', lineBreak: false });
-    doc.text(L(lang, 'ผู้รับรอง', 'Authorised signature'), left, sy + 18, { width: right - left, align: 'center', lineBreak: false });
-    if (byName) doc.font(F).fontSize(10).text(`(${byName})`, left, sy + 36, { width: right - left, align: 'center', lineBreak: false });
+    doc.text(L(lang, 'ผู้รับรอง', 'Authorised signature'), left, sy, { width: right - left, align: 'center', lineBreak: false });
+    if (byName) doc.font(FB).fontSize(12).text(byName, left, sy + 18, { width: right - left, align: 'center', lineBreak: false });
 
     // Footer on every page. Zero the bottom margin while stamping so writing
     // near the page edge never auto-appends a blank page.
@@ -634,9 +648,8 @@ export class ReportsService {
     if (y > doc.page.height - 90) { doc.addPage(); y = 40; }
     const sy = y + 16;
     doc.font(F).fontSize(12).fillColor('#26303f');
-    doc.text('.................................................', right - 200, sy, { width: 200, align: 'center', lineBreak: false });
-    doc.text(L(lang, 'ผู้รับรอง', 'Authorised signature'), right - 200, sy + 18, { width: 200, align: 'center', lineBreak: false });
-    if (byName) doc.font(F).fontSize(10).text(`(${byName})`, right - 200, sy + 34, { width: 200, align: 'center', lineBreak: false });
+    doc.text(L(lang, 'ผู้รับรอง', 'Authorised signature'), right - 200, sy, { width: 200, align: 'center', lineBreak: false });
+    if (byName) doc.font(FB).fontSize(11).text(byName, right - 200, sy + 17, { width: 200, align: 'center', lineBreak: false });
 
     const range = doc.bufferedPageRange();
     for (let i = range.start; i < range.start + range.count; i++) {
@@ -778,9 +791,8 @@ export class ReportsService {
     if (y > doc.page.height - 110) { doc.addPage(); y = 60; }
     const sy = y + 20;
     doc.font(F).fontSize(13).fillColor('#26303f');
-    doc.text('.................................................', left, sy, { width: right - left, align: 'center', lineBreak: false });
-    doc.text(L(lang, 'ผู้รับรอง', 'Authorised signature'), left, sy + 18, { width: right - left, align: 'center', lineBreak: false });
-    if (byName) doc.font(F).fontSize(10).text(`(${byName})`, left, sy + 36, { width: right - left, align: 'center', lineBreak: false });
+    doc.text(L(lang, 'ผู้รับรอง', 'Authorised signature'), left, sy, { width: right - left, align: 'center', lineBreak: false });
+    if (byName) doc.font(FB).fontSize(12).text(byName, left, sy + 18, { width: right - left, align: 'center', lineBreak: false });
 
     const range = doc.bufferedPageRange();
     for (let i = range.start; i < range.start + range.count; i++) {
