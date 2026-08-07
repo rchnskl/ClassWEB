@@ -1,5 +1,32 @@
-export const API_BASE =
-  process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001/api/v1';
+/**
+ * Base URL of the API, baked into the browser bundle at build time.
+ *
+ * The localhost fallback is deliberately restricted to non-production builds.
+ * It used to apply everywhere, which meant a production build run without
+ * NEXT_PUBLIC_API_URL exported shipped a site that pointed every request at
+ * the developer's own machine — it deployed cleanly, served every asset, and
+ * only failed once a real user tried to log in. Failing the build is the
+ * cheaper place to find that out, so a production build without the variable
+ * now throws during static generation instead of shipping.
+ *
+ * The value lives in apps/web/.env.production (committed — it is public by
+ * definition, since it ends up in the client bundle), so a normal build picks
+ * it up without anyone having to remember.
+ */
+function resolveApiBase(): string {
+  const configured = process.env.NEXT_PUBLIC_API_URL;
+  if (configured) return configured;
+  if (process.env.NODE_ENV === 'production') {
+    throw new Error(
+      'NEXT_PUBLIC_API_URL is not set. A production build must not fall back to ' +
+        'http://localhost:3001 — that ships a site nobody but the person who built ' +
+        'it can use. Set it in apps/web/.env.production (or the deploy environment).',
+    );
+  }
+  return 'http://localhost:3001/api/v1';
+}
+
+export const API_BASE = resolveApiBase();
 
 // ---------------------------------------------------------------------------
 // In-flight request tracking, for a global "something is happening" status

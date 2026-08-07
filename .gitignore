@@ -13,6 +13,10 @@ out/
 .env
 .env.*
 !.env.example
+# Client-side public config, baked into the browser bundle at build time and
+# therefore not secret. Committed so a deploy can never silently fall back to
+# localhost because whoever ran it didn't have the variable exported.
+!apps/web/.env.production
 
 # Prisma
 packages/database/prisma/*.db
