@@ -255,8 +255,15 @@ export default function TimetablePage() {
                         <div style={{ fontSize: 12, display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
                           <span>{st.icon} <span style={{ fontWeight: 700, fontSize: 10.5 }}>{t(`tt.type.${ev.type}`)}</span></span>
                           {canManage && (
-                            <button onClick={() => removeEvent(ev.id)} aria-label={t('tt.delete')} title={t('tt.delete')}
-                              style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: 'var(--text-2)', fontSize: 11, padding: 0, lineHeight: 1 }}>✕</button>
+                            <button
+                              type="button"
+                              onClick={(e) => { e.stopPropagation(); removeEvent(ev.id); }}
+                              aria-label={t('tt.delete')} title={t('tt.delete')}
+                              // Hit area padded out to ~24px — the bare 11px glyph with
+                              // padding:0 was easy to miss on a touch screen, especially
+                              // squeezed into the right 45% of a day column.
+                              style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: 'var(--text-2)', fontSize: 13, padding: 6, margin: -6, lineHeight: 1, minWidth: 24, minHeight: 24 }}
+                            >✕</button>
                           )}
                         </div>
                         <div style={{ fontSize: 10.5, lineHeight: 1.25, marginTop: 2, fontWeight: 600 }}>{ev.title}</div>
