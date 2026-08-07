@@ -43,6 +43,16 @@ async function main() {
   const totalWeight = SCORE_COMPONENTS.reduce((a, c) => a + c.weightPercent, 0);
   if (totalWeight !== 100) throw new Error(`Component weights sum to ${totalWeight}, expected 100`);
 
+  // The first import shipped 172 English-only steps because the writer simply
+  // never copied `th` across. Refuse to import a half-translated checklist
+  // rather than let it reach the bedside and fall back to English mid-form.
+  const untranslated = LAB_MIDTERM_SECTIONS.flatMap((s) =>
+    s.items.filter((it) => !it.th?.trim()).map((it) => `${s.nameEn}: ${it.en.slice(0, 60)}`),
+  );
+  if (untranslated.length) {
+    throw new Error(`${untranslated.length} checklist step(s) have no Thai translation:\n  ${untranslated.join('\n  ')}`);
+  }
+
   console.log(`Subject ${subject.code}`);
   console.log(`Components: ${SCORE_COMPONENTS.length} (weights sum ${totalWeight})`);
   console.log(`Lab mid-term checklist: ${LAB_MIDTERM_SECTIONS.length} sections, ${LAB_MIDTERM_SECTIONS.reduce((a, s) => a + s.items.length, 0)} steps`);
@@ -85,7 +95,10 @@ async function main() {
             weightPercent: s.weightPercent, order: i,
             items: {
               create: s.items.map((it, j) => ({
-                textEn: it.en, weightPercent: s.itemWeightPercent,
+                // textTh was omitted on the first import, so every step
+                // rendered in English no matter the interface language. The
+                // data file carries a translation for each one.
+                textEn: it.en, textTh: it.th, weightPercent: s.itemWeightPercent,
                 maxRating: 5, order: j, isCritical: Boolean(it.isCritical),
               })),
             },

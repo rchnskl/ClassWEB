@@ -52,6 +52,11 @@ export default function GradingDrawer({
 }) {
   const { t, lang } = useI18n();
   const name = (en: string, th: string | null) => (lang === 'th' && th ? th : en);
+  // Which procedure is being examined. A checklist that holds several
+  // procedures (the lab exam) is usually sat one drawn procedure at a time,
+  // so showing all 172 steps at once buries the handful that matter. null =
+  // show every procedure, for the sitting where the student performs them all.
+  const [onlySectionId, setOnlySectionId] = useState<string | null>(null);
 
   const [summary, setSummary] = useState<Summary | null>(null);
   const [activeId, setActiveId] = useState<string>(rubrics[0]?.id ?? '');
@@ -184,7 +189,46 @@ export default function GradingDrawer({
                   </div>
                 </div>
 
-                {active.sections.map((s) => (
+                {active.sections.length > 1 && (
+                  <div style={{ marginBottom: 12 }}>
+                    <div className="subtle" style={{ fontSize: 12, fontWeight: 600, marginBottom: 6 }}>{t('as.whichProcedure')}</div>
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                      <button
+                        onClick={() => setOnlySectionId(null)}
+                        style={{
+                          padding: '6px 12px', borderRadius: 999, fontSize: 12, fontWeight: 650, cursor: 'pointer',
+                          border: onlySectionId === null ? '1px solid var(--brand)' : '1px solid var(--glass-hairline)',
+                          background: onlySectionId === null ? 'linear-gradient(120deg, var(--brand-2), var(--brand))' : 'transparent',
+                          color: onlySectionId === null ? '#fff' : 'var(--text-2)',
+                        }}
+                      >
+                        {t('as.allProcedures')}
+                      </button>
+                      {active.sections.map((s) => {
+                        const graded = s.items.some((it) => ratings[it.id] != null);
+                        const on = onlySectionId === s.id;
+                        return (
+                          <button
+                            key={s.id}
+                            onClick={() => setOnlySectionId(s.id)}
+                            title={name(s.nameEn, s.nameTh)}
+                            style={{
+                              padding: '6px 12px', borderRadius: 999, fontSize: 12, fontWeight: 650, cursor: 'pointer',
+                              border: on ? '1px solid var(--brand)' : '1px solid var(--glass-hairline)',
+                              background: on ? 'linear-gradient(120deg, var(--brand-2), var(--brand))' : 'transparent',
+                              color: on ? '#fff' : 'var(--text-2)',
+                            }}
+                          >
+                            {graded && '✓ '}{name(s.nameEn, s.nameTh)}
+                          </button>
+                        );
+                      })}
+                    </div>
+                    <div className="muted" style={{ fontSize: 11.5, marginTop: 6 }}>{t('as.procedureHint')}</div>
+                  </div>
+                )}
+
+                {active.sections.filter((s) => onlySectionId === null || s.id === onlySectionId).map((s) => (
                   <div key={s.id} style={{ marginBottom: 14 }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontWeight: 700, fontSize: 13.5, padding: '6px 10px', borderRadius: 8, background: 'var(--popover-hover)', marginBottom: 6 }}>
                       <span>{name(s.nameEn, s.nameTh)}</span><span className="muted" style={{ fontSize: 12 }}>{s.weightPercent}%</span>
