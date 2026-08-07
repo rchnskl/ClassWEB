@@ -185,17 +185,35 @@ export class AssessmentService {
     ratings: Map<string, number>,
     passed: Map<string, boolean>,
   ): { scorePercent: number; criticalFailed: boolean } {
-    let rubricScore = 0;
+    // Scored over what was actually examined, not over everything on the
+    // form. A lab exam is sat both ways: sometimes the student performs every
+    // procedure, sometimes they draw one. Treating the procedures they never
+    // drew as zeros would cap them at their one section's weight — so an
+    // unscored item is "not applicable" here, not "scored nothing".
+    //
+    // An explicit 0 is a real mark and does count against the student; only a
+    // missing rating is skipped. When every item is scored this reduces to a
+    // plain weighted average, so grading a whole form is unchanged.
+    let weightedSum = 0;
+    let attemptedSectionWeight = 0;
     let criticalFailed = false;
+
     for (const section of rubric.sections) {
-      let sectionScore = 0; // 0..100
+      let scored = 0;
+      let attemptedItemWeight = 0;
       for (const item of section.items) {
-        const rating = ratings.get(item.id);
-        if (rating != null && rating > 0) sectionScore += item.weightPercent * (rating / item.maxRating);
         if (item.isCritical && passed.get(item.id) === false) criticalFailed = true;
+        const rating = ratings.get(item.id);
+        if (rating == null) continue;
+        attemptedItemWeight += item.weightPercent;
+        scored += item.weightPercent * (rating / item.maxRating);
       }
-      rubricScore += (section.weightPercent / 100) * sectionScore;
+      if (attemptedItemWeight === 0) continue; // section not examined
+      weightedSum += section.weightPercent * ((scored / attemptedItemWeight) * 100);
+      attemptedSectionWeight += section.weightPercent;
     }
+
+    const rubricScore = attemptedSectionWeight > 0 ? weightedSum / attemptedSectionWeight : 0;
     const scorePercent = criticalFailed ? 0 : Math.round(rubricScore * 100) / 100;
     return { scorePercent, criticalFailed };
   }

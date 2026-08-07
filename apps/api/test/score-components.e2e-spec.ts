@@ -100,6 +100,69 @@ describe('Score components / raw exam marks (integration, real Postgres)', () =>
     }).expect(400);
   });
 
+  // The lab exam is sat two ways: every procedure, or one drawn at random.
+  // One rubric has to serve both, so the score averages over what was
+  // actually examined rather than treating undrawn procedures as zeros.
+  describe('a multi-procedure checklist scored either way', () => {
+    let labRubricId: string;
+    let procA: string[];
+    let procB: string[];
+
+    beforeAll(async () => {
+      const r = await http.post('/api/v1/assessment/rubrics').set(auth()).send({
+        code: 'E2E-LAB-DRAW', nameEn: 'E2E Lab Draw', weightPercent: 7,
+        sections: [
+          { nameEn: 'Procedure A', weightPercent: 50, items: [
+            { textEn: 'A step 1', weightPercent: 50, maxRating: 5 },
+            { textEn: 'A step 2', weightPercent: 50, maxRating: 5 },
+          ] },
+          { nameEn: 'Procedure B', weightPercent: 50, items: [
+            { textEn: 'B step 1', weightPercent: 50, maxRating: 5 },
+            { textEn: 'B step 2', weightPercent: 50, maxRating: 5 },
+          ] },
+        ],
+      }).expect(201);
+      labRubricId = r.body.id;
+      procA = r.body.sections[0].items.map((i: { id: string }) => i.id);
+      procB = r.body.sections[1].items.map((i: { id: string }) => i.id);
+    });
+
+    it('gives full marks for a drawn procedure done perfectly, ignoring the undrawn one', async () => {
+      const res = await http.post('/api/v1/assessment/evaluation').set(auth()).send({
+        rubricId: labRubricId, studentId, sectionId,
+        scores: procA.map((id) => ({ rubricItemId: id, rating: 5 })),
+      }).expect(201);
+      expect(res.body.scorePercent).toBe(100);
+    });
+
+    it('gives the same full marks when every procedure is performed', async () => {
+      const res = await http.post('/api/v1/assessment/evaluation').set(auth()).send({
+        rubricId: labRubricId, studentId, sectionId,
+        scores: [...procA, ...procB].map((id) => ({ rubricItemId: id, rating: 5 })),
+      }).expect(201);
+      expect(res.body.scorePercent).toBe(100);
+    });
+
+    it('still counts a deliberate 0 against the student', async () => {
+      const res = await http.post('/api/v1/assessment/evaluation').set(auth()).send({
+        rubricId: labRubricId, studentId, sectionId,
+        scores: [{ rubricItemId: procA[0], rating: 5 }, { rubricItemId: procA[1], rating: 0 }],
+      }).expect(201);
+      expect(res.body.scorePercent).toBe(50);
+    });
+
+    it('averages across procedures when both are examined unevenly', async () => {
+      const res = await http.post('/api/v1/assessment/evaluation').set(auth()).send({
+        rubricId: labRubricId, studentId, sectionId,
+        scores: [
+          ...procA.map((id) => ({ rubricItemId: id, rating: 5 })),   // 100%
+          ...procB.map((id) => ({ rubricItemId: id, rating: 3 })),   // 60%
+        ],
+      }).expect(201);
+      expect(res.body.scorePercent).toBe(80);
+    });
+  });
+
   it('weights the component into the student total at its subject weight', async () => {
     await http.post('/api/v1/assessment/evaluation').set(auth()).send({
       rubricId, studentId, sectionId, scores: [{ rubricItemId: itemId, rating: 23 }],

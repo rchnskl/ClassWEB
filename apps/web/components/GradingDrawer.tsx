@@ -13,19 +13,34 @@ interface Summary {
   rubrics: { rubricId: string; nameEn: string; nameTh: string | null; weightPercent: number; scorePercent: number | null; graded: boolean; criticalFailed: boolean; contribution: number }[];
 }
 
-/** Client-side mirror of the backend scoring (for live feedback), including the OSCE-style critical-fail rule. */
+/**
+ * Client-side mirror of the backend scoring (for live feedback), including
+ * the OSCE-style critical-fail rule. Must stay in step with
+ * AssessmentService.scoreRubric or the live total misleads the grader:
+ * the score is an average over the items actually examined, so a procedure
+ * the student never drew doesn't drag them down, while an explicit 0 does.
+ */
 function scoreRubric(rubric: Rubric, ratings: Record<string, number>, passed: Record<string, boolean>): { total: number; criticalFailed: boolean } {
-  let total = 0;
+  let weightedSum = 0;
+  let attemptedSectionWeight = 0;
   let criticalFailed = false;
+
   for (const s of rubric.sections) {
-    let sec = 0;
+    let scored = 0;
+    let attemptedItemWeight = 0;
     for (const it of s.items) {
-      const r = ratings[it.id];
-      if (r) sec += it.weightPercent * (r / it.maxRating);
       if (it.isCritical && passed[it.id] === false) criticalFailed = true;
+      const r = ratings[it.id];
+      if (r == null) continue;
+      attemptedItemWeight += it.weightPercent;
+      scored += it.weightPercent * (r / it.maxRating);
     }
-    total += (s.weightPercent / 100) * sec;
+    if (attemptedItemWeight === 0) continue;
+    weightedSum += s.weightPercent * ((scored / attemptedItemWeight) * 100);
+    attemptedSectionWeight += s.weightPercent;
   }
+
+  const total = attemptedSectionWeight > 0 ? weightedSum / attemptedSectionWeight : 0;
   return { total: criticalFailed ? 0 : Math.round(total * 100) / 100, criticalFailed };
 }
 
@@ -83,7 +98,10 @@ export default function GradingDrawer({
     setSaving(true);
     setError(null);
     try {
-      const scores = Object.entries(ratings).filter(([, v]) => v > 0).map(([rubricItemId, rating]) => ({
+      // Send every item the grader touched, including a deliberate 0 — that
+      // is a real mark and has to count. Only untouched items are omitted,
+      // which is what marks a procedure as "not examined".
+      const scores = Object.entries(ratings).filter(([, v]) => v != null).map(([rubricItemId, rating]) => ({
         rubricItemId, rating, ...(rubricItemId in passed ? { passed: passed[rubricItemId] } : {}),
       }));
       await apiFetch('/assessment/evaluation', { method: 'POST', body: JSON.stringify({ rubricId: active.id, studentId, sectionId, scores }) });

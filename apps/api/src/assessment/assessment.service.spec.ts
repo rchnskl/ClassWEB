@@ -42,13 +42,21 @@ describe('AssessmentService (pure scoring logic)', () => {
       expect(service.scoreRubric(r, new Map([['a', 5], ['b', 0]]), noPass).scorePercent).toBe(50);
     });
 
-    it('treats an unrated item as zero, not as excluded from the denominator', () => {
+    // Deliberate reversal of the original rule ("an unrated item scores 0").
+    // The lab exam is sat two ways — every procedure, or one drawn at random —
+    // and one checklist has to serve both. Under the old rule a student who
+    // drew a single procedure and performed it perfectly was capped at that
+    // procedure's share of the form. An unrated item is therefore "not
+    // examined" and leaves the denominator; the cost is that forgetting to
+    // grade an item no longer shows up as a low score, which is instead
+    // surfaced by the isComplete / gradedWeight signals on the summary.
+    it('excludes an unrated item from the denominator rather than scoring it 0', () => {
       const r = rubric([{ weightPercent: 100, items: [
         { id: 'a', weightPercent: 50, maxRating: 5 },
         { id: 'b', weightPercent: 50, maxRating: 5 },
       ] }]);
-      // only "a" rated; "b" contributes nothing (not re-normalised to 100%)
-      expect(service.scoreRubric(r, new Map([['a', 5]]), noPass).scorePercent).toBe(50);
+      // only "a" rated, and rated at max -> full marks for what was examined
+      expect(service.scoreRubric(r, new Map([['a', 5]]), noPass).scorePercent).toBe(100);
     });
 
     it('applies section weight as a fraction of 100, not additively', () => {
@@ -56,8 +64,17 @@ describe('AssessmentService (pure scoring logic)', () => {
         { weightPercent: 30, items: [{ id: 'a', weightPercent: 100, maxRating: 5 }] },
         { weightPercent: 70, items: [{ id: 'b', weightPercent: 100, maxRating: 5 }] },
       ]);
-      // only section a fully scored: 30% of 100 = 30
-      expect(service.scoreRubric(r, new Map([['a', 5]]), noPass).scorePercent).toBe(30);
+      // both sections examined: 0.3*100 + 0.7*60 = 72
+      expect(service.scoreRubric(r, new Map([['a', 5], ['b', 3]]), noPass).scorePercent).toBe(72);
+    });
+
+    it('scores only the examined section when the other is skipped entirely', () => {
+      const r = rubric([
+        { weightPercent: 30, items: [{ id: 'a', weightPercent: 100, maxRating: 5 }] },
+        { weightPercent: 70, items: [{ id: 'b', weightPercent: 100, maxRating: 5 }] },
+      ]);
+      // the 70% section was never drawn, so the 30% one carries the whole score
+      expect(service.scoreRubric(r, new Map([['a', 4]]), noPass).scorePercent).toBe(80);
     });
 
     it('returns 0 for a rubric with no ratings at all', () => {
@@ -70,9 +87,18 @@ describe('AssessmentService (pure scoring logic)', () => {
       expect(service.scoreRubric(r, new Map([['a', 7]]), noPass).scorePercent).toBe(70);
     });
 
-    it('ignores a rating of 0 (falsy) the same as unrated', () => {
-      const r = rubric([{ weightPercent: 100, items: [{ id: 'a', weightPercent: 100, maxRating: 5 }] }]);
-      expect(service.scoreRubric(r, new Map([['a', 0]]), noPass).scorePercent).toBe(0);
+    // An explicit 0 is a real mark, unlike a missing one: the student was
+    // examined on this step and scored nothing. It therefore stays in the
+    // denominator and drags the score down, where an unrated sibling would
+    // simply be skipped.
+    it('counts an explicit 0 as a scored item, not as unrated', () => {
+      const r = rubric([{ weightPercent: 100, items: [
+        { id: 'a', weightPercent: 50, maxRating: 5 },
+        { id: 'b', weightPercent: 50, maxRating: 5 },
+      ] }]);
+      expect(service.scoreRubric(r, new Map([['a', 5], ['b', 0]]), noPass).scorePercent).toBe(50);
+      // …whereas leaving 'b' unrated scores only what was examined.
+      expect(service.scoreRubric(r, new Map([['a', 5]]), noPass).scorePercent).toBe(100);
     });
 
     // ---- OSCE-style critical failure -----------------------------------
