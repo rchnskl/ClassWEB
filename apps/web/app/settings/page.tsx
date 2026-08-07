@@ -7,7 +7,7 @@ import Topbar from '@/components/Topbar';
 import { apiFetch, downloadFile } from '@/lib/api';
 import { useI18n } from '@/lib/i18n';
 
-type Tab = 'general' | 'academic' | 'attendance' | 'users' | 'audit' | 'backup';
+type Tab = 'general' | 'academic' | 'attendance' | 'users' | 'audit' | 'backup' | 'maintenance';
 
 export default function SettingsPage() {
   const router = useRouter();
@@ -49,6 +49,7 @@ export default function SettingsPage() {
           <button className={`tab ${tab === 'users' ? 'active' : ''}`} onClick={() => setTab('users')}>{t('users.tab')}</button>
           <button className={`tab ${tab === 'audit' ? 'active' : ''}`} onClick={() => setTab('audit')}>{t('set.tab.audit')}</button>
           <button className={`tab ${tab === 'backup' ? 'active' : ''}`} onClick={() => setTab('backup')}>{t('set.tab.backup')}</button>
+          <button className={`tab ${tab === 'maintenance' ? 'active' : ''}`} onClick={() => setTab('maintenance')}>{t('set.tab.maintenance')}</button>
         </div>
 
         {tab === 'general' && <GeneralTab />}
@@ -57,6 +58,7 @@ export default function SettingsPage() {
         {tab === 'users' && <UsersTab />}
         {tab === 'audit' && <AuditTab />}
         {tab === 'backup' && <BackupTab />}
+        {tab === 'maintenance' && <MaintenanceTab />}
       </div>
     </div>
   );
@@ -939,6 +941,124 @@ function BackupTab() {
           </table>
         </div>
       </div>
+    </div>
+  );
+}
+
+interface MaintenancePreview {
+  sessionsToEnd: number;
+  staleRefreshTokens: number;
+  openCheckInWindows: number;
+  stuckBackups: number;
+  oldAuditLogs: number;
+}
+interface MaintenanceResult {
+  loggedOutSessions: number;
+  attendanceWindowsClosed: number;
+  backupsMarkedFailed: number;
+  auditLogsPruned: number;
+  ranAt: string;
+}
+
+function MaintenanceTab() {
+  const { t, lang } = useI18n();
+  const [preview, setPreview] = useState<MaintenancePreview | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [confirming, setConfirming] = useState(false);
+  const [running, setRunning] = useState(false);
+  const [result, setResult] = useState<MaintenanceResult | null>(null);
+  const [runError, setRunError] = useState<string | null>(null);
+
+  const load = useCallback(async () => {
+    setLoadError(null);
+    try { setPreview(await apiFetch<MaintenancePreview>('/maintenance/preview')); }
+    catch (err) { setLoadError(err instanceof Error ? err.message : 'Failed to load'); }
+  }, []);
+  useEffect(() => { void load(); }, [load]);
+
+  async function run() {
+    setRunning(true);
+    setRunError(null);
+    setConfirming(false);
+    try {
+      const res = await apiFetch<MaintenanceResult>('/maintenance/refresh', { method: 'POST' });
+      setResult(res);
+      await load();
+    } catch (err) {
+      setRunError(err instanceof Error ? err.message : 'Failed to run maintenance refresh');
+    } finally {
+      setRunning(false);
+    }
+  }
+
+  const fmt = (iso: string) => new Date(iso).toLocaleString(lang === 'th' ? 'th-TH' : 'en-US', { dateStyle: 'medium', timeStyle: 'short' });
+
+  if (loadError) {
+    return (
+      <div className="glass rise" style={{ padding: 24 }}>
+        <div className="chip chip-danger" style={{ display: 'block', marginBottom: 12 }}>{loadError}</div>
+        <button onClick={load} className="glass hairline" style={{ padding: '9px 16px', borderRadius: 12, fontSize: 13.5, fontWeight: 600 }}>{t('common.retry')}</button>
+      </div>
+    );
+  }
+
+  return (
+    <div>
+      <div className="glass rise" style={{ padding: 24, marginBottom: 16 }}>
+        <h3 style={{ margin: '0 0 6px', fontSize: 16, fontWeight: 700 }}>{t('set.maint.title')}</h3>
+        <p className="muted" style={{ fontSize: 13, margin: '0 0 18px', maxWidth: 620 }}>{t('set.maint.hint')}</p>
+
+        {preview && (
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 10, marginBottom: 18 }}>
+            <Stat label={t('set.maint.sessions')} value={preview.staleRefreshTokens} />
+            <Stat label={t('set.maint.checkins')} value={preview.openCheckInWindows} />
+            <Stat label={t('set.maint.backups')} value={preview.stuckBackups} />
+            <Stat label={t('set.maint.auditLogs')} value={preview.oldAuditLogs} />
+          </div>
+        )}
+
+        {runError && <div className="chip chip-danger" style={{ display: 'block', marginBottom: 14 }}>{runError}</div>}
+
+        {result && (
+          <div className="glass hairline" style={{ padding: 14, borderRadius: 12, marginBottom: 14, fontSize: 13 }}>
+            <div style={{ fontWeight: 700, marginBottom: 6 }}>{t('set.maint.doneAt')} {fmt(result.ranAt)}</div>
+            <div className="muted">{t('set.maint.resultSessions')}: {result.loggedOutSessions}</div>
+            <div className="muted">{t('set.maint.resultCheckins')}: {result.attendanceWindowsClosed}</div>
+            <div className="muted">{t('set.maint.resultBackups')}: {result.backupsMarkedFailed}</div>
+            <div className="muted">{t('set.maint.resultAudit')}: {result.auditLogsPruned}</div>
+          </div>
+        )}
+
+        {/* In-page confirm rather than window.confirm() — some in-app/embedded
+            browsers silently block native confirm dialogs, which made a
+            destructive action look completely unresponsive when clicked. */}
+        {confirming ? (
+          <div className="glass hairline" style={{ padding: 14, borderRadius: 12, display: 'flex', flexDirection: 'column', gap: 10 }}>
+            <div style={{ fontSize: 13.5, fontWeight: 600 }}>{t('set.maint.confirm')}</div>
+            <div style={{ display: 'flex', gap: 10 }}>
+              <button onClick={run} disabled={running} className="btn-danger" style={{ padding: '9px 16px', fontSize: 13.5 }}>
+                {running ? t('set.maint.running') : t('set.maint.confirmYes')}
+              </button>
+              <button onClick={() => setConfirming(false)} disabled={running} className="glass hairline" style={{ padding: '9px 16px', borderRadius: 12, fontSize: 13.5, fontWeight: 600 }}>
+                {t('tt.cancel')}
+              </button>
+            </div>
+          </div>
+        ) : (
+          <button onClick={() => setConfirming(true)} className="btn-danger" style={{ padding: '11px 20px', fontSize: 14 }}>
+            {t('set.maint.action')}
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function Stat({ label, value }: { label: string; value: number }) {
+  return (
+    <div className="glass hairline" style={{ padding: '12px 14px', borderRadius: 12 }}>
+      <div style={{ fontSize: 22, fontWeight: 750 }}>{value}</div>
+      <div className="muted" style={{ fontSize: 11.5 }}>{label}</div>
     </div>
   );
 }

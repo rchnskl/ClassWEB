@@ -32,6 +32,7 @@ import { HealthModule } from './health/health.module';
 import { SettingsModule } from './settings/settings.module';
 import { AuditModule } from './audit/audit.module';
 import { BackupsModule } from './backups/backups.module';
+import { MaintenanceModule } from './maintenance/maintenance.module';
 import { JwtAuthGuard } from './common/guards/jwt-auth.guard';
 import { PermissionsGuard } from './common/guards/permissions.guard';
 import { AuditInterceptor } from './common/interceptors/audit.interceptor';
@@ -73,6 +74,7 @@ import { AllExceptionsFilter } from './common/filters/all-exceptions.filter';
     SettingsModule,
     AuditModule,
     BackupsModule,
+    MaintenanceModule,
   ],
   providers: [
     // Order matters: rate-limit → authenticate → authorize.

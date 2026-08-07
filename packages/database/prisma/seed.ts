@@ -19,7 +19,7 @@ const RESOURCES = [
   'university', 'faculty', 'program', 'course', 'subject', 'section', 'department',
   'academicYear', 'semester', 'room', 'building',
   'student', 'lecturer', 'enrollment', 'attendance', 'timetable',
-  'note', 'assessment', 'report', 'notification', 'setting', 'audit', 'backup', 'user', 'role',
+  'note', 'assessment', 'report', 'notification', 'setting', 'audit', 'backup', 'user', 'role', 'maintenance',
 ];
 const ACTIONS = ['create', 'read', 'update', 'delete', 'export'] as const;
 
