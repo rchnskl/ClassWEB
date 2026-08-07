@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Sidebar from '@/components/Sidebar';
 import Topbar from '@/components/Topbar';
-import { apiFetch } from '@/lib/api';
+import { apiFetch, type MeResponse } from '@/lib/api';
 import { useI18n } from '@/lib/i18n';
 
 interface Slot {
@@ -19,6 +19,7 @@ interface Slot {
 interface CalEntry {
   id: string; type: string; title: string; startAt: string; endAt: string;
   color: string | null; room: { roomNumber: string } | null; createdById?: string | null;
+  visibility?: string;
 }
 
 const DAYS = ['MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY'];
@@ -66,6 +67,7 @@ export default function TimetablePage() {
   const { t } = useI18n();
   const [email, setEmail] = useState('');
   const [userId, setUserId] = useState('');
+  const [isAdmin, setIsAdmin] = useState(false);
   const [slots, setSlots] = useState<Slot[]>([]);
   const [events, setEvents] = useState<CalEntry[]>([]);
   const [loading, setLoading] = useState(true);
@@ -92,6 +94,7 @@ export default function TimetablePage() {
       .then((d) => setSlots(d.slots))
       .catch((e) => setError(e instanceof Error ? e.message : 'Failed to load timetable'))
       .finally(() => setLoading(false));
+    apiFetch<MeResponse>('/users/me').then((me) => setIsAdmin(me.roles.some((r) => r.role.code === 'ADMIN'))).catch(() => {});
     void loadEvents();
   }, [router, loadEvents]);
 
@@ -241,12 +244,17 @@ export default function TimetablePage() {
                     const color = ev.color ?? st.color;
                     const top = (toMin(ev._s) - START_HOUR * 60) * PX_PER_MIN;
                     const height = Math.max(28, (toMin(ev._e) - toMin(ev._s)) * PX_PER_MIN);
-                    const mine = ev.createdById === userId;
+                    // Mirrors calendar.service.ts's remove(): only a PRIVATE entry is
+                    // creator-restricted. FACULTY-visibility entries (exams, activities,
+                    // meetings) are manageable by admins and anyone with delete rights —
+                    // gating this button on "created by me" hid the ✕ from every admin
+                    // who didn't personally create the exam entry.
+                    const canManage = isAdmin || ev.createdById === userId || ev.visibility !== 'PRIVATE';
                     return (
                       <div key={ev.id} title={ev.title} style={{ position: 'absolute', top, height, right: 4, width: 'calc(45% - 6px)', borderRadius: 11, padding: '6px 8px', background: `${color}22`, border: `1px solid ${color}`, borderLeft: `3px solid ${color}`, color: 'var(--text-0)', overflow: 'hidden' }}>
                         <div style={{ fontSize: 12, display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
                           <span>{st.icon} <span style={{ fontWeight: 700, fontSize: 10.5 }}>{t(`tt.type.${ev.type}`)}</span></span>
-                          {mine && (
+                          {canManage && (
                             <button onClick={() => removeEvent(ev.id)} aria-label={t('tt.delete')} title={t('tt.delete')}
                               style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: 'var(--text-2)', fontSize: 11, padding: 0, lineHeight: 1 }}>✕</button>
                           )}
