@@ -19,7 +19,10 @@ export class LecturersService {
     id: true, employeeCode: true, nameEn: true, nameTh: true, position: true,
     email: true, phone: true, office: true, isActive: true, userId: true,
     department: { select: { id: true, code: true, nameEn: true } },
-    _count: { select: { primarySections: true } },
+    // Filtered so a deleted section doesn't keep inflating this count forever —
+    // Prisma's _count includes soft-deleted rows by default unless the relation
+    // itself is given a `where`.
+    _count: { select: { primarySections: { where: { deletedAt: null } } } },
   } satisfies Prisma.LecturerSelect;
 
   /**
