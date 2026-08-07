@@ -1610,7 +1610,11 @@ model EvaluationScore {
   id           String   @id @default(cuid())
   evaluationId String
   rubricItemId String
-  rating       Int
+  /// Score given for this item, on the item's own 0..maxRating scale. Float
+  /// rather than Int because a raw exam mark is routinely a half point
+  /// (23.5 out of 25) — the original 1..5 observation scales still store
+  /// whole numbers and are unaffected.
+  rating       Float
   /// Only meaningful when the item is isCritical; null for non-critical items.
   passed       Boolean?
 

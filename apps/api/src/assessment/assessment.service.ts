@@ -345,11 +345,20 @@ export class AssessmentService {
       if (!section) throw new BadRequestException('Section does not exist in this tenant');
     }
 
-    const validItems = new Set(rubric.sections.flatMap((s) => s.items.map((i) => i.id)));
+    // Each item carries its own scale, so the upper bound is per-item rather
+    // than a fixed 5: an observation item tops out at 5, a 25-mark midterm at
+    // 25. Enforced here because the DTO cannot know the item it refers to —
+    // without this an out-of-range rating would sail through and inflate the
+    // score past 100% (rating/maxRating is used unclamped when scoring).
+    const maxByItem = new Map(rubric.sections.flatMap((s) => s.items.map((i) => [i.id, i.maxRating] as const)));
     const ratings = new Map<string, number>();
     const passed = new Map<string, boolean>();
     for (const s of dto.scores) {
-      if (!validItems.has(s.rubricItemId)) continue;
+      const max = maxByItem.get(s.rubricItemId);
+      if (max === undefined) continue;
+      if (s.rating > max) {
+        throw new BadRequestException(`Score ${s.rating} exceeds the maximum of ${max} for this item`);
+      }
       ratings.set(s.rubricItemId, s.rating);
       if (s.passed !== undefined) passed.set(s.rubricItemId, s.passed);
     }

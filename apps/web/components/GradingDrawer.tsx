@@ -182,15 +182,37 @@ export default function GradingDrawer({
                           title={t('as.weight')}
                           style={{ width: 52, padding: '4px 6px', fontSize: 11.5, textAlign: 'right', borderRadius: 8, border: '1px solid var(--glass-hairline)', background: 'transparent', color: 'var(--text-2)' }} />
                         <span className="muted" style={{ fontSize: 10 }}>%</span>
-                        <div style={{ display: 'flex', gap: 3 }}>
-                          {[1, 2, 3, 4, 5].map((n) => (
-                            <button key={n} onClick={() => setRatings({ ...ratings, [it.id]: n })}
-                              style={{ width: 26, height: 26, borderRadius: 7, fontSize: 12, fontWeight: 700, cursor: 'pointer',
-                                border: (ratings[it.id] === n) ? '1px solid var(--brand)' : '1px solid var(--glass-hairline)',
-                                background: (ratings[it.id] === n) ? 'linear-gradient(120deg, var(--brand-2), var(--brand))' : 'transparent',
-                                color: (ratings[it.id] === n) ? '#fff' : 'var(--text-2)' }}>{n}</button>
-                          ))}
-                        </div>
+                        {/* A short observation scale stays a row of buttons —
+                            fastest to tap through a checklist. A score
+                            component (full mark 25, 30, …) can't be a button
+                            row, so it takes the raw mark directly. */}
+                        {it.maxRating <= 5 ? (
+                          <div style={{ display: 'flex', gap: 3 }}>
+                            {Array.from({ length: it.maxRating }, (_, i) => i + 1).map((n) => (
+                              <button key={n} onClick={() => setRatings({ ...ratings, [it.id]: n })}
+                                style={{ width: 26, height: 26, borderRadius: 7, fontSize: 12, fontWeight: 700, cursor: 'pointer',
+                                  border: (ratings[it.id] === n) ? '1px solid var(--brand)' : '1px solid var(--glass-hairline)',
+                                  background: (ratings[it.id] === n) ? 'linear-gradient(120deg, var(--brand-2), var(--brand))' : 'transparent',
+                                  color: (ratings[it.id] === n) ? '#fff' : 'var(--text-2)' }}>{n}</button>
+                            ))}
+                          </div>
+                        ) : (
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                            <input
+                              type="number" min={0} max={it.maxRating} step={0.5}
+                              value={ratings[it.id] ?? ''}
+                              placeholder="0"
+                              aria-label={`${name(it.textEn, it.textTh)} — ${t('as.score')}`}
+                              onChange={(e) => {
+                                const v = e.target.value;
+                                if (v === '') { const next = { ...ratings }; delete next[it.id]; setRatings(next); return; }
+                                setRatings({ ...ratings, [it.id]: Math.min(Number(v), it.maxRating) });
+                              }}
+                              style={{ width: 62, padding: '4px 6px', fontSize: 12.5, textAlign: 'right', borderRadius: 8,
+                                border: '1px solid var(--glass-hairline)', background: 'transparent', color: 'var(--text-0)' }} />
+                            <span className="muted" style={{ fontSize: 11 }}>/ {it.maxRating}</span>
+                          </div>
+                        )}
                         {it.isCritical && (
                           <div style={{ display: 'flex', gap: 3, marginLeft: 4 }}>
                             <button onClick={() => setPassed({ ...passed, [it.id]: true })} title={t('as.passed')}

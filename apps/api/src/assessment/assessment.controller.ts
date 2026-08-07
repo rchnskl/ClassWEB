@@ -102,7 +102,7 @@ export class AssessmentController {
 
   @Post('evaluation')
   @Permissions('assessment:create')
-  @ApiOperation({ summary: 'Save an evaluation (rate items 1–5); computes the rubric score' })
+  @ApiOperation({ summary: "Save an evaluation (each item scored on its own 0..maxRating scale); computes the rubric score" })
   save(@CurrentUser() user: AuthenticatedUser, @Body() dto: SaveEvaluationDto) {
     return this.assessment.save(user, user.email, dto);
   }

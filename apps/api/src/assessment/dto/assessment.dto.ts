@@ -7,11 +7,14 @@ export class ScoreEntryDto {
   @IsString()
   rubricItemId!: string;
 
-  @ApiProperty({ minimum: 0, maximum: 5 })
+  @ApiProperty({
+    minimum: 0,
+    description:
+      "Score on the item's own 0..maxRating scale. The upper bound is the item's maxRating and is enforced server-side — it is not a fixed 5, because a score component carries its raw mark (e.g. 23.5 out of 25).",
+  })
   @Type(() => Number)
-  @IsInt()
+  @IsNumber()
   @Min(0)
-  @Max(5)
   rating!: number;
 
   @ApiPropertyOptional({ description: 'Pass/fail for a critical item; ignored for non-critical items' })
@@ -103,8 +106,12 @@ export class RubricItemInputDto {
   @Type(() => Number) @IsNumber() @Min(0) @Max(100)
   weightPercent!: number;
 
-  @ApiPropertyOptional({ default: 5, minimum: 2, maximum: 10 })
-  @IsOptional() @Type(() => Number) @IsInt() @Min(2) @Max(10)
+  @ApiPropertyOptional({
+    default: 5, minimum: 2, maximum: 100,
+    description:
+      'Top of this item\'s scale. 5 for an observation rubric; for a score component it is the full mark (e.g. 25 for a 25-mark midterm), so the raw mark can be entered as-is.',
+  })
+  @IsOptional() @Type(() => Number) @IsInt() @Min(2) @Max(100)
   maxRating?: number;
 
   @ApiPropertyOptional({ description: 'Must-pass step; failing it forces the whole rubric score to 0', default: false })
