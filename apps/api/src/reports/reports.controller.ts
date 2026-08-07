@@ -1,11 +1,16 @@
 import { BadRequestException, Controller, Get, Param, Query, Res } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import type { Response } from 'express';
-import { ReportsService } from './reports.service';
+import { ReportsService, ReportLang } from './reports.service';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { Permissions } from '../common/decorators/permissions.decorator';
 import { Public } from '../common/decorators/public.decorator';
 import { AuthenticatedUser } from '../common/authenticated-user';
+
+/** ?lang=en switches a PDF's own labels/dates; anything else (or omitted) stays Thai. */
+function parseLang(lang?: string): ReportLang {
+  return lang === 'en' ? 'en' : 'th';
+}
 
 @ApiTags('reports')
 @Controller('reports')
@@ -16,8 +21,8 @@ export class ReportsController {
   @ApiBearerAuth()
   @Permissions('report:export')
   @ApiOperation({ summary: 'Attendance summary report — professional PDF (logos, signature, QR verify)' })
-  async pdf(@CurrentUser() user: AuthenticatedUser, @Res() res: Response) {
-    const { buffer, reportNumber } = await this.reports.attendancePdf(user, user.id, user.email);
+  async pdf(@CurrentUser() user: AuthenticatedUser, @Query('lang') lang: string | undefined, @Res() res: Response) {
+    const { buffer, reportNumber } = await this.reports.attendancePdf(user, user.id, user.email, parseLang(lang));
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', `attachment; filename="${reportNumber}.pdf"`);
     res.send(buffer);
@@ -49,8 +54,8 @@ export class ReportsController {
   @ApiBearerAuth()
   @Permissions('report:export')
   @ApiOperation({ summary: 'Individual student attendance report — PDF' })
-  async studentPdf(@CurrentUser() user: AuthenticatedUser, @Param('studentId') studentId: string, @Res() res: Response) {
-    const { buffer, reportNumber } = await this.reports.studentPdf(user.universityId, studentId, user.id, user.email);
+  async studentPdf(@CurrentUser() user: AuthenticatedUser, @Param('studentId') studentId: string, @Query('lang') lang: string | undefined, @Res() res: Response) {
+    const { buffer, reportNumber } = await this.reports.studentPdf(user.universityId, studentId, user.id, user.email, parseLang(lang));
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', `attachment; filename="${reportNumber}.pdf"`);
     res.send(buffer);
@@ -84,8 +89,8 @@ export class ReportsController {
   @ApiBearerAuth()
   @Permissions('report:export')
   @ApiOperation({ summary: 'Section grade sheet — landscape PDF (per-rubric scores + total + grade for every student)' })
-  async sectionGradesPdf(@CurrentUser() user: AuthenticatedUser, @Param('sectionId') sectionId: string, @Res() res: Response) {
-    const { buffer, reportNumber } = await this.reports.sectionGradesPdf(user, sectionId, user.id, user.email);
+  async sectionGradesPdf(@CurrentUser() user: AuthenticatedUser, @Param('sectionId') sectionId: string, @Query('lang') lang: string | undefined, @Res() res: Response) {
+    const { buffer, reportNumber } = await this.reports.sectionGradesPdf(user, sectionId, user.id, user.email, parseLang(lang));
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', `attachment; filename="${reportNumber}.pdf"`);
     res.send(buffer);
@@ -119,9 +124,9 @@ export class ReportsController {
   @ApiBearerAuth()
   @Permissions('report:export')
   @ApiOperation({ summary: 'Individual student grade report — PDF (rubric breakdown + total + grade, signature, QR verify)' })
-  async studentGradePdf(@CurrentUser() user: AuthenticatedUser, @Param('studentId') studentId: string, @Query('sectionId') sectionId: string, @Res() res: Response) {
+  async studentGradePdf(@CurrentUser() user: AuthenticatedUser, @Param('studentId') studentId: string, @Query('sectionId') sectionId: string, @Query('lang') lang: string | undefined, @Res() res: Response) {
     if (!sectionId) throw new BadRequestException('sectionId is required');
-    const { buffer, reportNumber } = await this.reports.studentGradePdf(user, studentId, sectionId, user.id, user.email);
+    const { buffer, reportNumber } = await this.reports.studentGradePdf(user, studentId, sectionId, user.id, user.email, parseLang(lang));
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', `attachment; filename="${reportNumber}.pdf"`);
     res.send(buffer);

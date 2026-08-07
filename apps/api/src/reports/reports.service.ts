@@ -12,14 +12,32 @@ import { AuthenticatedUser } from '../common/authenticated-user';
 
 const WEB_BASE = process.env.WEB_BASE_URL ?? 'http://localhost:3000';
 
+export type ReportLang = 'th' | 'en';
+
 function tierOf(rate: number): 'OK' | 'WARNING' | 'RISK' | 'CRITICAL' {
   if (rate < 60) return 'CRITICAL';
   if (rate < 70) return 'RISK';
   if (rate < 80) return 'WARNING';
   return 'OK';
 }
-const TIER_TH: Record<string, string> = { OK: 'ปกติ', WARNING: 'เฝ้าระวัง', RISK: 'เสี่ยง', CRITICAL: 'วิกฤต' };
-const STATUS_TH: Record<string, string> = { PRESENT: 'มาเรียน', LATE: 'สาย', ABSENT: 'ขาด', EXCUSED: 'ลาป่วย/ลากิจ', LEAVE: 'ลา' };
+const TIER_LABEL: Record<string, Record<ReportLang, string>> = {
+  OK: { th: 'ปกติ', en: 'OK' },
+  WARNING: { th: 'เฝ้าระวัง', en: 'Warning' },
+  RISK: { th: 'เสี่ยง', en: 'At risk' },
+  CRITICAL: { th: 'วิกฤต', en: 'Critical' },
+};
+const STATUS_LABEL: Record<string, Record<ReportLang, string>> = {
+  PRESENT: { th: 'มาเรียน', en: 'Present' },
+  LATE: { th: 'สาย', en: 'Late' },
+  ABSENT: { th: 'ขาด', en: 'Absent' },
+  EXCUSED: { th: 'ลาป่วย/ลากิจ', en: 'Excused' },
+  LEAVE: { th: 'ลา', en: 'Leave' },
+};
+
+/** Picks the string for the report's selected language — every PDF label goes through this. */
+function L(lang: ReportLang, th: string, en: string): string {
+  return lang === 'en' ? en : th;
+}
 
 @Injectable()
 export class ReportsService {
@@ -29,10 +47,10 @@ export class ReportsService {
     private readonly assessment: AssessmentService,
   ) {}
 
-  private thaiDateTime(d: Date): string {
-    return new Intl.DateTimeFormat('th-TH-u-ca-buddhist', {
-      dateStyle: 'long', timeStyle: 'short', timeZone: 'Asia/Bangkok',
-    }).format(d);
+  private formatDateTime(d: Date, lang: ReportLang): string {
+    return lang === 'en'
+      ? new Intl.DateTimeFormat('en-GB', { dateStyle: 'long', timeStyle: 'short', timeZone: 'Asia/Bangkok' }).format(d)
+      : new Intl.DateTimeFormat('th-TH-u-ca-buddhist', { dateStyle: 'long', timeStyle: 'short', timeZone: 'Asia/Bangkok' }).format(d);
   }
 
   /**
@@ -139,7 +157,7 @@ export class ReportsService {
 
   // ---- PDF --------------------------------------------------------------
 
-  async attendancePdf(user: AuthenticatedUser, byId?: string, byName?: string): Promise<{ buffer: Buffer; reportNumber: string }> {
+  async attendancePdf(user: AuthenticatedUser, byId?: string, byName?: string, lang: ReportLang = 'th'): Promise<{ buffer: Buffer; reportNumber: string }> {
     const universityId = user.universityId;
     const { university, faculty, overview } = await this.gather(user);
     const checksum = createHash('sha256').update(JSON.stringify(overview)).digest('hex');
@@ -167,43 +185,51 @@ export class ReportsService {
     if (uniLogo) doc.image(uniLogo, left, 38, { width: 54 });
     if (facLogo) doc.image(facLogo, right - 54, 36, { width: 54 });
     doc.font(FB).fontSize(20).fillColor('#26303f')
-      .text(university?.nameTh ?? university?.nameEn ?? 'University', 100, 42, { width: pageW - 200, align: 'center' });
+      .text((lang === 'en' ? university?.nameEn : university?.nameTh) ?? university?.nameEn ?? 'University', 100, 42, { width: pageW - 200, align: 'center' });
     doc.font(FB).fontSize(17).fillColor('#0e2a4a')
-      .text(faculty?.nameTh ?? faculty?.nameEn ?? 'Faculty of Nursing', 100, 68, { width: pageW - 200, align: 'center' });
+      .text((lang === 'en' ? faculty?.nameEn : faculty?.nameTh) ?? faculty?.nameEn ?? 'Faculty of Nursing', 100, 68, { width: pageW - 200, align: 'center' });
     doc.font(F).fontSize(15).fillColor('#4a5666')
-      .text('รายงานสรุปการเข้าเรียน (Attendance Summary Report)', 100, 92, { width: pageW - 200, align: 'center' });
+      .text(L(lang, 'รายงานสรุปการเข้าเรียน', 'Attendance Summary Report'), 100, 92, { width: pageW - 200, align: 'center' });
 
     doc.moveTo(left, 122).lineTo(right, 122).strokeColor('#ff8a4c').lineWidth(2).stroke();
 
     // Report number + generated time
     doc.font(F).fontSize(13).fillColor('#4a5666');
-    doc.text(`เลขที่รายงาน (Report No.): ${reportNumber}`, left, 130);
-    doc.text(`ออกรายงานเมื่อ (Generated): ${this.thaiDateTime(new Date())}`, left, 148);
+    doc.text(`${L(lang, 'เลขที่รายงาน', 'Report No.')}: ${reportNumber}`, left, 130);
+    doc.text(`${L(lang, 'ออกรายงานเมื่อ', 'Generated')}: ${this.formatDateTime(new Date(), lang)}`, left, 148);
 
     // Summary box
     let y = 178;
     doc.roundedRect(left, y, right - left, 66, 10).fillAndStroke('#fff6ee', '#ffd9bf');
-    doc.fillColor('#26303f').font(FB).fontSize(15).text('สรุปภาพรวม (Summary)', left + 14, y + 8);
+    doc.fillColor('#26303f').font(FB).fontSize(15).text(L(lang, 'สรุปภาพรวม', 'Summary'), left + 14, y + 8);
     doc.font(F).fontSize(14).fillColor('#4a5666');
     const rate = overview.overallRate ?? 0;
-    doc.text(`เข้าเรียนโดยรวม: ${rate}%`, left + 14, y + 30);
-    doc.text(`มาเรียน ${overview.totals.present} · สาย ${overview.totals.late} · ขาด ${overview.totals.absent}  (รวม ${overview.totals.records} รายการ)`, left + 180, y + 30);
-    doc.text(`นักศึกษากลุ่มเสี่ยง: ต่ำกว่า 80% = ${overview.risk.below80} · ต่ำกว่า 70% = ${overview.risk.below70} · ต่ำกว่า 60% = ${overview.risk.below60}`, left + 14, y + 46);
+    doc.text(`${L(lang, 'เข้าเรียนโดยรวม', 'Overall attendance')}: ${rate}%`, left + 14, y + 30);
+    doc.text(
+      `${L(lang, 'มาเรียน', 'Present')} ${overview.totals.present} · ${L(lang, 'สาย', 'Late')} ${overview.totals.late} · ${L(lang, 'ขาด', 'Absent')} ${overview.totals.absent}  (${L(lang, 'รวม', 'Total')} ${overview.totals.records} ${L(lang, 'รายการ', 'records')})`,
+      left + 180, y + 30,
+    );
+    doc.text(
+      `${L(lang, 'นักศึกษากลุ่มเสี่ยง', 'Students at risk')}: <80% = ${overview.risk.below80} · <70% = ${overview.risk.below70} · <60% = ${overview.risk.below60}`,
+      left + 14, y + 46,
+    );
 
     // At-risk table
     y += 86;
-    doc.font(FB).fontSize(15).fillColor('#26303f').text('รายชื่อนักศึกษากลุ่มเสี่ยง (Students at Risk)', left, y);
+    doc.font(FB).fontSize(15).fillColor('#26303f').text(L(lang, 'รายชื่อนักศึกษากลุ่มเสี่ยง', 'Students at Risk'), left, y);
     y += 24;
     const cols = [left, left + 30, left + 130, left + 330, left + 420];
-    const headers = ['ลำดับ', 'รหัส', 'ชื่อ-สกุล', 'เข้าเรียน %', 'สถานะ'];
+    const headers = [
+      L(lang, 'ลำดับ', '#'), L(lang, 'รหัส', 'Code'), L(lang, 'ชื่อ-สกุล', 'Name'),
+      L(lang, 'เข้าเรียน %', 'Rate %'), L(lang, 'สถานะ', 'Status'),
+    ];
     doc.roundedRect(left, y - 4, right - left, 22, 4).fill('#0e7c7b');
     doc.font(FB).fontSize(13).fillColor('#ffffff');
     headers.forEach((h, i) => doc.text(h, cols[i] + 4, y, { width: (cols[i + 1] ?? right) - cols[i] - 6 }));
     y += 22;
     doc.font(F).fontSize(13).fillColor('#26303f');
-    const tierTh: Record<string, string> = { WARNING: 'เฝ้าระวัง', RISK: 'เสี่ยง', CRITICAL: 'วิกฤต', OK: 'ปกติ' };
     if (overview.atRisk.length === 0) {
-      doc.text('— ไม่มีนักศึกษากลุ่มเสี่ยง —', left + 4, y + 2); y += 22;
+      doc.text(L(lang, '— ไม่มีนักศึกษากลุ่มเสี่ยง —', '— No students at risk —'), left + 4, y + 2); y += 22;
     } else {
       overview.atRisk.forEach((s, i) => {
         if (i % 2 === 1) doc.rect(left, y - 3, right - left, 20).fill('#f6f8fb').fillColor('#26303f');
@@ -212,7 +238,7 @@ export class ReportsService {
         doc.text(s.studentCode, cols[1] + 4, y, { width: cols[2] - cols[1] - 6 });
         doc.text(this.personName(s.nameEn, s.nameTh), cols[2] + 4, y, { width: cols[3] - cols[2] - 6, lineBreak: false, ellipsis: true });
         doc.text(`${s.rate}%`, cols[3] + 4, y, { width: cols[4] - cols[3] - 6 });
-        doc.text(tierTh[s.tier] ?? s.tier, cols[4] + 4, y, { width: right - cols[4] - 6 });
+        doc.text(TIER_LABEL[s.tier]?.[lang] ?? s.tier, cols[4] + 4, y, { width: right - cols[4] - 6 });
         y += 20;
       });
     }
@@ -222,10 +248,10 @@ export class ReportsService {
     const footY = doc.page.height - 168;
     doc.image(qrPng, left, footY, { width: 80 });
     doc.font(F).fontSize(10).fillColor('#7c8798')
-      .text('สแกนเพื่อตรวจสอบ', left - 15, footY + 82, { width: 110, align: 'center', lineBreak: false });
+      .text(L(lang, 'สแกนเพื่อตรวจสอบ', 'Scan to verify'), left - 15, footY + 82, { width: 110, align: 'center', lineBreak: false });
     doc.font(F).fontSize(14).fillColor('#26303f');
     doc.text('.................................................', right - 220, footY + 30, { width: 220, align: 'center', lineBreak: false });
-    doc.text('ผู้รับรอง / Authorised signature', right - 220, footY + 50, { width: 220, align: 'center', lineBreak: false });
+    doc.text(L(lang, 'ผู้รับรอง', 'Authorised signature'), right - 220, footY + 50, { width: 220, align: 'center', lineBreak: false });
     if (byName) doc.text(`(${byName})`, right - 220, footY + 68, { width: 220, align: 'center', lineBreak: false });
 
     // Footer line (kept above the bottom margin to avoid an extra page)
@@ -274,7 +300,7 @@ export class ReportsService {
     ws.addRow([faculty?.nameTh ?? 'Faculty of Nursing']);
     ws.addRow(['รายงานสรุปการเข้าเรียน (Attendance Summary Report)']);
     ws.addRow([`Report No.: ${reportNumber}`]);
-    ws.addRow([`Generated: ${this.thaiDateTime(new Date())}`]);
+    ws.addRow([`Generated: ${this.formatDateTime(new Date(), 'th')}`]);
     ws.addRow([`Overall rate: ${overview.overallRate ?? '-'}%  ·  Present ${overview.totals.present} / Late ${overview.totals.late} / Absent ${overview.totals.absent}`]);
     ws.addRow([]);
     const header = ws.addRow(['#', 'Student code', 'Name (EN)', 'Name (TH)', 'Program', 'Present', 'Late', 'Absent', 'Rate %', 'Tier', 'Badges']);
@@ -331,7 +357,7 @@ export class ReportsService {
     return { university, faculty, student, total, present, late, absent, rate, tier: tierOf(rate), bySubject, log };
   }
 
-  async studentPdf(universityId: string, studentId: string, byId?: string, byName?: string): Promise<{ buffer: Buffer; reportNumber: string }> {
+  async studentPdf(universityId: string, studentId: string, byId?: string, byName?: string, lang: ReportLang = 'th'): Promise<{ buffer: Buffer; reportNumber: string }> {
     const d = await this.gatherStudent(universityId, studentId);
     const checksum = createHash('sha256').update(JSON.stringify({ code: d.student.studentCode, rate: d.rate, total: d.total })).digest('hex');
     const reportNumber = await this.register(universityId, 'PDF', checksum, byId, byName, 'STUDENT_ATTENDANCE', `Student report ${d.student.studentCode}`);
@@ -353,29 +379,36 @@ export class ReportsService {
     const uniLogo = LOGO_UNIVERSITY(); const facLogo = LOGO_FACULTY();
     if (uniLogo) doc.image(uniLogo, left, 38, { width: 50 });
     if (facLogo) doc.image(facLogo, right - 50, 36, { width: 50 });
-    doc.font(FB).fontSize(18).fillColor('#26303f').text(d.university?.nameTh ?? 'University', 100, 44, { width: pageW - 200, align: 'center' });
-    doc.font(FB).fontSize(15).fillColor('#0e2a4a').text(d.faculty?.nameTh ?? 'Faculty of Nursing', 100, 66, { width: pageW - 200, align: 'center' });
-    doc.font(F).fontSize(14).fillColor('#4a5666').text('รายงานการเข้าเรียนรายบุคคล (Individual Attendance Report)', 100, 86, { width: pageW - 200, align: 'center' });
+    doc.font(FB).fontSize(18).fillColor('#26303f').text((lang === 'en' ? d.university?.nameEn : d.university?.nameTh) ?? 'University', 100, 44, { width: pageW - 200, align: 'center' });
+    doc.font(FB).fontSize(15).fillColor('#0e2a4a').text((lang === 'en' ? d.faculty?.nameEn : d.faculty?.nameTh) ?? 'Faculty of Nursing', 100, 66, { width: pageW - 200, align: 'center' });
+    doc.font(F).fontSize(14).fillColor('#4a5666').text(L(lang, 'รายงานการเข้าเรียนรายบุคคล', 'Individual Attendance Report'), 100, 86, { width: pageW - 200, align: 'center' });
     doc.moveTo(left, 112).lineTo(right, 112).strokeColor('#ff8a4c').lineWidth(2).stroke();
 
     // Student info + summary box
     let y = 122;
-    doc.font(F).fontSize(12).fillColor('#4a5666').text(`เลขที่รายงาน: ${reportNumber}    ออกเมื่อ: ${this.thaiDateTime(new Date())}`, left, y);
+    doc.font(F).fontSize(12).fillColor('#4a5666').text(`${L(lang, 'เลขที่รายงาน', 'Report No.')}: ${reportNumber}    ${L(lang, 'ออกเมื่อ', 'Generated')}: ${this.formatDateTime(new Date(), lang)}`, left, y);
     y += 22;
     doc.roundedRect(left, y, right - left, 78, 10).fillAndStroke('#fff6ee', '#ffd9bf');
     doc.fillColor('#26303f').font(FB).fontSize(14).text(`${this.personName(d.student.nameEn, d.student.nameTh)}  (${d.student.studentCode})`, left + 14, y + 10);
     doc.font(F).fontSize(12).fillColor('#4a5666');
-    doc.text(`หลักสูตร: ${d.student.program.code} · สถานะ: ${d.student.status}${d.student.admissionYear ? ` · ปีที่เข้า: ${d.student.admissionYear}` : ''}`, left + 14, y + 32);
+    doc.text(
+      `${L(lang, 'หลักสูตร', 'Program')}: ${d.student.program.code} · ${L(lang, 'สถานะ', 'Status')}: ${d.student.status}${d.student.admissionYear ? ` · ${L(lang, 'ปีที่เข้า', 'Admission year')}: ${d.student.admissionYear}` : ''}`,
+      left + 14, y + 32,
+    );
     doc.font(FB).fontSize(13).fillColor('#26303f')
-      .text(`เข้าเรียนโดยรวม: ${d.rate}%  (${TIER_TH[d.tier]})    มาเรียน ${d.present} · สาย ${d.late} · ขาด ${d.absent}  รวม ${d.total} คาบ`, left + 14, y + 52);
+      .text(
+        `${L(lang, 'เข้าเรียนโดยรวม', 'Overall attendance')}: ${d.rate}%  (${TIER_LABEL[d.tier]?.[lang] ?? d.tier})    ${L(lang, 'มาเรียน', 'Present')} ${d.present} · ${L(lang, 'สาย', 'Late')} ${d.late} · ${L(lang, 'ขาด', 'Absent')} ${d.absent}  ${L(lang, 'รวม', 'Total')} ${d.total} ${L(lang, 'คาบ', 'sessions')}`,
+        left + 14, y + 52,
+      );
     y += 96;
 
     // Per-subject breakdown
-    doc.font(FB).fontSize(14).fillColor('#26303f').text('สรุปแยกรายวิชา (By subject)', left, y); y += 22;
+    doc.font(FB).fontSize(14).fillColor('#26303f').text(L(lang, 'สรุปแยกรายวิชา', 'By Subject'), left, y); y += 22;
     const sc = [left, left + 90, left + 300, left + 360, left + 420, left + 480];
     doc.roundedRect(left, y - 4, right - left, 20, 4).fill('#0e7c7b');
     doc.font(FB).fontSize(11).fillColor('#fff');
-    ['รหัสวิชา', 'ชื่อวิชา', 'มา', 'สาย', 'ขาด', 'เข้าเรียน%'].forEach((h, i) => doc.text(h, sc[i] + 3, y, { width: (sc[i + 1] ?? right) - sc[i] - 5 }));
+    [L(lang, 'รหัสวิชา', 'Code'), L(lang, 'ชื่อวิชา', 'Subject'), L(lang, 'มา', 'P'), L(lang, 'สาย', 'L'), L(lang, 'ขาด', 'A'), L(lang, 'เข้าเรียน%', 'Rate%')]
+      .forEach((h, i) => doc.text(h, sc[i] + 3, y, { width: (sc[i + 1] ?? right) - sc[i] - 5 }));
     y += 20;
     doc.font(F).fontSize(11).fillColor('#26303f');
     for (const s of d.bySubject) {
@@ -388,23 +421,25 @@ export class ReportsService {
     y += 12;
 
     // Detailed session log (paginated)
-    doc.font(FB).fontSize(14).fillColor('#26303f').text('บันทึกการเข้าเรียนรายคาบ (Session log)', left, y); y += 22;
+    doc.font(FB).fontSize(14).fillColor('#26303f').text(L(lang, 'บันทึกการเข้าเรียนรายคาบ', 'Session Log'), left, y); y += 22;
     const lc = [left, left + 150, left + 320];
     const drawLogHeader = (yy: number) => {
       doc.roundedRect(left, yy - 4, right - left, 20, 4).fill('#0e7c7b');
       doc.font(FB).fontSize(11).fillColor('#fff');
-      ['วันที่', 'รายวิชา', 'สถานะ'].forEach((h, i) => doc.text(h, lc[i] + 3, yy, { width: (lc[i + 1] ?? right) - lc[i] - 5 }));
+      [L(lang, 'วันที่', 'Date'), L(lang, 'รายวิชา', 'Subject'), L(lang, 'สถานะ', 'Status')].forEach((h, i) => doc.text(h, lc[i] + 3, yy, { width: (lc[i + 1] ?? right) - lc[i] - 5 }));
       return yy + 20;
     };
     y = drawLogHeader(y);
     doc.font(F).fontSize(11).fillColor('#26303f');
-    const fmtDate = (dt: Date) => new Intl.DateTimeFormat('th-TH-u-ca-buddhist', { dateStyle: 'medium', timeZone: 'Asia/Bangkok' }).format(new Date(dt));
+    const fmtDate = (dt: Date) => (lang === 'en'
+      ? new Intl.DateTimeFormat('en-GB', { dateStyle: 'medium', timeZone: 'Asia/Bangkok' }).format(new Date(dt))
+      : new Intl.DateTimeFormat('th-TH-u-ca-buddhist', { dateStyle: 'medium', timeZone: 'Asia/Bangkok' }).format(new Date(dt)));
     d.log.forEach((row, i) => {
       if (y > doc.page.height - 80) { doc.addPage(); y = 50; y = drawLogHeader(y); doc.font(F).fontSize(11).fillColor('#26303f'); }
       if (i % 2 === 1) { doc.rect(left, y - 3, right - left, 18).fill('#f6f8fb'); doc.fillColor('#26303f'); }
       doc.text(fmtDate(row.date), lc[0] + 3, y, { width: lc[1] - lc[0] - 5 });
       doc.text(row.subject, lc[1] + 3, y, { width: lc[2] - lc[1] - 5 });
-      doc.text(STATUS_TH[row.status] ?? row.status, lc[2] + 3, y);
+      doc.text(STATUS_LABEL[row.status]?.[lang] ?? row.status, lc[2] + 3, y);
       y += 18;
     });
 
@@ -412,10 +447,10 @@ export class ReportsService {
     if (y > doc.page.height - 170) { doc.addPage(); y = 60; }
     const sy = y + 20;
     doc.image(qrPng, left, sy, { width: 78 });
-    doc.font(F).fontSize(10).fillColor('#7c8798').text('สแกนเพื่อตรวจสอบ', left - 15, sy + 80, { width: 108, align: 'center', lineBreak: false });
+    doc.font(F).fontSize(10).fillColor('#7c8798').text(L(lang, 'สแกนเพื่อตรวจสอบ', 'Scan to verify'), left - 15, sy + 80, { width: 108, align: 'center', lineBreak: false });
     doc.font(F).fontSize(13).fillColor('#26303f');
     doc.text('.................................................', right - 220, sy + 28, { width: 220, align: 'center', lineBreak: false });
-    doc.text('ผู้รับรอง / Authorised signature', right - 220, sy + 46, { width: 220, align: 'center', lineBreak: false });
+    doc.text(L(lang, 'ผู้รับรอง', 'Authorised signature'), right - 220, sy + 46, { width: 220, align: 'center', lineBreak: false });
 
     // Footer on every page. Zero the bottom margin while stamping so writing
     // near the page edge never auto-appends a blank page.
@@ -425,7 +460,7 @@ export class ReportsService {
       this.watermark(doc, F);
       doc.page.margins.bottom = 0;
       doc.font(F).fontSize(9).fillColor('#a0aab8')
-        .text(`Generated by ClassWeb · ${reportNumber} · verify at ${verifyUrl} · หน้า ${i + 1}/${range.count}`, left, doc.page.height - 40, { width: right - left, align: 'center', lineBreak: false });
+        .text(`Generated by ClassWeb · ${reportNumber} · verify at ${verifyUrl} · ${L(lang, 'หน้า', 'Page')} ${i + 1}/${range.count}`, left, doc.page.height - 40, { width: right - left, align: 'center', lineBreak: false });
     }
     doc.flushPages();
 
@@ -496,7 +531,7 @@ export class ReportsService {
     return { university, faculty, section, rubrics, students };
   }
 
-  async sectionGradesPdf(user: AuthenticatedUser, sectionId: string, byId?: string, byName?: string): Promise<{ buffer: Buffer; reportNumber: string }> {
+  async sectionGradesPdf(user: AuthenticatedUser, sectionId: string, byId?: string, byName?: string, lang: ReportLang = 'th'): Promise<{ buffer: Buffer; reportNumber: string }> {
     const universityId = user.universityId;
     const d = await this.gatherSectionGrades(user, sectionId);
     const checksum = createHash('sha256').update(JSON.stringify({ sectionId, students: d.students.map((s) => [s.studentId, s.total]) })).digest('hex');
@@ -520,12 +555,15 @@ export class ReportsService {
     const uniLogo = LOGO_UNIVERSITY(); const facLogo = LOGO_FACULTY();
     if (uniLogo) doc.image(uniLogo, left, 30, { width: 44 });
     if (facLogo) doc.image(facLogo, right - 44, 28, { width: 44 });
-    doc.font(FB).fontSize(16).fillColor('#26303f').text(d.university?.nameTh ?? 'University', 88, 34, { width: pageW - 176, align: 'center' });
-    doc.font(FB).fontSize(13).fillColor('#0e2a4a').text(d.faculty?.nameTh ?? 'Faculty of Nursing', 88, 53, { width: pageW - 176, align: 'center' });
+    doc.font(FB).fontSize(16).fillColor('#26303f').text((lang === 'en' ? d.university?.nameEn : d.university?.nameTh) ?? 'University', 88, 34, { width: pageW - 176, align: 'center' });
+    doc.font(FB).fontSize(13).fillColor('#0e2a4a').text((lang === 'en' ? d.faculty?.nameEn : d.faculty?.nameTh) ?? 'Faculty of Nursing', 88, 53, { width: pageW - 176, align: 'center' });
     doc.font(F).fontSize(12).fillColor('#4a5666')
-      .text(`รายงานผลการเรียนราย Section (Section Grade Report) — ${d.section.subject.code} ${d.section.subject.nameTh ?? d.section.subject.nameEn} · Sec ${d.section.sectionNo}`, 88, 71, { width: pageW - 176, align: 'center' });
+      .text(
+        `${L(lang, 'รายงานผลการเรียนราย Section', 'Section Grade Report')} — ${d.section.subject.code} ${(lang === 'en' ? d.section.subject.nameEn : d.section.subject.nameTh) ?? d.section.subject.nameEn} · Sec ${d.section.sectionNo}`,
+        88, 71, { width: pageW - 176, align: 'center' },
+      );
     doc.moveTo(left, 94).lineTo(right, 94).strokeColor('#ff8a4c').lineWidth(1.5).stroke();
-    doc.font(F).fontSize(10).fillColor('#4a5666').text(`เลขที่รายงาน: ${reportNumber}    ออกเมื่อ: ${this.thaiDateTime(new Date())}`, left, 100);
+    doc.font(F).fontSize(10).fillColor('#4a5666').text(`${L(lang, 'เลขที่รายงาน', 'Report No.')}: ${reportNumber}    ${L(lang, 'ออกเมื่อ', 'Generated')}: ${this.formatDateTime(new Date(), lang)}`, left, 100);
 
     // Table geometry — R1..Rn columns are equal width; a legend below the
     // table maps them to full rubric names (keeps columns readable at any
@@ -544,7 +582,7 @@ export class ReportsService {
     const gradeCol = colX.length - 1;
     colX.push(colX[gradeCol] + fixedW.grade);
 
-    const headerLabels = ['#', 'รหัส', 'ชื่อ-สกุล', ...d.rubrics.map((_, i) => `R${i + 1}`), 'รวม', 'เกรด'];
+    const headerLabels = ['#', L(lang, 'รหัส', 'Code'), L(lang, 'ชื่อ-สกุล', 'Name'), ...d.rubrics.map((_, i) => `R${i + 1}`), L(lang, 'รวม', 'Total'), L(lang, 'เกรด', 'Grade')];
     const drawHeader = (yy: number) => {
       doc.roundedRect(left, yy - 4, right - left, 20, 3).fill('#0e7c7b');
       doc.font(FB).fontSize(9).fillColor('#fff');
@@ -573,18 +611,18 @@ export class ReportsService {
     // Legend
     y += 12;
     if (y > doc.page.height - 70) { doc.addPage(); y = 40; }
-    doc.font(FB).fontSize(10).fillColor('#26303f').text('แบบประเมิน (Rubrics):', left, y); y += 15;
+    doc.font(FB).fontSize(10).fillColor('#26303f').text(L(lang, 'แบบประเมิน', 'Rubrics') + ':', left, y); y += 15;
     doc.font(F).fontSize(9).fillColor('#4a5666');
-    d.rubrics.forEach((r, i) => { doc.text(`R${i + 1} = ${r.nameTh ?? r.nameEn} (${r.weightPercent}%)`, left, y, { width: right - left }); y += 13; });
+    d.rubrics.forEach((r, i) => { doc.text(`R${i + 1} = ${(lang === 'en' ? r.nameEn : r.nameTh) ?? r.nameEn} (${r.weightPercent}%)`, left, y, { width: right - left }); y += 13; });
 
     // Signature + QR
     if (y > doc.page.height - 130) { doc.addPage(); y = 40; }
     const sy = y + 16;
     doc.image(qrPng, left, sy, { width: 66 });
-    doc.font(F).fontSize(9).fillColor('#7c8798').text('สแกนเพื่อตรวจสอบ', left - 12, sy + 68, { width: 92, align: 'center', lineBreak: false });
+    doc.font(F).fontSize(9).fillColor('#7c8798').text(L(lang, 'สแกนเพื่อตรวจสอบ', 'Scan to verify'), left - 12, sy + 68, { width: 92, align: 'center', lineBreak: false });
     doc.font(F).fontSize(12).fillColor('#26303f');
     doc.text('.................................................', right - 200, sy + 22, { width: 200, align: 'center', lineBreak: false });
-    doc.text('ผู้รับรอง / Authorised signature', right - 200, sy + 40, { width: 200, align: 'center', lineBreak: false });
+    doc.text(L(lang, 'ผู้รับรอง', 'Authorised signature'), right - 200, sy + 40, { width: 200, align: 'center', lineBreak: false });
 
     const range = doc.bufferedPageRange();
     for (let i = range.start; i < range.start + range.count; i++) {
@@ -592,7 +630,7 @@ export class ReportsService {
       this.watermark(doc, F);
       doc.page.margins.bottom = 0;
       doc.font(F).fontSize(8).fillColor('#a0aab8')
-        .text(`Generated by ClassWeb · ${reportNumber} · verify at ${verifyUrl} · หน้า ${i + 1}/${range.count}`, left, doc.page.height - 30, { width: right - left, align: 'center', lineBreak: false });
+        .text(`Generated by ClassWeb · ${reportNumber} · verify at ${verifyUrl} · ${L(lang, 'หน้า', 'Page')} ${i + 1}/${range.count}`, left, doc.page.height - 30, { width: right - left, align: 'center', lineBreak: false });
     }
     doc.flushPages();
 
@@ -632,7 +670,7 @@ export class ReportsService {
     const ws = wb.addWorksheet('Grades');
     ws.addRow([`${d.section.subject.code} · Section ${d.section.sectionNo}`]);
     ws.addRow([`Report No.: ${reportNumber}`]);
-    ws.addRow([`Generated: ${this.thaiDateTime(new Date())}`]);
+    ws.addRow([`Generated: ${this.formatDateTime(new Date(), 'th')}`]);
     ws.addRow([]);
     const rubricHeaders = d.rubrics.map((r) => `${r.nameEn} (${r.weightPercent}%)`);
     const header = ws.addRow(['#', 'Student code', 'Name (EN)', 'Name (TH)', ...rubricHeaders, 'Total', 'Grade', 'GPA']);
@@ -646,7 +684,7 @@ export class ReportsService {
 
   // ---- Grade reports: per-student breakdown -------------------------------
 
-  async studentGradePdf(user: AuthenticatedUser, studentId: string, sectionId: string, byId?: string, byName?: string): Promise<{ buffer: Buffer; reportNumber: string }> {
+  async studentGradePdf(user: AuthenticatedUser, studentId: string, sectionId: string, byId?: string, byName?: string, lang: ReportLang = 'th'): Promise<{ buffer: Buffer; reportNumber: string }> {
     const universityId = user.universityId;
     const [university, faculty, section, summary] = await Promise.all([
       this.prisma.university.findUnique({ where: { id: universityId }, select: { nameEn: true, nameTh: true } }),
@@ -675,25 +713,28 @@ export class ReportsService {
     const uniLogo = LOGO_UNIVERSITY(); const facLogo = LOGO_FACULTY();
     if (uniLogo) doc.image(uniLogo, left, 38, { width: 50 });
     if (facLogo) doc.image(facLogo, right - 50, 36, { width: 50 });
-    doc.font(FB).fontSize(18).fillColor('#26303f').text(university?.nameTh ?? 'University', 100, 44, { width: pageW - 200, align: 'center' });
-    doc.font(FB).fontSize(15).fillColor('#0e2a4a').text(faculty?.nameTh ?? 'Faculty of Nursing', 100, 66, { width: pageW - 200, align: 'center' });
-    doc.font(F).fontSize(14).fillColor('#4a5666').text('รายงานผลการเรียนรายบุคคล (Individual Grade Report)', 100, 86, { width: pageW - 200, align: 'center' });
+    doc.font(FB).fontSize(18).fillColor('#26303f').text((lang === 'en' ? university?.nameEn : university?.nameTh) ?? 'University', 100, 44, { width: pageW - 200, align: 'center' });
+    doc.font(FB).fontSize(15).fillColor('#0e2a4a').text((lang === 'en' ? faculty?.nameEn : faculty?.nameTh) ?? 'Faculty of Nursing', 100, 66, { width: pageW - 200, align: 'center' });
+    doc.font(F).fontSize(14).fillColor('#4a5666').text(L(lang, 'รายงานผลการเรียนรายบุคคล', 'Individual Grade Report'), 100, 86, { width: pageW - 200, align: 'center' });
     doc.moveTo(left, 112).lineTo(right, 112).strokeColor('#ff8a4c').lineWidth(2).stroke();
 
     let y = 122;
-    doc.font(F).fontSize(12).fillColor('#4a5666').text(`เลขที่รายงาน: ${reportNumber}    ออกเมื่อ: ${this.thaiDateTime(new Date())}`, left, y);
+    doc.font(F).fontSize(12).fillColor('#4a5666').text(`${L(lang, 'เลขที่รายงาน', 'Report No.')}: ${reportNumber}    ${L(lang, 'ออกเมื่อ', 'Generated')}: ${this.formatDateTime(new Date(), lang)}`, left, y);
     y += 22;
 
     doc.roundedRect(left, y, right - left, 78, 10).fillAndStroke('#fff6ee', '#ffd9bf');
     doc.fillColor('#26303f').font(FB).fontSize(14).text(`${this.personName(summary.student.nameEn, summary.student.nameTh)}  (${summary.student.studentCode})`, left + 14, y + 10);
     doc.font(F).fontSize(12).fillColor('#4a5666')
-      .text(`หลักสูตร: ${summary.student.program.code} · รายวิชา: ${section.subject.code} ${section.subject.nameTh ?? section.subject.nameEn} · Sec ${section.sectionNo}`, left + 14, y + 32);
+      .text(
+        `${L(lang, 'หลักสูตร', 'Program')}: ${summary.student.program.code} · ${L(lang, 'รายวิชา', 'Subject')}: ${section.subject.code} ${(lang === 'en' ? section.subject.nameEn : section.subject.nameTh) ?? section.subject.nameEn} · Sec ${section.sectionNo}`,
+        left + 14, y + 32,
+      );
     const gradeText = summary.grade ? `${summary.grade.grade} (${summary.grade.gpa.toFixed(2)} ${summary.grade.label})` : '—';
-    doc.font(FB).fontSize(13).fillColor('#26303f').text(`คะแนนรวม: ${summary.total}/100    เกรด: ${gradeText}`, left + 14, y + 52);
+    doc.font(FB).fontSize(13).fillColor('#26303f').text(`${L(lang, 'คะแนนรวม', 'Total score')}: ${summary.total}/100    ${L(lang, 'เกรด', 'Grade')}: ${gradeText}`, left + 14, y + 52);
     y += 96;
 
     // Rubric breakdown table
-    doc.font(FB).fontSize(14).fillColor('#26303f').text('รายละเอียดคะแนนแยกตามแบบประเมิน (Score breakdown)', left, y); y += 22;
+    doc.font(FB).fontSize(14).fillColor('#26303f').text(L(lang, 'รายละเอียดคะแนนแยกตามแบบประเมิน', 'Score Breakdown'), left, y); y += 22;
     // Column widths as offsets from `left`. The status column needs room for
     // Thai text ("ยังไม่ให้คะแนน") and the last (contribution) column must fit
     // decimals like "55.99" — an earlier version left it only ~9pt wide,
@@ -701,29 +742,30 @@ export class ReportsService {
     const cols = [left, left + 210, left + 265, left + 320, left + 420];
     doc.roundedRect(left, y - 4, right - left, 20, 4).fill('#0e7c7b');
     doc.font(FB).fontSize(11).fillColor('#fff');
-    ['แบบประเมิน', 'น้ำหนัก', 'คะแนน', 'สถานะ', 'คิดเป็น'].forEach((h, i) => doc.text(h, cols[i] + 4, y, { width: (cols[i + 1] ?? right) - cols[i] - 6 }));
+    [L(lang, 'แบบประเมิน', 'Rubric'), L(lang, 'น้ำหนัก', 'Weight'), L(lang, 'คะแนน', 'Score'), L(lang, 'สถานะ', 'Status'), L(lang, 'คิดเป็น', 'Contribution')]
+      .forEach((h, i) => doc.text(h, cols[i] + 4, y, { width: (cols[i + 1] ?? right) - cols[i] - 6 }));
     y += 20;
     doc.font(F).fontSize(11).fillColor('#26303f');
     summary.rubrics.forEach((r, i) => {
       if (i % 2 === 1) { doc.rect(left, y - 3, right - left, 20).fill('#f6f8fb'); doc.fillColor('#26303f'); }
-      doc.text(r.nameTh ?? r.nameEn, cols[0] + 4, y, { width: cols[1] - cols[0] - 6 });
+      doc.text((lang === 'en' ? r.nameEn : r.nameTh) ?? r.nameEn, cols[0] + 4, y, { width: cols[1] - cols[0] - 6 });
       doc.text(`${r.weightPercent}%`, cols[1] + 4, y, { width: cols[2] - cols[1] - 6 });
       doc.text(r.scorePercent != null ? `${r.scorePercent}` : '—', cols[2] + 4, y, { width: cols[3] - cols[2] - 6 });
-      doc.text(r.graded ? 'ให้คะแนนแล้ว' : 'ยังไม่ให้คะแนน', cols[3] + 4, y, { width: cols[4] - cols[3] - 6 });
+      doc.text(L(lang, r.graded ? 'ให้คะแนนแล้ว' : 'ยังไม่ให้คะแนน', r.graded ? 'Graded' : 'Not graded'), cols[3] + 4, y, { width: cols[4] - cols[3] - 6 });
       doc.text(`${r.contribution}`, cols[4] + 4, y, { width: right - cols[4] - 6 });
       y += 20;
     });
     y += 6;
-    doc.font(FB).fontSize(12).fillColor('#26303f').text(`รวม (Total): ${summary.total}/100`, left, y); y += 20;
+    doc.font(FB).fontSize(12).fillColor('#26303f').text(`${L(lang, 'รวม', 'Total')}: ${summary.total}/100`, left, y); y += 20;
 
     // Signature + QR
     if (y > doc.page.height - 170) { doc.addPage(); y = 60; }
     const sy = y + 20;
     doc.image(qrPng, left, sy, { width: 78 });
-    doc.font(F).fontSize(10).fillColor('#7c8798').text('สแกนเพื่อตรวจสอบ', left - 15, sy + 80, { width: 108, align: 'center', lineBreak: false });
+    doc.font(F).fontSize(10).fillColor('#7c8798').text(L(lang, 'สแกนเพื่อตรวจสอบ', 'Scan to verify'), left - 15, sy + 80, { width: 108, align: 'center', lineBreak: false });
     doc.font(F).fontSize(13).fillColor('#26303f');
     doc.text('.................................................', right - 220, sy + 28, { width: 220, align: 'center', lineBreak: false });
-    doc.text('ผู้รับรอง / Authorised signature', right - 220, sy + 46, { width: 220, align: 'center', lineBreak: false });
+    doc.text(L(lang, 'ผู้รับรอง', 'Authorised signature'), right - 220, sy + 46, { width: 220, align: 'center', lineBreak: false });
 
     const range = doc.bufferedPageRange();
     for (let i = range.start; i < range.start + range.count; i++) {

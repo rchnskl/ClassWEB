@@ -39,7 +39,7 @@ export default function ReportsPage() {
   async function exportAs(fmt: 'pdf' | 'xlsx' | 'csv') {
     setExporting(fmt);
     try {
-      await downloadFile(`/reports/attendance.${fmt}`, `attendance.${fmt}`);
+      await downloadFile(`/reports/attendance.${fmt}${fmt === 'pdf' ? `?lang=${lang}` : ''}`, `attendance.${fmt}`);
     } catch { /* ignore */ } finally {
       setExporting(null);
     }
@@ -48,7 +48,7 @@ export default function ReportsPage() {
   async function previewPdf() {
     setPreviewing(true);
     try {
-      setPreviewUrl(await fetchPreviewUrl('/reports/attendance.pdf'));
+      setPreviewUrl(await fetchPreviewUrl(`/reports/attendance.pdf?lang=${lang}`));
     } catch { /* ignore */ } finally {
       setPreviewing(false);
     }

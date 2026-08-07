@@ -45,23 +45,23 @@ export default function AssessmentPage() {
   async function exportSection(fmt: 'pdf' | 'xlsx' | 'csv') {
     if (!sectionId) return;
     setExporting(`section-${fmt}`);
-    try { await downloadFile(`/reports/grades/section/${sectionId}/${fmt}`, `section-grades.${fmt}`); }
+    try { await downloadFile(`/reports/grades/section/${sectionId}/${fmt}${fmt === 'pdf' ? `?lang=${lang}` : ''}`, `section-grades.${fmt}`); }
     catch { /* ignore */ } finally { setExporting(null); }
   }
   async function previewSectionPdf() {
     if (!sectionId) return;
     setPreviewing('section');
-    try { setPreviewUrl(await fetchPreviewUrl(`/reports/grades/section/${sectionId}/pdf`)); }
+    try { setPreviewUrl(await fetchPreviewUrl(`/reports/grades/section/${sectionId}/pdf?lang=${lang}`)); }
     catch { /* ignore */ } finally { setPreviewing(null); }
   }
   async function exportStudent(studentId: string) {
     setExporting(`student-${studentId}`);
-    try { await downloadFile(`/reports/grades/student/${studentId}/pdf?sectionId=${sectionId}`, `grade-report.pdf`); }
+    try { await downloadFile(`/reports/grades/student/${studentId}/pdf?sectionId=${sectionId}&lang=${lang}`, `grade-report.pdf`); }
     catch { /* ignore */ } finally { setExporting(null); }
   }
   async function previewStudentPdf(studentId: string) {
     setPreviewing(`student-${studentId}`);
-    try { setPreviewUrl(await fetchPreviewUrl(`/reports/grades/student/${studentId}/pdf?sectionId=${sectionId}`)); }
+    try { setPreviewUrl(await fetchPreviewUrl(`/reports/grades/student/${studentId}/pdf?sectionId=${sectionId}&lang=${lang}`)); }
     catch { /* ignore */ } finally { setPreviewing(null); }
   }
 

@@ -41,7 +41,7 @@ export default function StudentsPage() {
 function StudentsPageInner() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const { t } = useI18n();
+  const { t, lang } = useI18n();
   const [email, setEmail] = useState('');
   const [rows, setRows] = useState<StudentRow[]>([]);
   const [total, setTotal] = useState(0);
@@ -70,7 +70,7 @@ function StudentsPageInner() {
   async function downloadReport(s: StudentRow) {
     setReporting(s.id);
     try {
-      await downloadFile(`/reports/student/${s.id}/pdf`, `${s.studentCode}.pdf`);
+      await downloadFile(`/reports/student/${s.id}/pdf?lang=${lang}`, `${s.studentCode}.pdf`);
     } catch { /* ignore */ } finally {
       setReporting(null);
     }
@@ -79,7 +79,7 @@ function StudentsPageInner() {
   async function previewReport(s: StudentRow) {
     setPreviewing(s.id);
     try {
-      setPreviewUrl(await fetchPreviewUrl(`/reports/student/${s.id}/pdf`));
+      setPreviewUrl(await fetchPreviewUrl(`/reports/student/${s.id}/pdf?lang=${lang}`));
     } catch { /* ignore */ } finally {
       setPreviewing(null);
     }
