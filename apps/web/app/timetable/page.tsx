@@ -77,6 +77,11 @@ export default function TimetablePage() {
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState({ type: 'PERSONAL', title: '', location: '', startDate: today0, startTime: '13:00', endDate: today0, endTime: '14:00' });
   const [saving, setSaving] = useState(false);
+  // In-page confirm instead of window.confirm() — some embedded/in-app
+  // browsers (e.g. LINE's in-app webview) silently block native confirm()
+  // and auto-answer "cancel", so the delete button looked completely dead
+  // with no error and no visible dialog.
+  const [confirmingId, setConfirmingId] = useState<string | null>(null);
 
   const loadEvents = useCallback(async () => {
     const { fromISO, toISO } = weekRange();
@@ -116,7 +121,7 @@ export default function TimetablePage() {
   }, [events]);
 
   async function removeEvent(id: string) {
-    if (!window.confirm(t('tt.confirmDelete'))) return;
+    setConfirmingId(null);
     try {
       await apiFetch(`/calendar/entries/${id}`, { method: 'DELETE' });
       await loadEvents();
@@ -250,24 +255,45 @@ export default function TimetablePage() {
                     // gating this button on "created by me" hid the ✕ from every admin
                     // who didn't personally create the exam entry.
                     const canManage = isAdmin || ev.createdById === userId || ev.visibility !== 'PRIVATE';
+                    const confirming = confirmingId === ev.id;
                     return (
                       <div key={ev.id} title={ev.title} style={{ position: 'absolute', top, height, right: 4, width: 'calc(45% - 6px)', borderRadius: 11, padding: '6px 8px', background: `${color}22`, border: `1px solid ${color}`, borderLeft: `3px solid ${color}`, color: 'var(--text-0)', overflow: 'hidden' }}>
-                        <div style={{ fontSize: 12, display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                          <span>{st.icon} <span style={{ fontWeight: 700, fontSize: 10.5 }}>{t(`tt.type.${ev.type}`)}</span></span>
-                          {canManage && (
-                            <button
-                              type="button"
-                              onClick={(e) => { e.stopPropagation(); removeEvent(ev.id); }}
-                              aria-label={t('tt.delete')} title={t('tt.delete')}
-                              // Hit area padded out to ~24px — the bare 11px glyph with
-                              // padding:0 was easy to miss on a touch screen, especially
-                              // squeezed into the right 45% of a day column.
-                              style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: 'var(--text-2)', fontSize: 13, padding: 6, margin: -6, lineHeight: 1, minWidth: 24, minHeight: 24 }}
-                            >✕</button>
-                          )}
-                        </div>
-                        <div style={{ fontSize: 10.5, lineHeight: 1.25, marginTop: 2, fontWeight: 600 }}>{ev.title}</div>
-                        <div className="muted" style={{ fontSize: 9.5, marginTop: 2 }}>{ev._s}–{ev._e}</div>
+                        {confirming ? (
+                          // In-page confirm instead of window.confirm() — see the
+                          // confirmingId comment above for why.
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: 4, height: '100%', justifyContent: 'center' }}>
+                            <div style={{ fontSize: 10.5, fontWeight: 700 }}>{t('tt.confirmDelete')}</div>
+                            <div style={{ display: 'flex', gap: 6 }}>
+                              <button type="button" onClick={(e) => { e.stopPropagation(); removeEvent(ev.id); }}
+                                style={{ background: color, border: 'none', color: '#fff', borderRadius: 6, padding: '3px 8px', fontSize: 10.5, cursor: 'pointer', fontWeight: 700 }}>
+                                {t('tt.delete')}
+                              </button>
+                              <button type="button" onClick={(e) => { e.stopPropagation(); setConfirmingId(null); }}
+                                style={{ background: 'transparent', border: `1px solid ${color}`, color: 'var(--text-0)', borderRadius: 6, padding: '3px 8px', fontSize: 10.5, cursor: 'pointer' }}>
+                                {t('tt.cancel')}
+                              </button>
+                            </div>
+                          </div>
+                        ) : (
+                          <>
+                            <div style={{ fontSize: 12, display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                              <span>{st.icon} <span style={{ fontWeight: 700, fontSize: 10.5 }}>{t(`tt.type.${ev.type}`)}</span></span>
+                              {canManage && (
+                                <button
+                                  type="button"
+                                  onClick={(e) => { e.stopPropagation(); setConfirmingId(ev.id); }}
+                                  aria-label={t('tt.delete')} title={t('tt.delete')}
+                                  // Hit area padded out to ~24px — the bare 11px glyph with
+                                  // padding:0 was easy to miss on a touch screen, especially
+                                  // squeezed into the right 45% of a day column.
+                                  style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: 'var(--text-2)', fontSize: 13, padding: 6, margin: -6, lineHeight: 1, minWidth: 24, minHeight: 24 }}
+                                >✕</button>
+                              )}
+                            </div>
+                            <div style={{ fontSize: 10.5, lineHeight: 1.25, marginTop: 2, fontWeight: 600 }}>{ev.title}</div>
+                            <div className="muted" style={{ fontSize: 9.5, marginTop: 2 }}>{ev._s}–{ev._e}</div>
+                          </>
+                        )}
                       </div>
                     );
                   })}
