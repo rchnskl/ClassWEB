@@ -7,6 +7,9 @@
 # column/table nobody added.
 set -e
 
+echo "Clearing any stale migration lock from a previous interrupted deploy..."
+node clear-migration-lock.js
+
 echo "Applying database migrations..."
 node node_modules/prisma/build/index.js migrate deploy --schema=packages/database/prisma/schema.prisma
 

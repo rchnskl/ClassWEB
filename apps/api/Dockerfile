@@ -36,6 +36,7 @@ COPY --from=build /app/apps/api/assets ./apps/api/assets
 COPY --from=build /app/packages/database ./packages/database
 COPY --from=build /app/apps/api/package.json ./apps/api/package.json
 COPY apps/api/docker-entrypoint.sh ./docker-entrypoint.sh
+COPY apps/api/clear-migration-lock.js ./clear-migration-lock.js
 RUN chmod +x ./docker-entrypoint.sh
 
 USER app
