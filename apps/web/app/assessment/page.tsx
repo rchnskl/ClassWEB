@@ -225,7 +225,7 @@ export default function AssessmentPage() {
                         <span className="chip muted" title={t('as.inProgressHint')} style={{ fontWeight: 600 }}>{t('as.inProgress')} · {s.gradedCount}/{summary.rubricCount}</span>
                       )}
                       {s.hasCriticalFail && (
-                        <span className="chip" title={t('as.criticalFail')} style={{ marginLeft: 6, background: 'var(--danger)22', color: 'var(--danger)', fontWeight: 700 }}>✕ {t('as.criticalFail')}</span>
+                        <span className="chip" title={t('as.criticalFailHint')} style={{ marginLeft: 6, background: 'var(--danger)22', color: 'var(--danger)', fontWeight: 700 }}>⚠ {t('as.criticalFail')}</span>
                       )}
                     </Td>
                     <Td>

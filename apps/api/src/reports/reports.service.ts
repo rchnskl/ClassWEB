@@ -547,10 +547,42 @@ export class ReportsService {
     const [rubrics, summary, evaluations] = await Promise.all([
       this.assessment.activeRubricsForSubject(universityId, section.subjectId),
       this.assessment.sectionSummary(user, sectionId),
-      this.prisma.evaluation.findMany({ where: { universityId, sectionId }, select: { studentId: true, rubricId: true, scorePercent: true } }),
+      this.prisma.evaluation.findMany({
+        where: { universityId, sectionId },
+        select: {
+          id: true, studentId: true, rubricId: true, scorePercent: true,
+          scores: { select: { rubricItemId: true } },
+        },
+      }),
     ]);
     const scoreMap = new Map(evaluations.map((e) => [`${e.studentId}:${e.rubricId}`, e.scorePercent]));
-    const students = summary.students.map((s) => ({ ...s, scores: rubrics.map((r) => scoreMap.get(`${s.studentId}:${r.id}`) ?? null) }));
+
+    // For a multi-procedure checklist (LAB_MIDTERM-style — students draw one of
+    // several procedures rather than doing all of them), a bare percentage
+    // doesn't say which procedure it's from. Recover that from which
+    // RubricItems actually got a score row: save() only ever writes a row for
+    // an item that was rated, so the set of item ids an evaluation touched
+    // maps straight back to the RubricSection(s)/procedure(s) examined.
+    const sectionNameByItem = new Map<string, { nameEn: string; nameTh: string | null }>();
+    const multiSectionRubrics = new Set<string>();
+    for (const r of rubrics) {
+      if (r.sections.length > 1) multiSectionRubrics.add(r.id);
+      for (const s of r.sections) for (const it of s.items) sectionNameByItem.set(it.id, { nameEn: s.nameEn, nameTh: s.nameTh });
+    }
+    const examinedMap = new Map(evaluations.filter((e) => multiSectionRubrics.has(e.rubricId)).map((e) => {
+      const names = new Map<string, string>(); // dedupe by nameEn, preserve th
+      for (const sc of e.scores) {
+        const sec = sectionNameByItem.get(sc.rubricItemId);
+        if (sec) names.set(sec.nameEn, sec.nameTh ?? sec.nameEn);
+      }
+      return [`${e.studentId}:${e.rubricId}`, [...names.entries()]] as const;
+    }));
+
+    const students = summary.students.map((s) => ({
+      ...s,
+      scores: rubrics.map((r) => scoreMap.get(`${s.studentId}:${r.id}`) ?? null),
+      examinedProcedures: rubrics.map((r) => examinedMap.get(`${s.studentId}:${r.id}`) ?? null),
+    }));
 
     return { university, faculty, section, rubrics, students };
   }
@@ -629,7 +661,12 @@ export class ReportsService {
       doc.text(this.personName(s.nameEn, s.nameTh), colX[2] + 3, y, { width: colX[3] - colX[2] - 5, lineBreak: false, ellipsis: true });
       d.rubrics.forEach((_, ri) => {
         const sc = s.scores[ri];
-        doc.text(sc == null ? '—' : String(sc), colX[rubricStart + ri] + 3, y, { width: colX[rubricStart + ri + 1] - colX[rubricStart + ri] - 5, align: 'center' });
+        // A superscript-style "*" flags a score that came from only some of a
+        // multi-procedure checklist's sections (a drawn-lot exam) — the actual
+        // procedure name(s) are listed in the "Procedures examined" key below,
+        // since there's no room to print a name in a ~40px-wide cell.
+        const flagged = s.examinedProcedures[ri] != null;
+        doc.text(sc == null ? '—' : `${sc}${flagged ? '*' : ''}`, colX[rubricStart + ri] + 3, y, { width: colX[rubricStart + ri + 1] - colX[rubricStart + ri] - 5, align: 'center' });
       });
       doc.font(FB).text(String(s.total), colX[totalCol] + 3, y, { width: colX[totalCol + 1] - colX[totalCol] - 5, align: 'center' });
       doc.text(s.grade ?? '—', colX[gradeCol] + 3, y, { width: colX[gradeCol + 1] - colX[gradeCol] - 5, align: 'center' });
@@ -643,6 +680,26 @@ export class ReportsService {
     doc.font(FB).fontSize(11).fillColor('#26303f').text(L(lang, 'แบบประเมิน', 'Rubrics') + ':', left, y); y += 16;
     doc.font(F).fontSize(10).fillColor('#4a5666');
     d.rubrics.forEach((r, i) => { doc.text(`R${i + 1} = ${(lang === 'en' ? r.nameEn : r.nameTh) ?? r.nameEn} (${r.weightPercent}%)`, left, y, { width: right - left }); y += 14; });
+
+    // "* " key: which procedure each flagged score actually came from — see
+    // the comment on `flagged` above. Only printed when at least one student
+    // has one, so a section with no drawn-lot rubric prints nothing extra.
+    const hasAnyExamined = d.students.some((s) => s.examinedProcedures.some((p) => p != null));
+    if (hasAnyExamined) {
+      y += 6;
+      if (y > doc.page.height - 70) { doc.addPage(); y = 40; }
+      doc.font(FB).fontSize(11).fillColor('#26303f').text(`* ${L(lang, 'หัตถการที่สอบ', 'Procedure examined')}:`, left, y); y += 16;
+      doc.font(F).fontSize(10).fillColor('#4a5666');
+      d.students.forEach((s) => {
+        const named = s.examinedProcedures
+          .map((procs, ri) => (procs ? `R${ri + 1}: ${procs.map(([en, th]) => (lang === 'en' ? en : th)).join(', ')}` : null))
+          .filter((x): x is string => x != null);
+        if (named.length === 0) return;
+        if (y > doc.page.height - 40) { doc.addPage(); y = 40; }
+        doc.text(`${s.studentCode} — ${named.join(' · ')}`, left, y, { width: right - left });
+        y += 13;
+      });
+    }
 
     // Signature — QR already sits in the header, out of pagination's way.
     if (y > doc.page.height - 90) { doc.addPage(); y = 40; }
@@ -716,10 +773,34 @@ export class ReportsService {
     const [university, faculty, section, summary] = await Promise.all([
       this.prisma.university.findUnique({ where: { id: universityId }, select: { nameEn: true, nameTh: true } }),
       this.prisma.faculty.findFirst({ where: { universityId, code: 'NURSING' }, select: { nameEn: true, nameTh: true } }),
-      this.prisma.section.findFirst({ where: { id: sectionId, universityId, deletedAt: null }, select: { sectionNo: true, subject: { select: { code: true, nameEn: true, nameTh: true } } } }),
+      this.prisma.section.findFirst({ where: { id: sectionId, universityId, deletedAt: null }, select: { subjectId: true, sectionNo: true, subject: { select: { code: true, nameEn: true, nameTh: true } } } }),
       this.assessment.studentSummary(user, studentId, sectionId),
     ]);
     if (!section) throw new NotFoundException('Section not found in this tenant');
+
+    // Same "which procedure was this score from" recovery as sectionGradesPdf
+    // — see the comment there. Only one student's worth of evaluations here.
+    const [rubrics, evaluations] = await Promise.all([
+      this.assessment.activeRubricsForSubject(universityId, section.subjectId),
+      this.prisma.evaluation.findMany({
+        where: { universityId, studentId, sectionId },
+        select: { rubricId: true, scores: { select: { rubricItemId: true } } },
+      }),
+    ]);
+    const sectionNameByItem = new Map<string, { nameEn: string; nameTh: string | null }>();
+    const multiSectionRubrics = new Set<string>();
+    for (const r of rubrics) {
+      if (r.sections.length > 1) multiSectionRubrics.add(r.id);
+      for (const s of r.sections) for (const it of s.items) sectionNameByItem.set(it.id, { nameEn: s.nameEn, nameTh: s.nameTh });
+    }
+    const examinedByRubric = new Map(evaluations.filter((e) => multiSectionRubrics.has(e.rubricId)).map((e) => {
+      const names = new Map<string, string>();
+      for (const sc of e.scores) {
+        const sec = sectionNameByItem.get(sc.rubricItemId);
+        if (sec) names.set(sec.nameEn, sec.nameTh ?? sec.nameEn);
+      }
+      return [e.rubricId, [...names.entries()]] as const;
+    }));
 
     const checksum = createHash('sha256').update(JSON.stringify({ studentId, sectionId, total: summary.total })).digest('hex');
     const reportNumber = await this.register(universityId, 'PDF', checksum, byId, byName, 'STUDENT_GRADE', `Grade report ${summary.student.studentCode}`);
@@ -776,13 +857,25 @@ export class ReportsService {
     y += 20;
     doc.font(F).fontSize(11).fillColor('#26303f');
     summary.rubrics.forEach((r, i) => {
-      if (i % 2 === 1) { doc.rect(left, y - 3, right - left, 20).fill('#f6f8fb'); doc.fillColor('#26303f'); }
+      // A multi-procedure checklist rubric (LAB_MIDTERM-style — students draw
+      // one of several procedures) needs the procedure name printed, not just
+      // a percentage: "83%" alone doesn't say whether that's from hand
+      // hygiene or vital signs. Recovered from which RubricItems this
+      // student's evaluation actually has score rows for.
+      const procs = examinedByRubric.get(r.rubricId);
+      const rowH = procs && procs.length > 0 ? 30 : 20;
+      if (i % 2 === 1) { doc.rect(left, y - 3, right - left, rowH).fill('#f6f8fb'); doc.fillColor('#26303f'); }
       doc.text((lang === 'en' ? r.nameEn : r.nameTh) ?? r.nameEn, cols[0] + 4, y, { width: cols[1] - cols[0] - 6 });
       doc.text(`${r.weightPercent}%`, cols[1] + 4, y, { width: cols[2] - cols[1] - 6 });
       doc.text(r.scorePercent != null ? `${r.scorePercent}` : '—', cols[2] + 4, y, { width: cols[3] - cols[2] - 6 });
       doc.text(L(lang, r.graded ? 'ให้คะแนนแล้ว' : 'ยังไม่ให้คะแนน', r.graded ? 'Graded' : 'Not graded'), cols[3] + 4, y, { width: cols[4] - cols[3] - 6 });
       doc.text(`${r.contribution}`, cols[4] + 4, y, { width: right - cols[4] - 6 });
-      y += 20;
+      if (procs && procs.length > 0) {
+        doc.font(F).fontSize(9).fillColor('#7c8798')
+          .text(`${L(lang, 'หัตถการที่สอบ', 'Procedure examined')}: ${procs.map(([en, th]) => (lang === 'en' ? en : th)).join(', ')}`, cols[0] + 4, y + 14, { width: right - cols[0] - 6, lineBreak: false, ellipsis: true });
+        doc.font(F).fontSize(11).fillColor('#26303f');
+      }
+      y += rowH;
     });
     y += 6;
     doc.font(FB).fontSize(12).fillColor('#26303f').text(`${L(lang, 'รวม', 'Total')}: ${summary.total}/100`, left, y); y += 20;
