@@ -30,8 +30,19 @@ generator client {
 }
 
 datasource db {
-  provider = "postgresql"
-  url      = env("DATABASE_URL")
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  // Migrations take a Postgres session-level advisory lock
+  // (pg_advisory_lock) for the duration of `migrate deploy`. Neon's pooled
+  // endpoint (what DATABASE_URL points at, for app-runtime connection
+  // reuse) doesn't reliably keep one session pinned to one backend, so the
+  // lock and its later release can land on different backends and the next
+  // deploy's lock acquisition times out waiting on a lock nothing is really
+  // holding (P1002, "Timed out trying to acquire a postgres advisory
+  // lock") — reproduced 3 times in a row before this was added. Prisma
+  // runs migrations over directUrl when both are set, sidestepping the
+  // pooler for just that one operation.
+  directUrl = env("DIRECT_URL")
 }
 
 // =============================================================================

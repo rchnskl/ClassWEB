@@ -33,14 +33,24 @@ Cloudflare for everything else; a Containers appendix is at the end.
 ## 1. Neon (PostgreSQL)
 
 1. Create a Neon project (region closest to your users, e.g. Singapore `ap-southeast-1`).
-2. Copy the **pooled** connection string (has `-pooler` in the host). It looks like:
-   `postgresql://USER:PASSWORD@ep-xxx-pooler.ap-southeast-1.aws.neon.tech/neondb?sslmode=require`
-3. Keep it as `DATABASE_URL`. Prisma over TCP with `sslmode=require` works directly — no Hyperdrive
-   needed for Option B (Hyperdrive only matters if the API runs on Workers).
+2. Copy **both** connection strings from the Neon dashboard:
+   - **Pooled** (has `-pooler` in the host) → `DATABASE_URL`, what the API uses at runtime:
+     `postgresql://USER:PASSWORD@ep-xxx-pooler.ap-southeast-1.aws.neon.tech/neondb?sslmode=require`
+   - **Direct** (no `-pooler`) → `DIRECT_URL`, what `prisma migrate` uses:
+     `postgresql://USER:PASSWORD@ep-xxx.ap-southeast-1.aws.neon.tech/neondb?sslmode=require`
+
+   Both are required. Migrations take a Postgres session-level advisory lock for the
+   duration of the run; over the pooled endpoint the lock and its release can land on
+   different backends, and the *next* deploy's migration then times out waiting on a
+   lock nothing is actually holding (`P1002`, `Timed out trying to acquire a postgres
+   advisory lock`). `DIRECT_URL` sidesteps the pooler for that one operation only —
+   see the `datasource` comment in `packages/database/prisma/schema.prisma`.
+3. Prisma over TCP with `sslmode=require` works directly — no Hyperdrive needed for
+   Option B (Hyperdrive only matters if the API runs on Workers).
 4. Apply the schema + seed once:
    ```bash
-   DATABASE_URL="<neon-url>" npm run migrate:deploy -w @classweb/database
-   DATABASE_URL="<neon-url>" npm run db:seed          # creates the admin + RBAC matrix
+   DATABASE_URL="<neon-pooled-url>" DIRECT_URL="<neon-direct-url>" npm run migrate:deploy -w @classweb/database
+   DATABASE_URL="<neon-pooled-url>" npm run db:seed          # creates the admin + RBAC matrix
    ```
    The seed admin is `admin@nursing.au.edu` / `ChangeMe!2026` — **rotate it immediately** after first login.
 
@@ -59,9 +69,10 @@ build, health check, JWT secrets auto-generated) so you don't set anything up by
 
 1. [render.com](https://render.com) → sign in with GitHub.
 2. Dashboard → **New +** → **Blueprint** → connect this repo (`rchnskl/ClassWEB`).
-3. Render reads `render.yaml` and shows the `classweb-api` service. It asks for the two values
+3. Render reads `render.yaml` and shows the `classweb-api` service. It asks for the values
    marked `sync: false`:
    - `DATABASE_URL` → your Neon **pooled** connection string (`...-pooler...neon.tech/...?sslmode=require`)
+   - `DIRECT_URL` → your Neon **direct** connection string (same host, no `-pooler`) — see step 1
    - `CORS_ORIGINS` → leave blank for now; come back and set it once Cloudflare Pages (step 4)
      gives you its URL, then redeploy.
 4. **Apply** → Render builds `apps/api/Dockerfile` and deploys. `JWT_ACCESS_SECRET` /

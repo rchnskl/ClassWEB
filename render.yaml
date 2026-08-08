@@ -18,6 +18,13 @@ services:
         value: production
       - key: DATABASE_URL
         sync: false # paste your Neon pooled connection string here
+      - key: DIRECT_URL
+        sync: false # paste your Neon DIRECT (non-pooled) connection string here — same
+        # host as DATABASE_URL minus "-pooler". `prisma migrate deploy` needs a real,
+        # single-session connection to hold its advisory lock for the run; over the
+        # pooled endpoint the lock and its release can land on different backends,
+        # which surfaces as the next deploy's migration timing out waiting on a lock
+        # nothing is actually holding (P1002).
       - key: JWT_ACCESS_SECRET
         generateValue: true # Render generates a strong random secret
       - key: JWT_REFRESH_SECRET

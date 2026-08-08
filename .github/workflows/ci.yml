@@ -8,6 +8,7 @@ on:
 
 env:
   DATABASE_URL: postgresql://classweb:classweb@localhost:5432/classweb?schema=public
+  DIRECT_URL: postgresql://classweb:classweb@localhost:5432/classweb?schema=public
   JWT_ACCESS_SECRET: ci-access-secret-0123456789abcdef
   JWT_REFRESH_SECRET: ci-refresh-secret-0123456789abcdef
 
