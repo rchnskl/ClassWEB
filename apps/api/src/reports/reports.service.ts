@@ -722,16 +722,26 @@ export class ReportsService {
     const checksum = createHash('sha256').update(JSON.stringify({ sectionId, n: d.students.length })).digest('hex');
     const reportNumber = await this.register(universityId, 'CSV', checksum, byId, byName, 'SECTION_GRADES', `Grade report — ${d.section.subject.code}`);
     const esc = (v: string) => (/[",\n]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v);
-    const rubricHeaders = d.rubrics.map((r) => `${r.nameEn} (${r.weightPercent}%)`);
+    // A rubric column is followed by its own "Procedure" column only when that
+    // rubric actually has more than one procedure to disambiguate — same
+    // signal the PDF uses (see gatherSectionGrades) — so a plain single-item
+    // component doesn't grow an empty column next to it.
+    const rubricHeaders = d.rubrics.flatMap((r) => (r.sections.length > 1 ? [`${r.nameEn} (${r.weightPercent}%)`, `${r.nameEn} — Procedure`] : [`${r.nameEn} (${r.weightPercent}%)`]));
     const rows: string[][] = [
       ['Report No.', reportNumber],
       ['Section', `${d.section.subject.code} · ${d.section.sectionNo}`],
       [],
-      ['#', 'Student code', 'Name (EN)', 'Name (TH)', ...rubricHeaders, 'Total', 'Grade', 'GPA'],
+      ['#', 'Student code', 'Name (EN)', 'Name (TH)', ...rubricHeaders, 'Total', 'Status', 'Grade', 'GPA'],
       ...d.students.map((s, i) => [
         String(i + 1), s.studentCode, s.nameEn, s.nameTh ?? '',
-        ...s.scores.map((sc) => (sc == null ? '' : String(sc))),
-        String(s.total), s.grade ?? '', s.gpa != null ? String(s.gpa) : '',
+        ...d.rubrics.flatMap((r, ri) => {
+          const sc = s.scores[ri];
+          const scoreCell = sc == null ? '' : String(sc);
+          if (r.sections.length <= 1) return [scoreCell];
+          const procs = s.examinedProcedures[ri];
+          return [scoreCell, procs ? procs.map(([en]) => en).join(', ') : ''];
+        }),
+        String(s.total), s.isComplete ? 'Complete' : 'In progress', s.grade ?? '', s.gpa != null ? String(s.gpa) : '',
       ]),
     ];
     return { content: '﻿' + rows.map((r) => r.map((c) => esc(String(c))).join(',')).join('\n'), reportNumber };
@@ -748,11 +758,20 @@ export class ReportsService {
     ws.addRow([`Report No.: ${reportNumber}`]);
     ws.addRow([`Generated: ${this.formatDateTime(new Date(), 'th')}`]);
     ws.addRow([]);
-    const rubricHeaders = d.rubrics.map((r) => `${r.nameEn} (${r.weightPercent}%)`);
-    const header = ws.addRow(['#', 'Student code', 'Name (EN)', 'Name (TH)', ...rubricHeaders, 'Total', 'Grade', 'GPA']);
+    const rubricHeaders = d.rubrics.flatMap((r) => (r.sections.length > 1 ? [`${r.nameEn} (${r.weightPercent}%)`, `${r.nameEn} — Procedure`] : [`${r.nameEn} (${r.weightPercent}%)`]));
+    const header = ws.addRow(['#', 'Student code', 'Name (EN)', 'Name (TH)', ...rubricHeaders, 'Total', 'Status', 'Grade', 'GPA']);
     header.font = { bold: true, color: { argb: 'FFFFFFFF' } };
     header.eachCell((c) => { c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF0E7C7B' } }; });
-    d.students.forEach((s, i) => ws.addRow([i + 1, s.studentCode, s.nameEn, s.nameTh ?? '', ...s.scores.map((sc) => sc ?? ''), s.total, s.grade ?? '', s.gpa ?? '']));
+    d.students.forEach((s, i) => ws.addRow([
+      i + 1, s.studentCode, s.nameEn, s.nameTh ?? '',
+      ...d.rubrics.flatMap((r, ri) => {
+        const sc = s.scores[ri];
+        if (r.sections.length <= 1) return [sc ?? ''];
+        const procs = s.examinedProcedures[ri];
+        return [sc ?? '', procs ? procs.map(([en]) => en).join(', ') : ''];
+      }),
+      s.total, s.isComplete ? 'Complete' : 'In progress', s.grade ?? '', s.gpa ?? '',
+    ]));
     ws.columns.forEach((c) => { c.width = 16; });
     ws.getColumn(3).width = 22; ws.getColumn(4).width = 22;
     return { buffer: Buffer.from(await wb.xlsx.writeBuffer()), reportNumber };
@@ -760,20 +779,18 @@ export class ReportsService {
 
   // ---- Grade reports: per-student breakdown -------------------------------
 
-  async studentGradePdf(user: AuthenticatedUser, studentId: string, sectionId: string, byId?: string, byName?: string, lang: ReportLang = 'th'): Promise<{ buffer: Buffer; reportNumber: string }> {
-    const universityId = user.universityId;
-    const [university, faculty, section, summary] = await Promise.all([
-      this.prisma.university.findUnique({ where: { id: universityId }, select: { nameEn: true, nameTh: true } }),
-      this.prisma.faculty.findFirst({ where: { universityId, code: 'NURSING' }, select: { nameEn: true, nameTh: true } }),
-      this.prisma.section.findFirst({ where: { id: sectionId, universityId, deletedAt: null }, select: { subjectId: true, sectionNo: true, subject: { select: { code: true, nameEn: true, nameTh: true } } } }),
-      this.assessment.studentSummary(user, studentId, sectionId),
-    ]);
-    if (!section) throw new NotFoundException('Section not found in this tenant');
-
-    // Same "which procedure was this score from" recovery as sectionGradesPdf
-    // — see the comment there. Only one student's worth of evaluations here.
+  /**
+   * Which procedure(s) a student's evaluation of a multi-procedure checklist
+   * rubric (LAB_MIDTERM-style — drawn by lot) actually covered. save() only
+   * writes an EvaluationScore row for an item that got rated, so the set of
+   * scored RubricItem ids already encodes which RubricSection(s) were
+   * examined — this just joins that back to a section name. Rubrics with
+   * only one section are omitted from the result (nothing to disambiguate).
+   * Shared by every grade report format (PDF/CSV/XLSX) so they all agree.
+   */
+  private async examinedProceduresForStudent(universityId: string, subjectId: string, studentId: string, sectionId: string): Promise<Map<string, [string, string][]>> {
     const [rubrics, evaluations] = await Promise.all([
-      this.assessment.activeRubricsForSubject(universityId, section.subjectId),
+      this.assessment.activeRubricsForSubject(universityId, subjectId),
       this.prisma.evaluation.findMany({
         where: { universityId, studentId, sectionId },
         select: { rubricId: true, scores: { select: { rubricItemId: true } } },
@@ -785,14 +802,27 @@ export class ReportsService {
       if (r.sections.length > 1) multiSectionRubrics.add(r.id);
       for (const s of r.sections) for (const it of s.items) sectionNameByItem.set(it.id, { nameEn: s.nameEn, nameTh: s.nameTh });
     }
-    const examinedByRubric = new Map(evaluations.filter((e) => multiSectionRubrics.has(e.rubricId)).map((e) => {
+    return new Map(evaluations.filter((e) => multiSectionRubrics.has(e.rubricId)).map((e) => {
       const names = new Map<string, string>();
       for (const sc of e.scores) {
         const sec = sectionNameByItem.get(sc.rubricItemId);
         if (sec) names.set(sec.nameEn, sec.nameTh ?? sec.nameEn);
       }
-      return [e.rubricId, [...names.entries()]] as const;
+      return [e.rubricId, [...names.entries()]] as [string, [string, string][]];
     }));
+  }
+
+  async studentGradePdf(user: AuthenticatedUser, studentId: string, sectionId: string, byId?: string, byName?: string, lang: ReportLang = 'th'): Promise<{ buffer: Buffer; reportNumber: string }> {
+    const universityId = user.universityId;
+    const [university, faculty, section, summary] = await Promise.all([
+      this.prisma.university.findUnique({ where: { id: universityId }, select: { nameEn: true, nameTh: true } }),
+      this.prisma.faculty.findFirst({ where: { universityId, code: 'NURSING' }, select: { nameEn: true, nameTh: true } }),
+      this.prisma.section.findFirst({ where: { id: sectionId, universityId, deletedAt: null }, select: { subjectId: true, sectionNo: true, subject: { select: { code: true, nameEn: true, nameTh: true } } } }),
+      this.assessment.studentSummary(user, studentId, sectionId),
+    ]);
+    if (!section) throw new NotFoundException('Section not found in this tenant');
+
+    const examinedByRubric = await this.examinedProceduresForStudent(universityId, section.subjectId, studentId, sectionId);
 
     const checksum = createHash('sha256').update(JSON.stringify({ studentId, sectionId, total: summary.total })).digest('hex');
     const reportNumber = await this.register(universityId, 'PDF', checksum, byId, byName, 'STUDENT_GRADE', `Grade report ${summary.student.studentCode}`);
@@ -897,7 +927,13 @@ export class ReportsService {
 
   async studentGradeCsv(user: AuthenticatedUser, studentId: string, sectionId: string, byId?: string, byName?: string): Promise<{ content: string; reportNumber: string }> {
     const universityId = user.universityId;
-    const summary = await this.assessment.studentSummary(user, studentId, sectionId);
+    const [section, summary] = await Promise.all([
+      this.prisma.section.findFirst({ where: { id: sectionId, universityId, deletedAt: null }, select: { subjectId: true } }),
+      this.assessment.studentSummary(user, studentId, sectionId),
+    ]);
+    if (!section) throw new NotFoundException('Section not found in this tenant');
+    const examinedByRubric = await this.examinedProceduresForStudent(universityId, section.subjectId, studentId, sectionId);
+
     const checksum = createHash('sha256').update(JSON.stringify({ studentId, sectionId, total: summary.total })).digest('hex');
     const reportNumber = await this.register(universityId, 'CSV', checksum, byId, byName, 'STUDENT_GRADE', `Grade report ${summary.student.studentCode}`);
     const esc = (v: string) => (/[",\n]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v);
@@ -906,31 +942,46 @@ export class ReportsService {
       ['Student', `${summary.student.studentCode} ${summary.student.nameEn}`],
       ['Program', summary.student.program.code],
       ['Total', String(summary.total)],
+      ['Status', summary.isComplete ? 'Complete' : 'In progress'],
       ['Grade', summary.grade ? `${summary.grade.grade} (${summary.grade.gpa})` : ''],
       [],
-      ['Rubric', 'Weight %', 'Score %', 'Graded', 'Contribution'],
-      ...summary.rubrics.map((r) => [r.nameEn, String(r.weightPercent), r.scorePercent != null ? String(r.scorePercent) : '', r.graded ? 'Yes' : 'No', String(r.contribution)]),
+      ['Rubric', 'Weight %', 'Score %', 'Procedure', 'Graded', 'Contribution'],
+      ...summary.rubrics.map((r) => [
+        r.nameEn, String(r.weightPercent), r.scorePercent != null ? String(r.scorePercent) : '',
+        (examinedByRubric.get(r.rubricId) ?? []).map(([en]) => en).join(', '),
+        r.graded ? 'Yes' : 'No', String(r.contribution),
+      ]),
     ];
     return { content: '﻿' + rows.map((r) => r.map((c) => esc(String(c))).join(',')).join('\n'), reportNumber };
   }
 
   async studentGradeXlsx(user: AuthenticatedUser, studentId: string, sectionId: string, byId?: string, byName?: string): Promise<{ buffer: Buffer; reportNumber: string }> {
     const universityId = user.universityId;
-    const summary = await this.assessment.studentSummary(user, studentId, sectionId);
+    const [section, summary] = await Promise.all([
+      this.prisma.section.findFirst({ where: { id: sectionId, universityId, deletedAt: null }, select: { subjectId: true } }),
+      this.assessment.studentSummary(user, studentId, sectionId),
+    ]);
+    if (!section) throw new NotFoundException('Section not found in this tenant');
+    const examinedByRubric = await this.examinedProceduresForStudent(universityId, section.subjectId, studentId, sectionId);
+
     const checksum = createHash('sha256').update(JSON.stringify({ studentId, sectionId, total: summary.total })).digest('hex');
     const reportNumber = await this.register(universityId, 'XLSX', checksum, byId, byName, 'STUDENT_GRADE', `Grade report ${summary.student.studentCode}`);
     const wb = new ExcelJS.Workbook();
     const ws = wb.addWorksheet('Grades');
     ws.addRow([`${this.personName(summary.student.nameEn, summary.student.nameTh)} (${summary.student.studentCode})`]);
     ws.addRow([`Report No.: ${reportNumber}`]);
-    ws.addRow([`Total: ${summary.total}/100  ·  Grade: ${summary.grade ? summary.grade.grade + ' (' + summary.grade.gpa + ')' : '-'}`]);
+    ws.addRow([`Total: ${summary.total}/100  ·  Status: ${summary.isComplete ? 'Complete' : 'In progress'}  ·  Grade: ${summary.grade ? summary.grade.grade + ' (' + summary.grade.gpa + ')' : '-'}`]);
     ws.addRow([]);
-    const header = ws.addRow(['Rubric', 'Weight %', 'Score %', 'Graded', 'Contribution']);
+    const header = ws.addRow(['Rubric', 'Weight %', 'Score %', 'Procedure', 'Graded', 'Contribution']);
     header.font = { bold: true, color: { argb: 'FFFFFFFF' } };
     header.eachCell((c) => { c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF0E7C7B' } }; });
-    summary.rubrics.forEach((r) => ws.addRow([r.nameEn, r.weightPercent, r.scorePercent ?? '', r.graded ? 'Yes' : 'No', r.contribution]));
+    summary.rubrics.forEach((r) => ws.addRow([
+      r.nameEn, r.weightPercent, r.scorePercent ?? '',
+      (examinedByRubric.get(r.rubricId) ?? []).map(([en]) => en).join(', '),
+      r.graded ? 'Yes' : 'No', r.contribution,
+    ]));
     ws.columns.forEach((c) => { c.width = 20; });
-    ws.getColumn(1).width = 40;
+    ws.getColumn(1).width = 40; ws.getColumn(4).width = 28;
     return { buffer: Buffer.from(await wb.xlsx.writeBuffer()), reportNumber };
   }
 }
