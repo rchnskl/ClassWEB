@@ -626,22 +626,32 @@ export class ReportsService {
     doc.moveTo(left, 94).lineTo(right, 94).strokeColor('#ff8a4c').lineWidth(1.5).stroke();
     doc.font(F).fontSize(10).fillColor('#4a5666').text(`${L(lang, 'เลขที่รายงาน', 'Report No.')}: ${reportNumber}    ${L(lang, 'ออกเมื่อ', 'Generated')}: ${this.formatDateTime(new Date(), lang)}`, left, 100);
 
-    // Table geometry — R1..Rn columns are equal width; a legend below the
-    // table maps them to full rubric names (keeps columns readable at any
-    // rubric count instead of squeezing long names into narrow cells).
+    // Table geometry — R1..Rn columns are equal width, except a
+    // multi-procedure checklist rubric (LAB_MIDTERM-style — students draw one
+    // procedure by lot) gets extra width so the procedure name can print
+    // right under its score, in the table itself, rather than a "*" pointing
+    // at a key elsewhere on the page. A legend below the table still maps
+    // R1..Rn to full rubric names.
     let y = 122;
     const fixedW = { no: 22, code: 62, name: 120, total: 46, grade: 44 };
-    const rubricColW = Math.max(42, (right - left - fixedW.no - fixedW.code - fixedW.name - fixedW.total - fixedW.grade) / Math.max(1, d.rubrics.length));
+    const multiSectionRubricIds = new Set(d.rubrics.filter((r) => r.sections.length > 1).map((r) => r.id));
+    const multiColW = 100;
+    const multiCount = d.rubrics.filter((r) => multiSectionRubricIds.has(r.id)).length;
+    const singleCount = d.rubrics.length - multiCount;
+    const singleColW = Math.max(36, (right - left - fixedW.no - fixedW.code - fixedW.name - fixedW.total - fixedW.grade - multiCount * multiColW) / Math.max(1, singleCount));
     const colX: number[] = [left];
     colX.push(colX[0] + fixedW.no);
     colX.push(colX[1] + fixedW.code);
     colX.push(colX[2] + fixedW.name);
     const rubricStart = 3;
-    for (let i = 0; i < d.rubrics.length; i++) colX.push(colX[rubricStart + i] + rubricColW);
+    for (let i = 0; i < d.rubrics.length; i++) colX.push(colX[rubricStart + i] + (multiSectionRubricIds.has(d.rubrics[i].id) ? multiColW : singleColW));
     const totalCol = colX.length - 1;
     colX.push(colX[totalCol] + fixedW.total);
     const gradeCol = colX.length - 1;
     colX.push(colX[gradeCol] + fixedW.grade);
+    // Every row reserves space for a second line (the procedure name) so row
+    // height stays uniform whether or not that particular student has one.
+    const rowH = multiCount > 0 ? 27 : 18;
 
     const headerLabels = ['#', L(lang, 'รหัส', 'Code'), L(lang, 'ชื่อ-สกุล', 'Name'), ...d.rubrics.map((_, i) => `R${i + 1}`), L(lang, 'รวม', 'Total'), L(lang, 'เกรด', 'Grade')];
     const drawHeader = (yy: number) => {
@@ -654,24 +664,26 @@ export class ReportsService {
     doc.font(F).fontSize(10);
     d.students.forEach((s, i) => {
       if (y > doc.page.height - 100) { doc.addPage(); y = drawHeader(40); doc.font(F).fontSize(10); }
-      if (i % 2 === 1) { doc.rect(left, y - 3, right - left, 18).fill('#f6f8fb'); }
+      if (i % 2 === 1) { doc.rect(left, y - 3, right - left, rowH).fill('#f6f8fb'); }
       doc.fillColor('#26303f');
       doc.text(String(i + 1), colX[0] + 3, y, { width: colX[1] - colX[0] - 5 });
       doc.text(s.studentCode, colX[1] + 3, y, { width: colX[2] - colX[1] - 5 });
       doc.text(this.personName(s.nameEn, s.nameTh), colX[2] + 3, y, { width: colX[3] - colX[2] - 5, lineBreak: false, ellipsis: true });
       d.rubrics.forEach((_, ri) => {
         const sc = s.scores[ri];
-        // A superscript-style "*" flags a score that came from only some of a
-        // multi-procedure checklist's sections (a drawn-lot exam) — the actual
-        // procedure name(s) are listed in the "Procedures examined" key below,
-        // since there's no room to print a name in a ~40px-wide cell.
-        const flagged = s.examinedProcedures[ri] != null;
-        doc.text(sc == null ? '—' : `${sc}${flagged ? '*' : ''}`, colX[rubricStart + ri] + 3, y, { width: colX[rubricStart + ri + 1] - colX[rubricStart + ri] - 5, align: 'center' });
+        const colW = colX[rubricStart + ri + 1] - colX[rubricStart + ri] - 5;
+        doc.text(sc == null ? '—' : String(sc), colX[rubricStart + ri] + 3, y, { width: colW, align: 'center' });
+        const procs = s.examinedProcedures[ri];
+        if (procs) {
+          doc.font(F).fontSize(7.5).fillColor('#7c8798')
+            .text(procs.map(([en, th]) => (lang === 'en' ? en : th)).join(', '), colX[rubricStart + ri] + 3, y + 11, { width: colW, align: 'center', lineBreak: false, ellipsis: true });
+          doc.font(F).fontSize(10).fillColor('#26303f');
+        }
       });
       doc.font(FB).text(String(s.total), colX[totalCol] + 3, y, { width: colX[totalCol + 1] - colX[totalCol] - 5, align: 'center' });
       doc.text(s.grade ?? '—', colX[gradeCol] + 3, y, { width: colX[gradeCol + 1] - colX[gradeCol] - 5, align: 'center' });
       doc.font(F);
-      y += 18;
+      y += rowH;
     });
 
     // Legend
@@ -680,26 +692,6 @@ export class ReportsService {
     doc.font(FB).fontSize(11).fillColor('#26303f').text(L(lang, 'แบบประเมิน', 'Rubrics') + ':', left, y); y += 16;
     doc.font(F).fontSize(10).fillColor('#4a5666');
     d.rubrics.forEach((r, i) => { doc.text(`R${i + 1} = ${(lang === 'en' ? r.nameEn : r.nameTh) ?? r.nameEn} (${r.weightPercent}%)`, left, y, { width: right - left }); y += 14; });
-
-    // "* " key: which procedure each flagged score actually came from — see
-    // the comment on `flagged` above. Only printed when at least one student
-    // has one, so a section with no drawn-lot rubric prints nothing extra.
-    const hasAnyExamined = d.students.some((s) => s.examinedProcedures.some((p) => p != null));
-    if (hasAnyExamined) {
-      y += 6;
-      if (y > doc.page.height - 70) { doc.addPage(); y = 40; }
-      doc.font(FB).fontSize(11).fillColor('#26303f').text(`* ${L(lang, 'หัตถการที่สอบ', 'Procedure examined')}:`, left, y); y += 16;
-      doc.font(F).fontSize(10).fillColor('#4a5666');
-      d.students.forEach((s) => {
-        const named = s.examinedProcedures
-          .map((procs, ri) => (procs ? `R${ri + 1}: ${procs.map(([en, th]) => (lang === 'en' ? en : th)).join(', ')}` : null))
-          .filter((x): x is string => x != null);
-        if (named.length === 0) return;
-        if (y > doc.page.height - 40) { doc.addPage(); y = 40; }
-        doc.text(`${s.studentCode} — ${named.join(' · ')}`, left, y, { width: right - left });
-        y += 13;
-      });
-    }
 
     // Signature — QR already sits in the header, out of pagination's way.
     if (y > doc.page.height - 90) { doc.addPage(); y = 40; }
