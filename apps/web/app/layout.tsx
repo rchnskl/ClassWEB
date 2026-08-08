@@ -5,6 +5,7 @@ import GlobalLoadingBar from '@/components/GlobalLoadingBar';
 import SessionGuard from '@/components/SessionGuard';
 import { I18nProvider } from '@/lib/i18n';
 import { UIProvider } from '@/lib/ui';
+import { BrandingProvider } from '@/lib/branding';
 
 export const metadata: Metadata = {
   title: 'ClassWeb — Faculty of Nursing',
@@ -30,7 +31,9 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <AuroraBackground />
         <I18nProvider>
           <UIProvider>
-            <SessionGuard>{children}</SessionGuard>
+            <BrandingProvider>
+              <SessionGuard>{children}</SessionGuard>
+            </BrandingProvider>
           </UIProvider>
         </I18nProvider>
       </body>

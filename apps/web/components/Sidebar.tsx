@@ -6,6 +6,7 @@ import Logo from './Logo';
 import { apiFetch } from '@/lib/api';
 import { useI18n } from '@/lib/i18n';
 import { useUI } from '@/lib/ui';
+import { useBranding } from '@/lib/branding';
 import {
   IconGrid, IconStudents, IconTeacher, IconBook, IconCalendar,
   IconCheck, IconReport, IconSettings, IconGrade, IconChevronLeft,
@@ -37,6 +38,7 @@ const NAV = [
 export default function Sidebar({ active = 'Dashboard' }: { active?: string }) {
   const { t, lang } = useI18n();
   const { sidebarOpen, setSidebarOpen, sidebarCollapsed, setSidebarCollapsed } = useUI();
+  const { systemName } = useBranding();
   const close = () => setSidebarOpen(false);
 
   const [currentYear, setCurrentYear] = useState<YearRef | null>(null);
@@ -72,7 +74,7 @@ export default function Sidebar({ active = 'Dashboard' }: { active?: string }) {
         {!sidebarCollapsed && (
           <div>
             <div style={{ fontWeight: 700, fontSize: 16.5, letterSpacing: -0.3, whiteSpace: 'nowrap' }}>
-              Class<span className="brand-text">Web</span>
+              {systemName && systemName !== 'ClassWeb' ? systemName : (<>Class<span className="brand-text">Web</span></>)}
             </div>
             <div className="muted" style={{ fontSize: 11, whiteSpace: 'nowrap' }}>{t('brand.short')}</div>
           </div>

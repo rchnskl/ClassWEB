@@ -26,6 +26,12 @@ export class SettingsController {
     return this.settings.bulkUpsert(user.universityId, dto);
   }
 
+  @Get('branding')
+  @ApiOperation({ summary: 'App name + theme colors — readable by any authenticated user, not just setting:read holders' })
+  branding(@CurrentUser() user: AuthenticatedUser) {
+    return this.settings.getBranding(user.universityId);
+  }
+
   @Get('attendance-rule')
   @Permissions('setting:read')
   @ApiOperation({ summary: 'University-wide default attendance rule' })

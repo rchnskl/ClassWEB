@@ -30,6 +30,30 @@ export class SettingsService {
     }));
   }
 
+  /** Flat key→value map (defaults merged in) for internal consumers like report generation. */
+  async getMap(universityId: string): Promise<Record<string, string>> {
+    const rows = await this.list(universityId);
+    const map: Record<string, string> = {};
+    for (const r of rows) map[r.key] = typeof r.value === 'string' ? r.value : String(r.value ?? '');
+    return map;
+  }
+
+  /**
+   * Subset of settings safe to expose to every authenticated user regardless
+   * of role — app name + theme colors need to render the same for a student
+   * or lecturer as for the admin who configured them, unlike the full
+   * settings list (which requires setting:read).
+   */
+  async getBranding(universityId: string) {
+    const map = await this.getMap(universityId);
+    return {
+      'system.name': map['system.name'],
+      'theme.primaryColor': map['theme.primaryColor'],
+      'theme.secondaryColor': map['theme.secondaryColor'],
+      'theme.mode': map['theme.mode'],
+    };
+  }
+
   async bulkUpsert(universityId: string, dto: BulkUpsertSettingsDto) {
     await this.prisma.$transaction(
       dto.settings.map((s) =>
