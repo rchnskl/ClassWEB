@@ -15,7 +15,11 @@
 // runs before `migrate deploy` is invoked, so there is no legitimate
 // concurrent migration that could hold it at this point in a single-instance
 // deploy.
-const { Client } = require('pg');
+//
+// Uses @prisma/client (a real production dependency, unlike `pg` which is
+// dev-only here and gets pruned from the runtime image) purely for its raw
+// query execution — no models/schema needed for this.
+const { PrismaClient } = require('@prisma/client');
 
 async function main() {
   const url = process.env.DIRECT_URL || process.env.DATABASE_URL;
@@ -23,22 +27,21 @@ async function main() {
     console.log('clear-migration-lock: no DIRECT_URL/DATABASE_URL set, skipping.');
     return;
   }
-  const client = new Client({ connectionString: url });
-  await client.connect();
+  const prisma = new PrismaClient({ datasources: { db: { url } } });
   try {
-    const { rows } = await client.query(
-      `SELECT l.pid FROM pg_locks l WHERE l.locktype = 'advisory' AND l.objid = 72707369 AND l.granted = true`,
-    );
+    const rows = await prisma.$queryRaw`
+      SELECT l.pid FROM pg_locks l WHERE l.locktype = 'advisory' AND l.objid = 72707369 AND l.granted = true
+    `;
     if (rows.length === 0) {
       console.log('clear-migration-lock: no stale migration lock found.');
       return;
     }
     for (const { pid } of rows) {
       console.log(`clear-migration-lock: found stale migration lock held by pid ${pid}, terminating it.`);
-      await client.query('SELECT pg_terminate_backend($1::int4)', [pid]);
+      await prisma.$queryRaw`SELECT pg_terminate_backend(${pid}::int4)`;
     }
   } finally {
-    await client.end();
+    await prisma.$disconnect();
   }
 }
 
