@@ -26,18 +26,37 @@ function scoreRubric(rubric: Rubric, ratings: Record<string, number>, passed: Re
   let criticalFailed = false;
 
   for (const s of rubric.sections) {
+    // Weights left at 0 fall back to the full marks — mirrors the server, where
+    // it stops a blank-weight rubric from scoring everyone 0.
+    const examined = s.items.filter((it) => ratings[it.id] != null);
+    const weightless = examined.length > 0 && examined.every((it) => it.weightPercent === 0);
+    const w = (it: Item) => (weightless ? it.maxRating : it.weightPercent);
+
     let scored = 0;
     let attemptedItemWeight = 0;
     for (const it of s.items) {
       if (it.isCritical && passed[it.id] === false) criticalFailed = true;
       const r = ratings[it.id];
       if (r == null) continue;
-      attemptedItemWeight += it.weightPercent;
-      scored += it.weightPercent * (r / it.maxRating);
+      attemptedItemWeight += w(it);
+      scored += w(it) * (r / it.maxRating);
     }
     if (attemptedItemWeight === 0) continue;
     weightedSum += s.weightPercent * ((scored / attemptedItemWeight) * 100);
     attemptedSectionWeight += s.weightPercent;
+  }
+
+  if (attemptedSectionWeight === 0) {
+    for (const s of rubric.sections) {
+      const examined = s.items.filter((it) => ratings[it.id] != null);
+      if (examined.length === 0) continue;
+      const useMarks = examined.every((it) => it.weightPercent === 0);
+      const w = (it: Item) => (useMarks ? it.maxRating : it.weightPercent);
+      const totalW = examined.reduce((a, it) => a + w(it), 0);
+      if (totalW <= 0) continue;
+      weightedSum += (examined.reduce((a, it) => a + w(it) * ((ratings[it.id] ?? 0) / it.maxRating), 0) / totalW) * 100;
+      attemptedSectionWeight += 1;
+    }
   }
 
   const total = attemptedSectionWeight > 0 ? weightedSum / attemptedSectionWeight : 0;
@@ -64,6 +83,13 @@ export default function GradingDrawer({
   const [passed, setPassed] = useState<Record<string, boolean>>({});
   const [weights, setWeights] = useState<Record<string, number>>({});
   const [weightsDirty, setWeightsDirty] = useState(false);
+  // Direct entry: some components are marked outside the app (a written exam,
+  // a case study) and come back as one number. Working out per-item marks to
+  // fit them into a checklist is arithmetic no one should have to do.
+  const [directMode, setDirectMode] = useState(false);
+  const [rawScore, setRawScore] = useState<string>('');
+  const [rawMax, setRawMax] = useState<string>('');
+  const [directPercent, setDirectPercent] = useState<string>('');
   const [saving, setSaving] = useState(false);
   const [savingW, setSavingW] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -89,9 +115,20 @@ export default function GradingDrawer({
   // Load existing scores + item weights when the active rubric changes.
   useEffect(() => {
     if (!activeId) return;
-    apiFetch<{ evaluation: { scores: Record<string, number>; passed: Record<string, boolean> } | null }>(`/assessment/evaluation?rubricId=${activeId}&studentId=${studentId}&sectionId=${sectionId}`)
-      .then((d) => { setRatings(d.evaluation?.scores ?? {}); setPassed(d.evaluation?.passed ?? {}); })
-      .catch(() => { setRatings({}); setPassed({}); });
+    apiFetch<{ evaluation: { scores: Record<string, number>; passed: Record<string, boolean>; scorePercent: number | null; rawScore: number | null; rawMax: number | null } | null }>(`/assessment/evaluation?rubricId=${activeId}&studentId=${studentId}&sectionId=${sectionId}`)
+      .then((d) => {
+        const ev = d.evaluation;
+        setRatings(ev?.scores ?? {});
+        setPassed(ev?.passed ?? {});
+        // Reopen in whichever way it was graded, so a re-save doesn't quietly
+        // switch the record from one to the other.
+        const wasDirect = !!ev && Object.keys(ev.scores ?? {}).length === 0 && ev.scorePercent != null;
+        setDirectMode(wasDirect);
+        setRawScore(ev?.rawScore != null ? String(ev.rawScore) : '');
+        setRawMax(ev?.rawMax != null ? String(ev.rawMax) : '');
+        setDirectPercent(wasDirect && ev?.rawScore == null && ev?.scorePercent != null ? String(ev.scorePercent) : '');
+      })
+      .catch(() => { setRatings({}); setPassed({}); setDirectMode(false); setRawScore(''); setRawMax(''); setDirectPercent(''); });
     const r = rubrics.find((x) => x.id === activeId);
     const w: Record<string, number> = {};
     r?.sections.forEach((s) => s.items.forEach((i) => { w[i.id] = i.weightPercent; }));
@@ -106,10 +143,15 @@ export default function GradingDrawer({
       // Send every item the grader touched, including a deliberate 0 — that
       // is a real mark and has to count. Only untouched items are omitted,
       // which is what marks a procedure as "not examined".
-      const scores = Object.entries(ratings).filter(([, v]) => v != null).map(([rubricItemId, rating]) => ({
+      const scores = directMode ? [] : Object.entries(ratings).filter(([, v]) => v != null).map(([rubricItemId, rating]) => ({
         rubricItemId, rating, ...(rubricItemId in passed ? { passed: passed[rubricItemId] } : {}),
       }));
-      await apiFetch('/assessment/evaluation', { method: 'POST', body: JSON.stringify({ rubricId: active.id, studentId, sectionId, scores }) });
+      const direct = directMode
+        ? (rawScore !== '' && rawMax !== ''
+            ? { rawScore: Number(rawScore), rawMax: Number(rawMax) }
+            : { scorePercent: Number(directPercent) })
+        : undefined;
+      await apiFetch('/assessment/evaluation', { method: 'POST', body: JSON.stringify({ rubricId: active.id, studentId, sectionId, scores, ...(direct ? { direct } : {}) }) });
       await loadSummary();
       onSaved();
     } catch (err) {
@@ -132,7 +174,11 @@ export default function GradingDrawer({
     } finally { setSavingW(false); }
   }
 
-  const live = active ? scoreRubric({ ...active, sections: active.sections.map((s) => ({ ...s, items: s.items.map((i) => ({ ...i, weightPercent: weights[i.id] ?? i.weightPercent })) })) }, ratings, passed) : { total: 0, criticalFailed: false };
+  const directTotal = rawScore !== '' && rawMax !== '' && Number(rawMax) > 0
+    ? Math.round((Number(rawScore) / Number(rawMax)) * 10000) / 100
+    : directPercent !== '' ? Number(directPercent) : 0;
+  const itemLive = active ? scoreRubric({ ...active, sections: active.sections.map((s) => ({ ...s, items: s.items.map((i) => ({ ...i, weightPercent: weights[i.id] ?? i.weightPercent })) })) }, ratings, passed) : { total: 0, criticalFailed: false };
+  const live = directMode ? { total: directTotal, criticalFailed: false } : itemLive;
 
   return (
     <div onClick={onClose} style={{ position: 'fixed', inset: 0, background: 'rgba(6,10,20,0.5)', backdropFilter: 'blur(3px)', zIndex: 1100, display: 'flex', justifyContent: 'flex-end' }}>
@@ -189,6 +235,51 @@ export default function GradingDrawer({
                   </div>
                 </div>
 
+                {/* How this rubric is being scored. Item by item is the default;
+                    direct entry is for a component marked elsewhere. */}
+                <div style={{ display: 'flex', gap: 6, marginBottom: 12 }}>
+                  {([false, true] as const).map((mode) => (
+                    <button key={String(mode)} onClick={() => setDirectMode(mode)}
+                      style={{ padding: '6px 12px', borderRadius: 999, fontSize: 12, fontWeight: 650, cursor: 'pointer',
+                        border: directMode === mode ? '1px solid var(--brand)' : '1px solid var(--glass-hairline)',
+                        background: directMode === mode ? 'linear-gradient(120deg, var(--brand-2), var(--brand))' : 'transparent',
+                        color: directMode === mode ? '#fff' : 'var(--text-2)' }}>
+                      {mode ? t('as.modeDirect') : t('as.modeItems')}
+                    </button>
+                  ))}
+                </div>
+
+                {directMode ? (
+                  <div style={{ border: '1px solid var(--glass-hairline)', borderRadius: 14, padding: 16, marginBottom: 14 }}>
+                    <div className="muted" style={{ fontSize: 12, marginBottom: 12 }}>{t('as.directHint')}</div>
+                    <div style={{ display: 'flex', alignItems: 'flex-end', gap: 10, flexWrap: 'wrap' }}>
+                      <label style={{ display: 'block' }}>
+                        <span className="subtle" style={{ fontSize: 11, fontWeight: 600, display: 'block', marginBottom: 4 }}>{t('as.rawScore')}</span>
+                        <input type="number" min={0} step={0.5} className="input" style={{ width: 110 }} value={rawScore}
+                          onChange={(e) => { setRawScore(e.target.value); setDirectPercent(''); }} />
+                      </label>
+                      <span style={{ paddingBottom: 12, fontSize: 15, color: 'var(--text-2)' }}>/</span>
+                      <label style={{ display: 'block' }}>
+                        <span className="subtle" style={{ fontSize: 11, fontWeight: 600, display: 'block', marginBottom: 4 }}>{t('as.rawMax')}</span>
+                        <input type="number" min={0} step={0.5} className="input" style={{ width: 110 }} value={rawMax}
+                          onChange={(e) => { setRawMax(e.target.value); setDirectPercent(''); }} />
+                      </label>
+                      <span style={{ paddingBottom: 12, fontSize: 12, color: 'var(--text-2)' }}>{t('as.orPercent')}</span>
+                      <label style={{ display: 'block' }}>
+                        <span className="subtle" style={{ fontSize: 11, fontWeight: 600, display: 'block', marginBottom: 4 }}>%</span>
+                        <input type="number" min={0} max={100} step={0.01} className="input" style={{ width: 110 }} value={directPercent}
+                          onChange={(e) => { setDirectPercent(e.target.value); setRawScore(''); setRawMax(''); }} />
+                      </label>
+                    </div>
+                    <div style={{ marginTop: 12, fontSize: 13 }}>
+                      {t('as.rubricScore')}: <b style={{ fontSize: 17, color: 'var(--brand)' }}>{directTotal}</b>/100
+                      {rawScore !== '' && rawMax !== '' && Number(rawMax) > 0 && (
+                        <span className="muted" style={{ marginLeft: 8, fontSize: 12 }}>({rawScore}/{rawMax} · {t('as.contributes')} {Math.round(directTotal * active.weightPercent) / 100})</span>
+                      )}
+                    </div>
+                  </div>
+                ) : (
+                <>
                 {active.sections.length > 1 && (
                   <div style={{ marginBottom: 12 }}>
                     <div className="subtle" style={{ fontSize: 12, fontWeight: 600, marginBottom: 6 }}>{t('as.whichProcedure')}</div>
@@ -293,6 +384,8 @@ export default function GradingDrawer({
                     ))}
                   </div>
                 ))}
+                </>
+                )}
               </>
             )}
           </>

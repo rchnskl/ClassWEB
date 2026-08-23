@@ -565,12 +565,27 @@ export class ReportsService {
       this.prisma.evaluation.findMany({
         where: { universityId, sectionId },
         select: {
-          id: true, studentId: true, rubricId: true, scorePercent: true,
-          scores: { select: { rubricItemId: true } },
+          id: true, studentId: true, rubricId: true, scorePercent: true, rawScore: true, rawMax: true,
+          scores: { select: { rubricItemId: true, rating: true } },
         },
       }),
     ]);
     const scoreMap = new Map(evaluations.map((e) => [`${e.studentId}:${e.rubricId}`, e.scorePercent]));
+
+    // The marks behind each percentage. A rubric entered directly carries the
+    // mark the lecturer typed; one graded item by item has it summed from the
+    // items actually examined (unexamined items are not zeros — see
+    // AssessmentService.scoreRubric).
+    const maxByItem = new Map(rubrics.flatMap((r) => r.sections.flatMap((sec) => sec.items.map((it) => [it.id, it.maxRating] as const))));
+    const marksMap = new Map(evaluations.map((e) => {
+      if (e.rawMax != null && e.rawScore != null) return [`${e.studentId}:${e.rubricId}`, { marks: e.rawScore, fullMarks: e.rawMax }] as const;
+      const scored = e.scores.filter((sc) => maxByItem.has(sc.rubricItemId));
+      if (scored.length === 0) return [`${e.studentId}:${e.rubricId}`, null] as const;
+      return [`${e.studentId}:${e.rubricId}`, {
+        marks: Math.round(scored.reduce((a, sc) => a + sc.rating, 0) * 100) / 100,
+        fullMarks: scored.reduce((a, sc) => a + (maxByItem.get(sc.rubricItemId) ?? 0), 0),
+      }] as const;
+    }));
 
     // For a multi-procedure checklist (LAB_MIDTERM-style — students draw one of
     // several procedures rather than doing all of them), a bare percentage
@@ -596,6 +611,7 @@ export class ReportsService {
     const students = summary.students.map((s) => ({
       ...s,
       scores: rubrics.map((r) => scoreMap.get(`${s.studentId}:${r.id}`) ?? null),
+      marks: rubrics.map((r) => marksMap.get(`${s.studentId}:${r.id}`) ?? null),
       examinedProcedures: rubrics.map((r) => examinedMap.get(`${s.studentId}:${r.id}`) ?? null),
     }));
 
@@ -665,9 +681,12 @@ export class ReportsService {
     colX.push(colX[totalCol] + fixedW.total);
     const gradeCol = colX.length - 1;
     colX.push(colX[gradeCol] + fixedW.grade);
-    // Every row reserves space for a second line (the procedure name) so row
-    // height stays uniform whether or not that particular student has one.
-    const rowH = multiCount > 0 ? 27 : 18;
+    // Every row reserves space for the extra lines under the score (the marks
+    // it came from, and for a drawn-by-lot checklist the procedure name) so
+    // row height stays uniform whether or not a particular student has them.
+    const anyMarks = d.students.some((s) => s.marks.some((m) => m != null));
+    const extraLines = (anyMarks ? 1 : 0) + (multiCount > 0 ? 1 : 0);
+    const rowH = 18 + extraLines * 9;
 
     const headerLabels = ['#', L(lang, 'รหัส', 'Code'), L(lang, 'ชื่อ-สกุล', 'Name'), ...d.rubrics.map((_, i) => `R${i + 1}`), L(lang, 'รวม', 'Total'), L(lang, 'เกรด', 'Grade')];
     const drawHeader = (yy: number) => {
@@ -688,13 +707,25 @@ export class ReportsService {
       d.rubrics.forEach((_, ri) => {
         const sc = s.scores[ri];
         const colW = colX[rubricStart + ri + 1] - colX[rubricStart + ri] - 5;
-        doc.text(sc == null ? '—' : String(sc), colX[rubricStart + ri] + 3, y, { width: colW, align: 'center' });
-        const procs = s.examinedProcedures[ri];
-        if (procs) {
-          doc.font(F).fontSize(7.5).fillColor('#7c8798')
-            .text(procs.map(([en, th]) => (lang === 'en' ? en : th)).join(', '), colX[rubricStart + ri] + 3, y + 11, { width: colW, align: 'center', lineBreak: false, ellipsis: true });
-          doc.font(F).fontSize(10).fillColor('#26303f');
+        const colLeft = colX[rubricStart + ri] + 3;
+        doc.text(sc == null ? '—' : String(sc), colLeft, y, { width: colW, align: 'center' });
+        // A bare "0" is unreadable on a printed sheet: it could be a real zero,
+        // a critical failure, or nothing entered. The marks line says which.
+        let sub = y + 11;
+        const m = s.marks[ri];
+        if (m) {
+          doc.font(F).fontSize(7.5).fillColor('#4a5666')
+            .text(`${m.marks}/${m.fullMarks}`, colLeft, sub, { width: colW, align: 'center', lineBreak: false });
+          sub += 9;
         }
+        const procs = s.examinedProcedures[ri];
+        if (procs && procs.length > 0) {
+          // height caps this at the one line the row reserves — without it a
+          // long Thai procedure name wrapped and bled into the row below.
+          doc.font(F).fontSize(7).fillColor('#7c8798')
+            .text(procs.map(([en, th]) => (lang === 'en' ? en : th)).join(', '), colLeft, sub, { width: colW, height: 8, align: 'center', ellipsis: true });
+        }
+        doc.font(F).fontSize(10).fillColor('#26303f');
       });
       doc.font(FB).text(String(s.total), colX[totalCol] + 3, y, { width: colX[totalCol + 1] - colX[totalCol] - 5, align: 'center' });
       doc.text(s.grade ?? '—', colX[gradeCol] + 3, y, { width: colX[gradeCol + 1] - colX[gradeCol] - 5, align: 'center' });
@@ -702,15 +733,19 @@ export class ReportsService {
       y += rowH;
     });
 
-    // Legend
+    // Legend + signature are measured together and moved as one block. Checked
+    // line by line they used to break twice — one rubric spilling onto a page
+    // of its own, then the signature onto a third — leaving two near-empty
+    // sheets in every printout.
     y += 12;
-    if (y > doc.page.height - 70) { doc.addPage(); y = 40; }
+    const legendH = 16 + d.rubrics.length * 14;
+    const signatureH = 50;
+    if (y + legendH + signatureH > doc.page.height - 40) { doc.addPage(); y = 40; }
     doc.font(FB).fontSize(11).fillColor('#26303f').text(L(lang, 'แบบประเมิน', 'Rubrics') + ':', left, y); y += 16;
     doc.font(F).fontSize(10).fillColor('#4a5666');
     d.rubrics.forEach((r, i) => { doc.text(`R${i + 1} = ${(lang === 'en' ? r.nameEn : r.nameTh) ?? r.nameEn} (${r.weightPercent}%)`, left, y, { width: right - left }); y += 14; });
 
     // Signature — QR already sits in the header, out of pagination's way.
-    if (y > doc.page.height - 90) { doc.addPage(); y = 40; }
     const sy = y + 16;
     doc.font(F).fontSize(12).fillColor('#26303f');
     doc.text(L(lang, 'ผู้รับรอง', 'Authorised signature'), right - 200, sy, { width: 200, align: 'center', lineBreak: false });
@@ -742,7 +777,9 @@ export class ReportsService {
     // rubric actually has more than one procedure to disambiguate — same
     // signal the PDF uses (see gatherSectionGrades) — so a plain single-item
     // component doesn't grow an empty column next to it.
-    const rubricHeaders = d.rubrics.flatMap((r) => (r.sections.length > 1 ? [`${r.nameEn} (${r.weightPercent}%)`, `${r.nameEn} — Procedure`] : [`${r.nameEn} (${r.weightPercent}%)`]));
+    const rubricHeaders = d.rubrics.flatMap((r) => (r.sections.length > 1
+      ? [`${r.nameEn} (${r.weightPercent}%)`, `${r.nameEn} — Marks`, `${r.nameEn} — Procedure`]
+      : [`${r.nameEn} (${r.weightPercent}%)`, `${r.nameEn} — Marks`]));
     const rows: string[][] = [
       ['Report No.', reportNumber],
       ['Section', `${d.section.subject.code} · ${d.section.sectionNo}`],
@@ -752,10 +789,11 @@ export class ReportsService {
         String(i + 1), s.studentCode, s.nameEn, s.nameTh ?? '',
         ...d.rubrics.flatMap((r, ri) => {
           const sc = s.scores[ri];
-          const scoreCell = sc == null ? '' : String(sc);
-          if (r.sections.length <= 1) return [scoreCell];
+          const m = s.marks[ri];
+          const cells = [sc == null ? '' : String(sc), m ? `${m.marks}/${m.fullMarks}` : ''];
+          if (r.sections.length <= 1) return cells;
           const procs = s.examinedProcedures[ri];
-          return [scoreCell, procs ? procs.map(([en]) => en).join(', ') : ''];
+          return [...cells, procs ? procs.map(([en]) => en).join(', ') : ''];
         }),
         String(s.total), s.isComplete ? 'Complete' : 'In progress', s.grade ?? '', s.gpa != null ? String(s.gpa) : '',
       ]),
@@ -774,7 +812,9 @@ export class ReportsService {
     ws.addRow([`Report No.: ${reportNumber}`]);
     ws.addRow([`Generated: ${this.formatDateTime(new Date(), 'th')}`]);
     ws.addRow([]);
-    const rubricHeaders = d.rubrics.flatMap((r) => (r.sections.length > 1 ? [`${r.nameEn} (${r.weightPercent}%)`, `${r.nameEn} — Procedure`] : [`${r.nameEn} (${r.weightPercent}%)`]));
+    const rubricHeaders = d.rubrics.flatMap((r) => (r.sections.length > 1
+      ? [`${r.nameEn} (${r.weightPercent}%)`, `${r.nameEn} — Marks`, `${r.nameEn} — Procedure`]
+      : [`${r.nameEn} (${r.weightPercent}%)`, `${r.nameEn} — Marks`]));
     const header = ws.addRow(['#', 'Student code', 'Name (EN)', 'Name (TH)', ...rubricHeaders, 'Total', 'Status', 'Grade', 'GPA']);
     header.font = { bold: true, color: { argb: 'FFFFFFFF' } };
     header.eachCell((c) => { c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF0E7C7B' } }; });
@@ -782,9 +822,11 @@ export class ReportsService {
       i + 1, s.studentCode, s.nameEn, s.nameTh ?? '',
       ...d.rubrics.flatMap((r, ri) => {
         const sc = s.scores[ri];
-        if (r.sections.length <= 1) return [sc ?? ''];
+        const m = s.marks[ri];
+        const cells: (string | number)[] = [sc ?? '', m ? `${m.marks}/${m.fullMarks}` : ''];
+        if (r.sections.length <= 1) return cells;
         const procs = s.examinedProcedures[ri];
-        return [sc ?? '', procs ? procs.map(([en]) => en).join(', ') : ''];
+        return [...cells, procs ? procs.map(([en]) => en).join(', ') : ''];
       }),
       s.total, s.isComplete ? 'Complete' : 'In progress', s.grade ?? '', s.gpa ?? '',
     ]));
@@ -822,11 +864,16 @@ export class ReportsService {
       this.assessment.activeRubricsForSubject(universityId, subjectId),
       this.prisma.evaluation.findMany({
         where: { universityId, studentId, sectionId },
-        select: { rubricId: true, scores: { select: { rubricItemId: true, rating: true, passed: true } } },
+        select: { rubricId: true, rawScore: true, rawMax: true, scores: { select: { rubricItemId: true, rating: true, passed: true } } },
       }),
     ]);
     const scoresByRubric = new Map(
       evaluations.map((e) => [e.rubricId, new Map(e.scores.map((sc) => [sc.rubricItemId, sc]))]),
+    );
+    // A rubric entered as one number has no item rows to add up; the mark the
+    // lecturer typed is the mark, and it is what the report should print.
+    const directByRubric = new Map(
+      evaluations.filter((e) => e.rawScore != null && e.rawMax != null).map((e) => [e.rubricId, { marks: e.rawScore!, fullMarks: e.rawMax! }]),
     );
     const round2 = (n: number) => Math.round(n * 100) / 100;
 
@@ -849,14 +896,16 @@ export class ReportsService {
         };
       });
       const examinedSections = sections.filter((sec) => sec.examined);
+      const direct = directByRubric.get(r.id);
       return [r.id, {
         // Only a checklist that holds several procedures needs the procedure
         // name spelled out; a single-section rubric is its own name.
         multiSection: r.sections.length > 1,
         sections,
         examinedSections,
-        marks: round2(examinedSections.reduce((a, sec) => a + sec.marks, 0)),
-        fullMarks: examinedSections.reduce((a, sec) => a + sec.fullMarks, 0),
+        direct: !!direct,
+        marks: direct ? direct.marks : round2(examinedSections.reduce((a, sec) => a + sec.marks, 0)),
+        fullMarks: direct ? direct.fullMarks : examinedSections.reduce((a, sec) => a + sec.fullMarks, 0),
       }] as const;
     }));
   }

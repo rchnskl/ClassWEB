@@ -168,6 +168,34 @@ describe('AssessmentService (pure scoring logic)', () => {
       expect(service.scoreRubric(r, new Map(), noPass).scorePercent).toBe(0);
     });
 
+    it('scores a rubric whose weights were left at 0, using the full marks', () => {
+      // What the lecturer hit: a rubric saved with blank percentages scored
+      // every student 0, and the sheet showed it as if it were a real mark.
+      const r = rubric([{ weightPercent: 0, items: [
+        { id: 'a', weightPercent: 0, maxRating: 30 },
+        { id: 'b', weightPercent: 0, maxRating: 10 },
+      ] }]);
+      // 27/30 and 5/10 → 32 of 40 marks.
+      expect(service.scoreRubric(r, new Map([['a', 27], ['b', 5]]), noPass).scorePercent).toBe(80);
+    });
+
+    it('scores across several zero-weight sections', () => {
+      const r = rubric([
+        { weightPercent: 0, items: [{ id: 'a', weightPercent: 0, maxRating: 10 }] },
+        { weightPercent: 0, items: [{ id: 'b', weightPercent: 0, maxRating: 10 }] },
+      ]);
+      expect(service.scoreRubric(r, new Map([['a', 10], ['b', 5]]), noPass).scorePercent).toBe(75);
+    });
+
+    it('still prefers real weights over the full marks when they are set', () => {
+      const r = rubric([{ weightPercent: 100, items: [
+        { id: 'a', weightPercent: 90, maxRating: 10 },
+        { id: 'b', weightPercent: 10, maxRating: 50 },
+      ] }]);
+      // Full marks on the lightly weighted item, nothing on the heavy one.
+      expect(service.scoreRubric(r, new Map([['a', 0], ['b', 50]]), noPass).scorePercent).toBe(10);
+    });
+
     it('supports non-5 maxRating scales', () => {
       const r = rubric([{ weightPercent: 100, items: [{ id: 'a', weightPercent: 100, maxRating: 10 }] }]);
       expect(service.scoreRubric(r, new Map([['a', 7]]), noPass).scorePercent).toBe(70);

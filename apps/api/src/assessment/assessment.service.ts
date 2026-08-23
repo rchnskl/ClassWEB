@@ -269,18 +269,45 @@ export class AssessmentService {
     let criticalFailed = false;
 
     for (const section of rubric.sections) {
+      // A rubric saved with its weights left at 0 used to score every student
+      // 0, silently: the weighted sum was 0 over a 0 total, and the sheet just
+      // showed a zero that looked like a real mark. Where a weight carries no
+      // information, fall back to the full marks — which is what "out of 50"
+      // already means — so marks entered always produce a score.
+      const examined = section.items.filter((it) => ratings.get(it.id) != null);
+      const weightless = examined.length > 0 && examined.every((it) => it.weightPercent === 0);
+      const itemWeight = (it: { weightPercent: number; maxRating: number }) => (weightless ? it.maxRating : it.weightPercent);
+
       let scored = 0;
       let attemptedItemWeight = 0;
       for (const item of section.items) {
         if (item.isCritical && passed.get(item.id) === false) criticalFailed = true;
         const rating = ratings.get(item.id);
         if (rating == null) continue;
-        attemptedItemWeight += item.weightPercent;
-        scored += item.weightPercent * (rating / item.maxRating);
+        attemptedItemWeight += itemWeight(item);
+        scored += itemWeight(item) * (rating / item.maxRating);
       }
       if (attemptedItemWeight === 0) continue; // section not examined
       weightedSum += section.weightPercent * ((scored / attemptedItemWeight) * 100);
       attemptedSectionWeight += section.weightPercent;
+    }
+
+    // Same fallback one level up: sections all weighted 0 would otherwise wipe
+    // out a fully marked rubric. Their examined items are already averaged, so
+    // an equal split across the examined sections is the honest reading.
+    if (attemptedSectionWeight === 0) {
+      const examinedSections = rubric.sections.filter((sec) => sec.items.some((it) => ratings.get(it.id) != null));
+      if (examinedSections.length > 0) {
+        weightedSum = 0;
+        for (const section of examinedSections) {
+          const examined = section.items.filter((it) => ratings.get(it.id) != null);
+          const useMarks = examined.every((it) => it.weightPercent === 0);
+          const w = (it: { weightPercent: number; maxRating: number }) => (useMarks ? it.maxRating : it.weightPercent);
+          const total = examined.reduce((a, it) => a + w(it), 0);
+          const got = examined.reduce((a, it) => a + w(it) * ((ratings.get(it.id) ?? 0) / it.maxRating), 0);
+          if (total > 0) { weightedSum += (got / total) * 100; attemptedSectionWeight += 1; }
+        }
+      }
     }
 
     const rubricScore = attemptedSectionWeight > 0 ? weightedSum / attemptedSectionWeight : 0;
@@ -404,6 +431,19 @@ export class AssessmentService {
     await this.lecturerScope.assertTeachesOrManages(user, sectionId);
   }
 
+  /** Turns a direct entry into the 0–100 the gradebook stores, keeping the raw mark. */
+  private resolveDirectScore(direct: { rawScore?: number; rawMax?: number; scorePercent?: number }) {
+    const { rawScore, rawMax, scorePercent } = direct;
+    if (rawScore != null || rawMax != null) {
+      if (rawScore == null || rawMax == null) throw new BadRequestException('Both the raw mark and what it is out of are required');
+      if (rawMax <= 0) throw new BadRequestException('The full mark must be greater than 0');
+      if (rawScore > rawMax) throw new BadRequestException(`Mark ${rawScore} exceeds the full mark of ${rawMax}`);
+      return { rawScore, rawMax, scorePercent: Math.round((rawScore / rawMax) * 10000) / 100 };
+    }
+    if (scorePercent == null) throw new BadRequestException('Give either a raw mark out of a full mark, or a percentage');
+    return { rawScore: null, rawMax: null, scorePercent };
+  }
+
   async getEvaluation(user: AuthenticatedUser, rubricId: string, studentId: string, sectionId?: string) {
     const universityId = user.universityId;
     await this.assertGradingScope(user, sectionId);
@@ -415,6 +455,7 @@ export class AssessmentService {
       rubric: await this.getRubric(universityId, rubricId),
       evaluation: evaluation
         ? { id: evaluation.id, status: evaluation.status, scorePercent: evaluation.scorePercent, criticalFailed: evaluation.criticalFailed, note: evaluation.note,
+            rawScore: evaluation.rawScore, rawMax: evaluation.rawMax,
             scores: Object.fromEntries(evaluation.scores.map((s) => [s.rubricItemId, s.rating])),
             passed: Object.fromEntries(evaluation.scores.filter((s) => s.passed !== null).map((s) => [s.rubricItemId, s.passed])) }
         : null,
@@ -450,7 +491,16 @@ export class AssessmentService {
       ratings.set(s.rubricItemId, s.rating);
       if (s.passed !== undefined) passed.set(s.rubricItemId, s.passed);
     }
-    const { scorePercent, criticalFailed } = this.scoreRubric(rubric, ratings, passed);
+
+    // Direct entry wins over the checklist: a component marked outside the app
+    // arrives as one number, and inventing per-item marks to carry it would be
+    // a fiction on the grade sheet. The raw mark is kept as given so the report
+    // can print "42/50", not just the percentage it works out to.
+    const direct = dto.direct ? this.resolveDirectScore(dto.direct) : null;
+    const { scorePercent, criticalFailed } = direct
+      ? { scorePercent: direct.scorePercent, criticalFailed: false }
+      : this.scoreRubric(rubric, ratings, passed);
+    if (direct) { ratings.clear(); passed.clear(); }
 
     const existing = await this.prisma.evaluation.findFirst({
       where: { universityId, rubricId: dto.rubricId, studentId: dto.studentId, sectionId: dto.sectionId ?? null },
@@ -459,7 +509,10 @@ export class AssessmentService {
     const evaluation = existing
       ? await this.prisma.evaluation.update({
           where: { id: existing.id },
-          data: { evaluatorId: userId, evaluatorName: userName, status: 'SUBMITTED', scorePercent, criticalFailed, note: dto.note },
+          data: {
+            evaluatorId: userId, evaluatorName: userName, status: 'SUBMITTED', scorePercent, criticalFailed, note: dto.note,
+            rawScore: direct?.rawScore ?? null, rawMax: direct?.rawMax ?? null,
+          },
         })
       : await this.prisma.evaluation.create({
           data: {
@@ -468,6 +521,7 @@ export class AssessmentService {
             student: { connect: { id: dto.studentId } },
             ...(dto.sectionId ? { section: { connect: { id: dto.sectionId } } } : {}),
             evaluatorId: userId, evaluatorName: userName, status: 'SUBMITTED', scorePercent, criticalFailed, note: dto.note,
+            rawScore: direct?.rawScore ?? null, rawMax: direct?.rawMax ?? null,
           },
         });
 

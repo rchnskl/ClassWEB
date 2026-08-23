@@ -23,6 +23,26 @@ export class ScoreEntryDto {
   passed?: boolean;
 }
 
+/**
+ * Scoring a rubric as a whole instead of item by item. Some components are
+ * marked outside the app (a written exam, a case study) and arrive as one
+ * number — forcing that through a checklist means inventing per-item marks.
+ * Give the raw mark and what it was out of, or the percentage directly.
+ */
+export class DirectScoreDto {
+  @ApiPropertyOptional({ description: 'Raw mark given, e.g. 42. Requires rawMax.' })
+  @IsOptional() @Type(() => Number) @IsNumber() @Min(0)
+  rawScore?: number;
+
+  @ApiPropertyOptional({ description: 'What the raw mark was out of, e.g. 50.' })
+  @IsOptional() @Type(() => Number) @IsNumber() @Min(0.01)
+  rawMax?: number;
+
+  @ApiPropertyOptional({ description: 'The 0–100 score itself, when there is no raw mark to record.' })
+  @IsOptional() @Type(() => Number) @IsNumber() @Min(0) @Max(100)
+  scorePercent?: number;
+}
+
 export class SaveEvaluationDto {
   @ApiProperty()
   @IsString()
@@ -47,6 +67,10 @@ export class SaveEvaluationDto {
   @ValidateNested({ each: true })
   @Type(() => ScoreEntryDto)
   scores!: ScoreEntryDto[];
+
+  @ApiPropertyOptional({ type: DirectScoreDto, description: 'Score the rubric as a whole; item scores are cleared when this is used.' })
+  @IsOptional() @ValidateNested() @Type(() => DirectScoreDto)
+  direct?: DirectScoreDto;
 }
 
 class WeightDto {

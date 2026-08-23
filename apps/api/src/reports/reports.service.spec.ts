@@ -106,3 +106,82 @@ describe('ReportsService — individual grade report', () => {
     expect(rows[2]).toEqual(expect.arrayContaining(['Written paper', 21.5, 25]));
   });
 });
+
+/**
+ * The whole-class sheet. Its failure modes are layout ones the lecturer sees
+ * on paper: a bare "0" with no marks behind it, a procedure name bleeding into
+ * the row below, and a legend/signature that each broke onto a near-empty page
+ * of their own.
+ */
+describe('ReportsService — section grade sheet', () => {
+  const user = { id: 'u1', universityId: 'uni1', roles: ['ADMIN'] } as unknown as AuthenticatedUser;
+
+  const rubrics = [
+    {
+      id: 'r-lab', nameEn: 'Lab mid-term', nameTh: 'การสอบกลางภาค (ภาคปฏิบัติ)', weightPercent: 15,
+      sections: [
+        { id: 's-1', nameEn: 'Nasogastric tube feeding', nameTh: 'การให้อาหารทางสายยางให้อาหาร', weightPercent: 50,
+          items: [{ id: 'i1', textEn: 'Step 1', textTh: 'ขั้นตอนที่ 1', maxRating: 5, weightPercent: 100, isCritical: false }] },
+        { id: 's-2', nameEn: 'Urinary catheterisation', nameTh: 'การสวนปัสสาวะ', weightPercent: 50,
+          items: [{ id: 'i2', textEn: 'Step 1', textTh: 'ขั้นตอนที่ 1', maxRating: 5, weightPercent: 100, isCritical: false }] },
+      ],
+    },
+    {
+      id: 'r-mid', nameEn: 'Midterm exam', nameTh: 'สอบกลางภาค', weightPercent: 85,
+      sections: [{ id: 's-3', nameEn: 'Midterm exam', nameTh: 'สอบกลางภาค', weightPercent: 100,
+        items: [{ id: 'i3', textEn: 'Written paper', textTh: 'ข้อเขียน', maxRating: 50, weightPercent: 100, isCritical: false }] }],
+    },
+  ];
+
+  const summary = {
+    students: [
+      { studentId: 'a', studentCode: '6512345', nameEn: 'Somchai Jaidee', nameTh: 'สมชาย ใจดี', total: 71.4, gradedWeight: 100, gradedCount: 2, hasCriticalFail: false, isComplete: true, grade: 'B', gpa: 3 },
+      { studentId: 'b', studentCode: '6512346', nameEn: 'Suda Rakdee', nameTh: 'สุดา รักดี', total: 0, gradedWeight: 15, gradedCount: 1, hasCriticalFail: false, isComplete: false, grade: null, gpa: null },
+    ],
+  };
+
+  // Student A: the checklist item by item, and the exam entered directly as
+  // 42/50. Student B: a zero on the checklist and nothing else yet.
+  const evaluations = [
+    { id: 'e1', studentId: 'a', rubricId: 'r-lab', scorePercent: 80, rawScore: null, rawMax: null, scores: [{ rubricItemId: 'i1', rating: 4 }] },
+    { id: 'e2', studentId: 'a', rubricId: 'r-mid', scorePercent: 84, rawScore: 42, rawMax: 50, scores: [] },
+    { id: 'e3', studentId: 'b', rubricId: 'r-lab', scorePercent: 0, rawScore: null, rawMax: null, scores: [{ rubricItemId: 'i2', rating: 0 }] },
+  ];
+
+  const prisma = {
+    university: { findUnique: jest.fn().mockResolvedValue({ nameEn: 'Assumption University', nameTh: 'มหาวิทยาลัยอัสสัมชัญ' }) },
+    faculty: { findFirst: jest.fn().mockResolvedValue({ nameEn: 'Faculty of Nursing', nameTh: 'คณะพยาบาลศาสตร์' }) },
+    section: { findFirst: jest.fn().mockResolvedValue({ subjectId: 'subj1', sectionNo: '01', subject: { code: 'NUS2202', nameEn: 'Adult Nursing', nameTh: 'การพยาบาลผู้ใหญ่' } }) },
+    evaluation: { findMany: jest.fn().mockResolvedValue(evaluations) },
+    report: { create: jest.fn().mockResolvedValue({}), update: jest.fn().mockResolvedValue({}) },
+    auditLog: { create: jest.fn().mockResolvedValue({}) },
+  };
+  const assessment = {
+    sectionSummary: jest.fn().mockResolvedValue(summary),
+    activeRubricsForSubject: jest.fn().mockResolvedValue(rubrics),
+  };
+  const settings = { getMap: jest.fn().mockResolvedValue({ 'pdf.header': '', 'pdf.footer': 'ClassWeb' }) };
+  const service = new ReportsService(prisma as any, {} as any, assessment as any, settings as any);
+
+  it('fits a small class on one page', async () => {
+    const { buffer } = await service.sectionGradesPdf(user, 'sec1', 'u1', 'A. Rachanon Sakol');
+    if (process.env.DUMP_SECTION_PDF) require('fs').writeFileSync(process.env.DUMP_SECTION_PDF, buffer);
+    expect(buffer.subarray(0, 5).toString()).toBe('%PDF-');
+    // Two students and two rubrics have no business spilling onto a second
+    // sheet — the legend and signature used to force two.
+    expect(buffer.toString('latin1').match(/\/Type\s*\/Page[^s]/g) ?? []).toHaveLength(1);
+  });
+
+  it('carries the marks behind each percentage into the CSV', async () => {
+    const { content } = await service.sectionGradesCsv(user, 'sec1');
+    const lines = content.split('\n');
+    expect(lines[3]).toContain('Lab mid-term — Marks');
+    expect(lines[3]).toContain('Midterm exam — Marks');
+    // Directly entered exam keeps the mark as typed; the checklist sums the
+    // items the student was actually examined on.
+    expect(lines[4]).toContain('42/50');
+    expect(lines[4]).toContain('4/5');
+    // A zero is shown as a zero out of something, not a bare 0.
+    expect(lines[5]).toContain('0/5');
+  });
+});
