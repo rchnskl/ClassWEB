@@ -804,28 +804,66 @@ export class ReportsService {
    * only one section are omitted from the result (nothing to disambiguate).
    * Shared by every grade report format (PDF/CSV/XLSX) so they all agree.
    */
-  private async examinedProceduresForStudent(universityId: string, subjectId: string, studentId: string, sectionId: string): Promise<Map<string, [string, string][]>> {
+  /**
+   * The marks behind a student's percentages: every rubric this subject uses,
+   * broken down by section and item, with the mark actually given.
+   *
+   * The report used to print percentages only, which reads as an opinion
+   * rather than a result — "83%" doesn't say 25 out of 30, nor which of the
+   * procedures on a multi-procedure checklist the student actually drew.
+   *
+   * Marks are totalled over the items that were *examined* (a rating was
+   * entered), matching AssessmentService.scoreRubric: a procedure the student
+   * never drew is not-applicable, not a zero. An explicit 0 is a real mark and
+   * is included.
+   */
+  private async gradeDetail(universityId: string, subjectId: string, studentId: string, sectionId: string) {
     const [rubrics, evaluations] = await Promise.all([
       this.assessment.activeRubricsForSubject(universityId, subjectId),
       this.prisma.evaluation.findMany({
         where: { universityId, studentId, sectionId },
-        select: { rubricId: true, scores: { select: { rubricItemId: true } } },
+        select: { rubricId: true, scores: { select: { rubricItemId: true, rating: true, passed: true } } },
       }),
     ]);
-    const sectionNameByItem = new Map<string, { nameEn: string; nameTh: string | null }>();
-    const multiSectionRubrics = new Set<string>();
-    for (const r of rubrics) {
-      if (r.sections.length > 1) multiSectionRubrics.add(r.id);
-      for (const s of r.sections) for (const it of s.items) sectionNameByItem.set(it.id, { nameEn: s.nameEn, nameTh: s.nameTh });
-    }
-    return new Map(evaluations.filter((e) => multiSectionRubrics.has(e.rubricId)).map((e) => {
-      const names = new Map<string, string>();
-      for (const sc of e.scores) {
-        const sec = sectionNameByItem.get(sc.rubricItemId);
-        if (sec) names.set(sec.nameEn, sec.nameTh ?? sec.nameEn);
-      }
-      return [e.rubricId, [...names.entries()]] as [string, [string, string][]];
+    const scoresByRubric = new Map(
+      evaluations.map((e) => [e.rubricId, new Map(e.scores.map((sc) => [sc.rubricItemId, sc]))]),
+    );
+    const round2 = (n: number) => Math.round(n * 100) / 100;
+
+    return new Map(rubrics.map((r) => {
+      const scores = scoresByRubric.get(r.id) ?? new Map<string, { rating: number; passed: boolean | null }>();
+      const sections = r.sections.map((sec) => {
+        const items = sec.items.map((it) => {
+          const sc = scores.get(it.id);
+          return {
+            textEn: it.textEn, textTh: it.textTh, maxRating: it.maxRating, weightPercent: it.weightPercent,
+            isCritical: it.isCritical, rating: sc?.rating ?? null, passed: sc?.passed ?? null,
+          };
+        });
+        const examined = items.filter((it) => it.rating != null);
+        return {
+          nameEn: sec.nameEn, nameTh: sec.nameTh, weightPercent: sec.weightPercent, items,
+          examined: examined.length > 0,
+          marks: round2(examined.reduce((a, it) => a + (it.rating ?? 0), 0)),
+          fullMarks: examined.reduce((a, it) => a + it.maxRating, 0),
+        };
+      });
+      const examinedSections = sections.filter((sec) => sec.examined);
+      return [r.id, {
+        // Only a checklist that holds several procedures needs the procedure
+        // name spelled out; a single-section rubric is its own name.
+        multiSection: r.sections.length > 1,
+        sections,
+        examinedSections,
+        marks: round2(examinedSections.reduce((a, sec) => a + sec.marks, 0)),
+        fullMarks: examinedSections.reduce((a, sec) => a + sec.fullMarks, 0),
+      }] as const;
     }));
+  }
+
+  /** "42/50" for a graded rubric or section, "—" when nothing was examined. */
+  private marksText(d: { marks: number; fullMarks: number } | undefined): string {
+    return d && d.fullMarks > 0 ? `${d.marks}/${d.fullMarks}` : '—';
   }
 
   async studentGradePdf(user: AuthenticatedUser, studentId: string, sectionId: string, byId?: string, byName?: string, lang: ReportLang = 'th'): Promise<{ buffer: Buffer; reportNumber: string }> {
@@ -839,7 +877,7 @@ export class ReportsService {
     ]);
     if (!section) throw new NotFoundException('Section not found in this tenant');
 
-    const examinedByRubric = await this.examinedProceduresForStudent(universityId, section.subjectId, studentId, sectionId);
+    const detailByRubric = await this.gradeDetail(universityId, section.subjectId, studentId, sectionId);
 
     const checksum = createHash('sha256').update(JSON.stringify({ studentId, sectionId, total: summary.total })).digest('hex');
     const reportNumber = await this.register(universityId, 'PDF', checksum, byId, byName, 'STUDENT_GRADE', `Grade report ${summary.student.studentCode}`);
@@ -893,10 +931,10 @@ export class ReportsService {
     // Thai text ("ยังไม่ให้คะแนน") and the last (contribution) column must fit
     // decimals like "55.99" — an earlier version left it only ~9pt wide,
     // which wrapped numbers onto multiple lines.
-    const cols = [left, left + 210, left + 265, left + 320, left + 420];
+    const cols = [left, left + 175, left + 245, left + 300, left + 352, left + 440];
     doc.roundedRect(left, y - 4, right - left, 20, 4).fill('#0e7c7b');
     doc.font(FB).fontSize(11).fillColor('#fff');
-    [L(lang, 'แบบประเมิน', 'Rubric'), L(lang, 'น้ำหนัก', 'Weight'), L(lang, 'คะแนน', 'Score'), L(lang, 'สถานะ', 'Status'), L(lang, 'คิดเป็น', 'Contribution')]
+    [L(lang, 'แบบประเมิน', 'Rubric'), L(lang, 'คะแนนดิบ', 'Marks'), L(lang, 'น้ำหนัก', 'Weight'), L(lang, 'คะแนน %', 'Score %'), L(lang, 'สถานะ', 'Status'), L(lang, 'คิดเป็น', 'Contribution')]
       .forEach((h, i) => doc.text(h, cols[i] + 4, y, { width: (cols[i + 1] ?? right) - cols[i] - 6 }));
     y += 20;
     doc.font(F).fontSize(11).fillColor('#26303f');
@@ -906,23 +944,83 @@ export class ReportsService {
       // a percentage: "83%" alone doesn't say whether that's from hand
       // hygiene or vital signs. Recovered from which RubricItems this
       // student's evaluation actually has score rows for.
-      const procs = examinedByRubric.get(r.rubricId);
-      const rowH = procs && procs.length > 0 ? 30 : 20;
+      const detail = detailByRubric.get(r.rubricId);
+      const procs = detail?.multiSection ? detail.examinedSections : [];
+      const rowH = procs.length > 0 ? 30 : 20;
       if (i % 2 === 1) { doc.rect(left, y - 3, right - left, rowH).fill('#f6f8fb'); doc.fillColor('#26303f'); }
       doc.text((lang === 'en' ? r.nameEn : r.nameTh) ?? r.nameEn, cols[0] + 4, y, { width: cols[1] - cols[0] - 6 });
-      doc.text(`${r.weightPercent}%`, cols[1] + 4, y, { width: cols[2] - cols[1] - 6 });
-      doc.text(r.scorePercent != null ? `${r.scorePercent}` : '—', cols[2] + 4, y, { width: cols[3] - cols[2] - 6 });
-      doc.text(L(lang, r.graded ? 'ให้คะแนนแล้ว' : 'ยังไม่ให้คะแนน', r.graded ? 'Graded' : 'Not graded'), cols[3] + 4, y, { width: cols[4] - cols[3] - 6 });
-      doc.text(`${r.contribution}`, cols[4] + 4, y, { width: right - cols[4] - 6 });
-      if (procs && procs.length > 0) {
+      doc.text(this.marksText(detail), cols[1] + 4, y, { width: cols[2] - cols[1] - 6 });
+      doc.text(`${r.weightPercent}%`, cols[2] + 4, y, { width: cols[3] - cols[2] - 6 });
+      doc.text(r.scorePercent != null ? `${r.scorePercent}` : '—', cols[3] + 4, y, { width: cols[4] - cols[3] - 6 });
+      doc.text(L(lang, r.graded ? 'ให้คะแนนแล้ว' : 'ยังไม่ให้คะแนน', r.graded ? 'Graded' : 'Not graded'), cols[4] + 4, y, { width: cols[5] - cols[4] - 6 });
+      doc.text(`${r.contribution}`, cols[5] + 4, y, { width: right - cols[5] - 6 });
+      if (procs.length > 0) {
         doc.font(F).fontSize(9).fillColor('#7c8798')
-          .text(`${L(lang, 'หัตถการที่สอบ', 'Procedure examined')}: ${procs.map(([en, th]) => (lang === 'en' ? en : th)).join(', ')}`, cols[0] + 4, y + 14, { width: right - cols[0] - 6, lineBreak: false, ellipsis: true });
+          .text(`${L(lang, 'หัตถการที่สอบ', 'Procedure examined')}: ${procs.map((sec) => (lang === 'en' ? sec.nameEn : sec.nameTh ?? sec.nameEn)).join(', ')}`, cols[0] + 4, y + 14, { width: right - cols[0] - 6, lineBreak: false, ellipsis: true });
         doc.font(F).fontSize(11).fillColor('#26303f');
       }
       y += rowH;
     });
     y += 6;
-    doc.font(FB).fontSize(12).fillColor('#26303f').text(`${L(lang, 'รวม', 'Total')}: ${summary.total}/100`, left, y); y += 20;
+    const rawMarks = summary.rubrics.reduce((a, r) => a + (detailByRubric.get(r.rubricId)?.marks ?? 0), 0);
+    const rawFull = summary.rubrics.reduce((a, r) => a + (detailByRubric.get(r.rubricId)?.fullMarks ?? 0), 0);
+    doc.font(FB).fontSize(12).fillColor('#26303f')
+      .text(`${L(lang, 'รวม', 'Total')}: ${summary.total}/100${rawFull > 0 ? `    ${L(lang, 'คะแนนดิบรวม', 'Raw marks')}: ${Math.round(rawMarks * 100) / 100}/${rawFull}` : ''}`, left, y);
+    y += 20;
+
+    // Item-by-item marks. The table above says what each rubric was worth;
+    // this says how it was arrived at — which is what a student querying a
+    // grade actually asks for, and what a lecturer needs to defend it.
+    // Sections the student was never examined on are left out entirely rather
+    // than printed as zeros, matching how they are scored.
+    const graded = summary.rubrics
+      .map((r) => ({ row: r, detail: detailByRubric.get(r.rubricId) }))
+      .filter((x): x is { row: typeof x.row; detail: NonNullable<typeof x.detail> } => !!x.detail && x.detail.examinedSections.length > 0);
+
+    if (graded.length > 0) {
+      const nextPageIfNeeded = (needed: number) => {
+        if (y + needed > doc.page.height - 90) { doc.addPage(); y = 50; }
+      };
+      nextPageIfNeeded(60);
+      doc.font(FB).fontSize(14).fillColor('#26303f').text(L(lang, 'คะแนนรายข้อ', 'Item-by-item Marks'), left, y); y += 20;
+
+      for (const { row, detail } of graded) {
+        nextPageIfNeeded(46);
+        doc.font(FB).fontSize(11.5).fillColor('#0e2a4a')
+          .text(`${(lang === 'en' ? row.nameEn : row.nameTh) ?? row.nameEn}  ·  ${this.marksText(detail)} ${L(lang, 'คะแนน', 'marks')}  ·  ${L(lang, 'น้ำหนัก', 'weight')} ${row.weightPercent}%`, left, y, { width: right - left });
+        y += 16;
+        if (row.criticalFailed) {
+          doc.font(F).fontSize(9.5).fillColor('#c0392b')
+            .text(L(lang, 'ไม่ผ่านข้อที่ต้องผ่าน (*) คะแนนของแบบประเมินนี้จึงเป็น 0', 'A must-pass step was failed, so this rubric scores 0'), left + 10, y, { width: right - left - 10 });
+          y += 14;
+        }
+
+        for (const sec of detail.examinedSections) {
+          nextPageIfNeeded(34);
+          if (detail.multiSection) {
+            doc.font(FB).fontSize(10.5).fillColor('#4a5666')
+              .text(`${(lang === 'en' ? sec.nameEn : sec.nameTh) ?? sec.nameEn}  (${sec.marks}/${sec.fullMarks})`, left + 10, y, { width: right - left - 10 });
+            y += 14;
+          }
+          for (const it of sec.items) {
+            if (it.rating == null) continue; // not examined — see gradeDetail
+            nextPageIfNeeded(16);
+            const label = `${it.isCritical ? '* ' : ''}${(lang === 'en' ? it.textEn : it.textTh) ?? it.textEn}`;
+            doc.font(F).fontSize(9.5).fillColor(it.isCritical && it.passed === false ? '#c0392b' : '#26303f')
+              .text(label, left + 20, y, { width: right - left - 110, lineBreak: false, ellipsis: true });
+            doc.font(F).fontSize(9.5).fillColor('#26303f')
+              .text(`${it.rating}/${it.maxRating}${it.isCritical ? (it.passed === false ? ` · ${L(lang, 'ไม่ผ่าน', 'failed')}` : it.passed === true ? ` · ${L(lang, 'ผ่าน', 'passed')}` : '') : ''}`,
+                right - 100, y, { width: 100, align: 'right', lineBreak: false });
+            y += 13;
+          }
+          y += 2;
+        }
+        y += 6;
+      }
+      doc.font(F).fontSize(8.5).fillColor('#7c8798')
+        .text(L(lang, '* = ข้อที่ต้องผ่าน หากไม่ผ่าน คะแนนของแบบประเมินนั้นเป็น 0', '* = must-pass step; failing it forces that rubric to 0'), left, y, { width: right - left });
+      y += 14;
+    }
 
     // Signature — centered; QR is up in the header.
     if (y > doc.page.height - 110) { doc.addPage(); y = 60; }
@@ -954,25 +1052,49 @@ export class ReportsService {
       this.assessment.studentSummary(user, studentId, sectionId),
     ]);
     if (!section) throw new NotFoundException('Section not found in this tenant');
-    const examinedByRubric = await this.examinedProceduresForStudent(universityId, section.subjectId, studentId, sectionId);
+    const detailByRubric = await this.gradeDetail(universityId, section.subjectId, studentId, sectionId);
 
     const checksum = createHash('sha256').update(JSON.stringify({ studentId, sectionId, total: summary.total })).digest('hex');
     const reportNumber = await this.register(universityId, 'CSV', checksum, byId, byName, 'STUDENT_GRADE', `Grade report ${summary.student.studentCode}`);
     const esc = (v: string) => (/[",\n]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v);
+    const rawMarks = summary.rubrics.reduce((a, r) => a + (detailByRubric.get(r.rubricId)?.marks ?? 0), 0);
+    const rawFull = summary.rubrics.reduce((a, r) => a + (detailByRubric.get(r.rubricId)?.fullMarks ?? 0), 0);
     const rows: string[][] = [
       ['Report No.', reportNumber],
       ['Student', `${summary.student.studentCode} ${summary.student.nameEn}`],
       ['Program', summary.student.program.code],
       ['Total', String(summary.total)],
+      ['Raw marks', `${Math.round(rawMarks * 100) / 100}/${rawFull}`],
       ['Status', summary.isComplete ? 'Complete' : 'In progress'],
       ['Grade', summary.grade ? `${summary.grade.grade} (${summary.grade.gpa})` : ''],
       [],
-      ['Rubric', 'Weight %', 'Score %', 'Procedure', 'Graded', 'Contribution'],
-      ...summary.rubrics.map((r) => [
-        r.nameEn, String(r.weightPercent), r.scorePercent != null ? String(r.scorePercent) : '',
-        (examinedByRubric.get(r.rubricId) ?? []).map(([en]) => en).join(', '),
-        r.graded ? 'Yes' : 'No', String(r.contribution),
-      ]),
+      ['Rubric', 'Marks', 'Full marks', 'Weight %', 'Score %', 'Procedure', 'Graded', 'Contribution'],
+      ...summary.rubrics.map((r) => {
+        const d = detailByRubric.get(r.rubricId);
+        return [
+          r.nameEn,
+          d && d.fullMarks > 0 ? String(d.marks) : '', d && d.fullMarks > 0 ? String(d.fullMarks) : '',
+          String(r.weightPercent), r.scorePercent != null ? String(r.scorePercent) : '',
+          (d?.multiSection ? d.examinedSections : []).map((sec) => sec.nameEn).join(', '),
+          r.graded ? 'Yes' : 'No', String(r.contribution),
+        ];
+      }),
+      [],
+      // The mark behind every percentage above, so the sheet can be checked
+      // (or re-totalled) without opening the app. Unexamined items are left
+      // out, as they are in the scoring.
+      ['Item-by-item marks'],
+      ['Rubric', 'Section', 'Item', 'Mark', 'Full mark', 'Must-pass', 'Result'],
+      ...summary.rubrics.flatMap((r) => {
+        const d = detailByRubric.get(r.rubricId);
+        if (!d) return [];
+        return d.examinedSections.flatMap((sec) =>
+          sec.items.filter((it) => it.rating != null).map((it) => [
+            r.nameEn, sec.nameEn, it.textEn, String(it.rating), String(it.maxRating),
+            it.isCritical ? 'Yes' : '', it.isCritical ? (it.passed === false ? 'Failed' : it.passed === true ? 'Passed' : '') : '',
+          ]),
+        );
+      }),
     ];
     return { content: '﻿' + rows.map((r) => r.map((c) => esc(String(c))).join(',')).join('\n'), reportNumber };
   }
@@ -984,7 +1106,7 @@ export class ReportsService {
       this.assessment.studentSummary(user, studentId, sectionId),
     ]);
     if (!section) throw new NotFoundException('Section not found in this tenant');
-    const examinedByRubric = await this.examinedProceduresForStudent(universityId, section.subjectId, studentId, sectionId);
+    const detailByRubric = await this.gradeDetail(universityId, section.subjectId, studentId, sectionId);
 
     const checksum = createHash('sha256').update(JSON.stringify({ studentId, sectionId, total: summary.total })).digest('hex');
     const reportNumber = await this.register(universityId, 'XLSX', checksum, byId, byName, 'STUDENT_GRADE', `Grade report ${summary.student.studentCode}`);
@@ -992,18 +1114,41 @@ export class ReportsService {
     const ws = wb.addWorksheet('Grades');
     ws.addRow([`${this.personName(summary.student.nameEn, summary.student.nameTh)} (${summary.student.studentCode})`]);
     ws.addRow([`Report No.: ${reportNumber}`]);
-    ws.addRow([`Total: ${summary.total}/100  ·  Status: ${summary.isComplete ? 'Complete' : 'In progress'}  ·  Grade: ${summary.grade ? summary.grade.grade + ' (' + summary.grade.gpa + ')' : '-'}`]);
+    const rawMarks = Math.round(summary.rubrics.reduce((a, r) => a + (detailByRubric.get(r.rubricId)?.marks ?? 0), 0) * 100) / 100;
+    const rawFull = summary.rubrics.reduce((a, r) => a + (detailByRubric.get(r.rubricId)?.fullMarks ?? 0), 0);
+    ws.addRow([`Total: ${summary.total}/100  ·  Raw marks: ${rawFull > 0 ? `${rawMarks}/${rawFull}` : '-'}  ·  Status: ${summary.isComplete ? 'Complete' : 'In progress'}  ·  Grade: ${summary.grade ? summary.grade.grade + ' (' + summary.grade.gpa + ')' : '-'}`]);
     ws.addRow([]);
-    const header = ws.addRow(['Rubric', 'Weight %', 'Score %', 'Procedure', 'Graded', 'Contribution']);
-    header.font = { bold: true, color: { argb: 'FFFFFFFF' } };
-    header.eachCell((c) => { c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF0E7C7B' } }; });
-    summary.rubrics.forEach((r) => ws.addRow([
-      r.nameEn, r.weightPercent, r.scorePercent ?? '',
-      (examinedByRubric.get(r.rubricId) ?? []).map(([en]) => en).join(', '),
-      r.graded ? 'Yes' : 'No', r.contribution,
-    ]));
-    ws.columns.forEach((c) => { c.width = 20; });
-    ws.getColumn(1).width = 40; ws.getColumn(4).width = 28;
+    const headerStyle = (row: ExcelJS.Row) => {
+      row.font = { bold: true, color: { argb: 'FFFFFFFF' } };
+      row.eachCell((c) => { c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF0E7C7B' } }; });
+    };
+    headerStyle(ws.addRow(['Rubric', 'Marks', 'Full marks', 'Weight %', 'Score %', 'Procedure', 'Graded', 'Contribution']));
+    summary.rubrics.forEach((r) => {
+      const d = detailByRubric.get(r.rubricId);
+      ws.addRow([
+        r.nameEn, d && d.fullMarks > 0 ? d.marks : '', d && d.fullMarks > 0 ? d.fullMarks : '',
+        r.weightPercent, r.scorePercent ?? '',
+        (d?.multiSection ? d.examinedSections : []).map((sec) => sec.nameEn).join(', '),
+        r.graded ? 'Yes' : 'No', r.contribution,
+      ]);
+    });
+    ws.columns.forEach((c) => { c.width = 18; });
+    ws.getColumn(1).width = 40; ws.getColumn(6).width = 28;
+
+    // Second sheet: the marks the percentages came from, one row per item.
+    const detail = wb.addWorksheet('Item marks');
+    headerStyle(detail.addRow(['Rubric', 'Section', 'Item', 'Mark', 'Full mark', 'Must-pass', 'Result']));
+    summary.rubrics.forEach((r) => {
+      const d = detailByRubric.get(r.rubricId);
+      d?.examinedSections.forEach((sec) => {
+        sec.items.filter((it) => it.rating != null).forEach((it) => detail.addRow([
+          r.nameEn, sec.nameEn, it.textEn, it.rating, it.maxRating,
+          it.isCritical ? 'Yes' : '', it.isCritical ? (it.passed === false ? 'Failed' : it.passed === true ? 'Passed' : '') : '',
+        ]));
+      });
+    });
+    detail.columns.forEach((c) => { c.width = 14; });
+    detail.getColumn(1).width = 32; detail.getColumn(2).width = 28; detail.getColumn(3).width = 60;
     return { buffer: Buffer.from(await wb.xlsx.writeBuffer()), reportNumber };
   }
 }
