@@ -1,9 +1,13 @@
 import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { AuditAction } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
-import { SaveEvaluationDto, SaveRubricDto, UpdateGradeBandsDto, UpdateRubricWeightsDto, UpdateSubjectRubricsDto } from './dto/assessment.dto';
+import { RubricItemInputDto, RubricSectionInputDto, SaveEvaluationDto, SaveRubricDto, UpdateGradeBandsDto, UpdateRubricWeightsDto, UpdateSubjectRubricsDto } from './dto/assessment.dto';
 import { AuthenticatedUser } from '../common/authenticated-user';
 import { LecturerScopeService } from '../common/lecturer-scope.service';
+
+/** A rubric item/section with its weight resolved (entered, or split by full marks). */
+type WeightedItem = RubricItemInputDto & { weightPercent: number };
+type WeightedSection = Omit<RubricSectionInputDto, 'items'> & { weightPercent: number; items: WeightedItem[] };
 
 interface GradeBand { grade: string; gpa: number; label: string; minScore: number }
 
@@ -40,6 +44,7 @@ export class AssessmentService {
     return rubric;
   }
 
+  /** Direct weight edit (rubric / sections / items) without touching the structure. */
   async updateWeights(universityId: string, id: string, dto: UpdateRubricWeightsDto) {
     const rubric = await this.getRubric(universityId, id);
 
@@ -74,18 +79,42 @@ export class AssessmentService {
     return this.getRubric(universityId, id);
   }
 
-  /** Shared weight-sum validation for the rubric builder (create + replace). */
-  private validateRubricStructure(dto: SaveRubricDto) {
-    const sectionSum = dto.sections.reduce((a, s) => a + s.weightPercent, 0);
+  /**
+   * Resolves the weights to store. A weight is what the marks are *worth*
+   * toward the grade and is set independently of the full marks: a 50-mark
+   * midterm section can be worth 15%, and 15% is then all it can ever
+   * contribute, however many marks it holds. Only when a weight is left
+   * unset does it fall back to the marks split (full mark over the total),
+   * which is the sensible default for a plain checklist.
+   */
+  private resolveWeights(dto: SaveRubricDto): WeightedSection[] {
+    const fullMark = (it: RubricItemInputDto) => it.maxRating ?? 5;
+    const sectionTotals = dto.sections.map((s) => s.items.reduce((a, it) => a + fullMark(it), 0));
+    const grandTotal = sectionTotals.reduce((a, n) => a + n, 0);
+
+    return dto.sections.map((s, si) => ({
+      ...s,
+      weightPercent: s.weightPercent ?? (grandTotal > 0 ? (sectionTotals[si] / grandTotal) * 100 : 0),
+      items: s.items.map((it) => ({
+        ...it,
+        weightPercent: it.weightPercent ?? (sectionTotals[si] > 0 ? (fullMark(it) / sectionTotals[si]) * 100 : 0),
+      })),
+    }));
+  }
+
+  /** Weights are shares of 100 — neither level may claim more than the whole. */
+  private validateWeights(sections: WeightedSection[]) {
+    const sectionSum = sections.reduce((a, s) => a + s.weightPercent, 0);
     if (sectionSum > 100.001) throw new BadRequestException('Section weights must not exceed 100%');
-    for (const section of dto.sections) {
+    for (const section of sections) {
       const itemSum = section.items.reduce((a, i) => a + i.weightPercent, 0);
       if (itemSum > 100.001) throw new BadRequestException(`Item weights within section "${section.nameEn}" must not exceed 100%`);
     }
   }
 
   async createRubric(universityId: string, dto: SaveRubricDto) {
-    this.validateRubricStructure(dto);
+    const sections = this.resolveWeights(dto);
+    this.validateWeights(sections);
     const maxOrder = await this.prisma.rubric.aggregate({ where: { universityId, deletedAt: null }, _max: { order: true } });
     const rubric = await this.prisma.rubric.create({
       data: {
@@ -97,7 +126,7 @@ export class AssessmentService {
         weightPercent: dto.weightPercent ?? 0,
         order: (maxOrder._max.order ?? 0) + 1,
         sections: {
-          create: dto.sections.map((s, si) => ({
+          create: sections.map((s, si) => ({
             nameEn: s.nameEn,
             nameTh: s.nameTh,
             weightPercent: s.weightPercent,
@@ -120,10 +149,42 @@ export class AssessmentService {
     return rubric;
   }
 
-  /** Fully replaces a rubric's sections/items (existing children are dropped and recreated). */
+  /**
+   * Applies an edited rubric structure. Sections/items that came back with
+   * their id are updated in place — dropping and recreating them would break
+   * the EvaluationScore rows that point at the old rubric items (a restricted
+   * FK, so it fails outright once anything has been graded, and would lose the
+   * marks even where it didn't). Only genuinely removed rows are deleted, and
+   * only when nothing has been scored against them.
+   */
   async updateRubricStructure(universityId: string, id: string, dto: SaveRubricDto) {
-    await this.getRubric(universityId, id); // ensures existence + tenant ownership
-    this.validateRubricStructure(dto);
+    const existing = await this.getRubric(universityId, id); // ensures existence + tenant ownership
+    const sections = this.resolveWeights(dto);
+    this.validateWeights(sections);
+
+    const existingSections = new Map(existing.sections.map((s) => [s.id, s]));
+    const existingItems = new Map(existing.sections.flatMap((s) => s.items.map((it) => [it.id, it])));
+
+    // An id the client sent that this rubric doesn't own is treated as "new".
+    const keptSectionIds = new Set(sections.map((s) => s.id).filter((sid): sid is string => !!sid && existingSections.has(sid)));
+    const keptItemIds = new Set(
+      sections.flatMap((s) => s.items.map((it) => it.id)).filter((iid): iid is string => !!iid && existingItems.has(iid)),
+    );
+
+    const removedSectionIds = existing.sections.filter((s) => !keptSectionIds.has(s.id)).map((s) => s.id);
+    const removedItemIds = existing.sections
+      .flatMap((s) => s.items)
+      .filter((it) => !keptItemIds.has(it.id))
+      .map((it) => it.id);
+
+    if (removedItemIds.length > 0) {
+      const scored = await this.prisma.evaluationScore.count({ where: { rubricItemId: { in: removedItemIds } } });
+      if (scored > 0) {
+        throw new ConflictException(
+          `Cannot remove rubric item(s) that already have ${scored} recorded score(s). Edit their wording or weight instead, or delete the evaluations first.`,
+        );
+      }
+    }
 
     await this.prisma.$transaction(async (tx) => {
       await tx.rubric.update({
@@ -136,28 +197,37 @@ export class AssessmentService {
           ...(dto.weightPercent !== undefined && { weightPercent: dto.weightPercent }),
         },
       });
-      // onDelete: Cascade on RubricSection→RubricItem takes items with it.
-      await tx.rubricSection.deleteMany({ where: { rubricId: id } });
-      for (const [si, s] of dto.sections.entries()) {
-        await tx.rubricSection.create({
-          data: {
-            rubricId: id,
-            nameEn: s.nameEn,
-            nameTh: s.nameTh,
-            weightPercent: s.weightPercent,
-            order: si,
-            items: {
-              create: s.items.map((it, ii) => ({
-                textEn: it.textEn,
-                textTh: it.textTh,
-                weightPercent: it.weightPercent,
-                maxRating: it.maxRating ?? 5,
-                isCritical: it.isCritical ?? false,
-                order: ii,
-              })),
-            },
-          },
+
+      if (removedItemIds.length > 0) await tx.rubricItem.deleteMany({ where: { id: { in: removedItemIds } } });
+      // onDelete: Cascade on RubricSection→RubricItem takes any leftovers with it.
+      if (removedSectionIds.length > 0) await tx.rubricSection.deleteMany({ where: { id: { in: removedSectionIds } } });
+
+      for (const [si, s] of sections.entries()) {
+        const sectionData = { nameEn: s.nameEn, nameTh: s.nameTh, weightPercent: s.weightPercent, order: si };
+        const itemData = (it: WeightedItem, ii: number) => ({
+          textEn: it.textEn,
+          textTh: it.textTh,
+          weightPercent: it.weightPercent,
+          maxRating: it.maxRating ?? 5,
+          isCritical: it.isCritical ?? false,
+          order: ii,
         });
+
+        if (s.id && keptSectionIds.has(s.id)) {
+          const sectionId = s.id;
+          await tx.rubricSection.update({ where: { id: sectionId }, data: sectionData });
+          for (const [ii, it] of s.items.entries()) {
+            if (it.id && keptItemIds.has(it.id)) {
+              await tx.rubricItem.update({ where: { id: it.id }, data: itemData(it, ii) });
+            } else {
+              await tx.rubricItem.create({ data: { sectionId, ...itemData(it, ii) } });
+            }
+          }
+        } else {
+          await tx.rubricSection.create({
+            data: { rubricId: id, ...sectionData, items: { create: s.items.map(itemData) } },
+          });
+        }
       }
     });
     return this.getRubric(universityId, id);

@@ -15,6 +15,92 @@ describe('AssessmentService (pure scoring logic)', () => {
   }
   const noPass = new Map<string, boolean>();
 
+  describe('resolveWeights', () => {
+    const dto = (sections: { items: { maxRating?: number }[] }[]) => ({
+      sections: sections.map((s, i) => ({ nameEn: `S${i}`, items: s.items.map((it, j) => ({ textEn: `I${j}`, ...it })) })),
+    });
+
+    it('keeps a weight that was entered, whatever the full marks say', () => {
+      // A 50-mark midterm worth 15%: the marks scale the score, the 15% caps
+      // what it can contribute — the two numbers are set independently.
+      const [s] = service.resolveWeights({
+        sections: [{ nameEn: 'Midterm', weightPercent: 15, items: [{ textEn: 'Paper', maxRating: 50, weightPercent: 100 }] }],
+      });
+      expect(s.weightPercent).toBe(15);
+      expect(s.items[0].weightPercent).toBe(100);
+    });
+
+    it('falls back to the marks split only where no weight was given', () => {
+      const out = service.resolveWeights({
+        sections: [
+          { nameEn: 'Given', weightPercent: 15, items: [{ textEn: 'a', maxRating: 50 }] },
+          { nameEn: 'Derived', items: [{ textEn: 'b', maxRating: 10 }, { textEn: 'c', maxRating: 30 }] },
+        ],
+      });
+      expect(out[0].weightPercent).toBe(15);
+      // 40 of the 90 total marks
+      expect(out[1].weightPercent).toBeCloseTo((40 / 90) * 100, 10);
+      expect(out[1].items.map((i: { weightPercent: number }) => i.weightPercent)).toEqual([25, 75]);
+    });
+
+    it('splits a section by each item\'s full mark', () => {
+      const [s] = service.resolveWeights(dto([{ items: [{ maxRating: 30 }, { maxRating: 10 }] }]));
+      expect(s.weightPercent).toBe(100);
+      expect(s.items.map((i: { weightPercent: number }) => i.weightPercent)).toEqual([75, 25]);
+    });
+
+    it('weights sections by their share of the total full marks', () => {
+      const out = service.resolveWeights(dto([
+        { items: [{ maxRating: 60 }] },
+        { items: [{ maxRating: 20 }, { maxRating: 20 }] },
+      ]));
+      expect(out.map((s: { weightPercent: number }) => s.weightPercent)).toEqual([60, 40]);
+    });
+
+    it('defaults a missing full mark to 5', () => {
+      const [s] = service.resolveWeights(dto([{ items: [{}, { maxRating: 15 }] }]));
+      expect(s.items.map((i: { weightPercent: number }) => i.weightPercent)).toEqual([25, 75]);
+    });
+
+    it('always totals 100% across sections', () => {
+      const out = service.resolveWeights(dto([
+        { items: [{ maxRating: 7 }, { maxRating: 3 }] },
+        { items: [{ maxRating: 11 }] },
+        { items: [{ maxRating: 2 }] },
+      ]));
+      expect(out.reduce((a: number, s: { weightPercent: number }) => a + s.weightPercent, 0)).toBeCloseTo(100, 10);
+    });
+
+    it('caps a section at its own weight however many marks it holds', () => {
+      // 15% section (50 marks) + 85% section (5 marks). Full marks on the
+      // midterm alone must contribute 15, not the 50/55 its marks suggest.
+      const r = {
+        sections: [
+          { weightPercent: 15, items: [{ id: 'mid', weightPercent: 100, maxRating: 50, isCritical: false }] },
+          { weightPercent: 85, items: [{ id: 'other', weightPercent: 100, maxRating: 5, isCritical: false }] },
+        ],
+      };
+      const both = service.scoreRubric(r, new Map([['mid', 50], ['other', 0]]), noPass);
+      expect(both.scorePercent).toBe(15);
+    });
+
+    it('makes the rubric score equal marks earned out of total full marks when weights follow the marks', () => {
+      // 10 + 20 + 20 = 50 marks available; the student takes 5 + 20 + 10 = 35.
+      const sections = service.resolveWeights(dto([
+        { items: [{ maxRating: 10 }, { maxRating: 20 }] },
+        { items: [{ maxRating: 20 }] },
+      ]));
+      const withIds = {
+        sections: sections.map((s: any, si: number) => ({
+          ...s,
+          items: s.items.map((it: any, ii: number) => ({ ...it, id: `${si}-${ii}`, isCritical: false })),
+        })),
+      };
+      const ratings = new Map([['0-0', 5], ['0-1', 20], ['1-0', 10]]);
+      expect(service.scoreRubric(withIds, ratings, noPass).scorePercent).toBe(70); // 35/50
+    });
+  });
+
   describe('scoreRubric', () => {
     it('gives full marks (100) when every item is rated at its max', () => {
       const r = rubric([

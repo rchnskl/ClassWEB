@@ -4,11 +4,27 @@ import { useEffect, useState } from 'react';
 import { apiFetch } from '@/lib/api';
 import { useI18n } from '@/lib/i18n';
 
-interface ItemForm { textEn: string; textTh: string; weightPercent: number; maxRating: number; isCritical: boolean }
-interface SectionForm { nameEn: string; nameTh: string; weightPercent: number; items: ItemForm[] }
+interface ItemForm { id?: string; textEn: string; textTh: string; weightPercent: number; maxRating: number; isCritical: boolean }
+interface SectionForm { id?: string; nameEn: string; nameTh: string; weightPercent: number; items: ItemForm[] }
 interface RubricForm { code: string; nameEn: string; nameTh: string; description: string; weightPercent: number; sections: SectionForm[] }
 
 interface RubricListItem { id: string; code: string | null; nameEn: string; nameTh: string | null; weightPercent: number; sections: { items: unknown[] }[] }
+
+/**
+ * Full marks and weight are two different numbers and are entered separately:
+ * the full mark is the scale a step is scored on (out of 5, out of 50), the
+ * weight is what that score is worth toward the grade. A 50-mark midterm at
+ * 15% contributes at most 15 — its marks never inflate its share. splitByMarks
+ * is the convenience for the common case where they *should* line up.
+ */
+const totalMarks = (items: ItemForm[]) => items.reduce((a, it) => a + (it.maxRating || 0), 0);
+
+/** Weights that mirror the full marks, as a starting point the user can edit. */
+function splitByMarks<T>(parts: T[], marks: (p: T) => number): number[] {
+  const total = parts.reduce((a, p) => a + marks(p), 0);
+  if (total <= 0) return parts.map(() => 0);
+  return parts.map((p) => Math.round((marks(p) / total) * 1000) / 10);
+}
 
 /**
  * Advisory status for a set of weights that is *meant* to total 100%.
@@ -50,12 +66,15 @@ export default function RubricBuilderDrawer({ onClose, onChanged }: { onClose: (
   }
 
   async function startEdit(id: string) {
-    const r = await apiFetch<{ code: string | null; nameEn: string; nameTh: string | null; description: string | null; weightPercent: number; sections: { nameEn: string; nameTh: string | null; weightPercent: number; items: { textEn: string; textTh: string | null; weightPercent: number; maxRating: number; isCritical: boolean }[] }[] }>(`/assessment/rubrics/${id}`);
+    const r = await apiFetch<{ code: string | null; nameEn: string; nameTh: string | null; description: string | null; weightPercent: number; sections: { id: string; nameEn: string; nameTh: string | null; weightPercent: number; items: { id: string; textEn: string; textTh: string | null; weightPercent: number; maxRating: number; isCritical: boolean }[] }[] }>(`/assessment/rubrics/${id}`);
     setForm({
       code: r.code ?? '', nameEn: r.nameEn, nameTh: r.nameTh ?? '', description: r.description ?? '', weightPercent: r.weightPercent,
+      // ids ride along so the server updates these rows in place — recreating
+      // them would orphan (and, with a restricted FK, refuse to drop) the
+      // scores already recorded against them.
       sections: r.sections.map((s) => ({
-        nameEn: s.nameEn, nameTh: s.nameTh ?? '', weightPercent: s.weightPercent,
-        items: s.items.map((it) => ({ textEn: it.textEn, textTh: it.textTh ?? '', weightPercent: it.weightPercent, maxRating: it.maxRating, isCritical: it.isCritical })),
+        id: s.id, nameEn: s.nameEn, nameTh: s.nameTh ?? '', weightPercent: s.weightPercent,
+        items: s.items.map((it) => ({ id: it.id, textEn: it.textEn, textTh: it.textTh ?? '', weightPercent: it.weightPercent, maxRating: it.maxRating, isCritical: it.isCritical })),
       })),
     });
     setEditingId(id);
@@ -84,6 +103,22 @@ export default function RubricBuilderDrawer({ onClose, onChanged }: { onClose: (
     setForm((f) => ({
       ...f,
       sections: f.sections.map((s, i) => i !== si ? s : { ...s, items: s.items.map((it, j) => (j === ii ? { ...it, ...patch } : it)) }),
+    }));
+  }
+  function distributeSections() {
+    setForm((f) => {
+      const shares = splitByMarks(f.sections, (s) => totalMarks(s.items));
+      return { ...f, sections: f.sections.map((s, i) => ({ ...s, weightPercent: shares[i] })) };
+    });
+  }
+  function distributeItems(si: number) {
+    setForm((f) => ({
+      ...f,
+      sections: f.sections.map((s, i) => {
+        if (i !== si) return s;
+        const shares = splitByMarks(s.items, (it) => it.maxRating || 0);
+        return { ...s, items: s.items.map((it, j) => ({ ...it, weightPercent: shares[j] })) };
+      }),
     }));
   }
   function addSection() { setForm((f) => ({ ...f, sections: [...f.sections, EMPTY_SECTION()] })); }
@@ -153,12 +188,22 @@ export default function RubricBuilderDrawer({ onClose, onChanged }: { onClose: (
 
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', margin: '18px 0 10px' }}>
               <div style={{ fontWeight: 700, fontSize: 13.5 }}>{t('rubric.sections')}</div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <span className="chip" title={t('rubric.totalFullMarksHint')} style={{ background: 'var(--glass-hairline)', color: 'var(--text-1)' }}>
+                {t('rubric.totalFullMarks')}: {form.sections.reduce((a, s) => a + totalMarks(s.items), 0)}
+              </span>
+              <button onClick={distributeSections} className="glass hairline" title={t('rubric.splitByMarksHint')}
+                style={{ padding: '5px 10px', borderRadius: 9, fontSize: 11.5, fontWeight: 600, cursor: 'pointer', color: 'var(--text-1)' }}>
+                {t('rubric.splitByMarks')}
+              </button>
               {(() => { const st = weightStatus(sectionSum); return (
                 <span className="chip" title={st.tone === 'under' ? t('rubric.weightUnderHint') : undefined} style={{ background: st.bg, color: st.color }}>
                   {t('rubric.sumOfWeights')}: {sectionSum.toFixed(1)}%{st.tone === 'under' ? ` · ${t('rubric.weightUnder')}` : ''}
                 </span>
               ); })()}
+              </div>
             </div>
+            <div className="muted" style={{ fontSize: 11.5, marginBottom: 10 }}>{t('rubric.weightVsMarksHint')}</div>
 
             {form.sections.map((s, si) => {
               const itemSum = s.items.reduce((a, i) => a + (i.weightPercent || 0), 0);
@@ -167,27 +212,34 @@ export default function RubricBuilderDrawer({ onClose, onChanged }: { onClose: (
                   <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end', marginBottom: 10 }}>
                     <F label={`${t('rubric.sectionNameEn')} *`}><input className="input" value={s.nameEn} onChange={(e) => updateSection(si, { nameEn: e.target.value })} /></F>
                     <F label={t('rubric.sectionNameTh')}><input className="input" value={s.nameTh} onChange={(e) => updateSection(si, { nameTh: e.target.value })} /></F>
-                    <div style={{ width: 90 }}>
-                      <F label="%"><input type="number" min={0} max={100} className="input" value={s.weightPercent} onChange={(e) => updateSection(si, { weightPercent: Number(e.target.value) })} /></F>
+                    <div style={{ width: 96 }}>
+                      <F label={t('rubric.sectionShare')}><input type="number" min={0} max={100} step={0.1} className="input" title={t('rubric.sectionShareHint')} value={s.weightPercent} onChange={(e) => updateSection(si, { weightPercent: Number(e.target.value) })} /></F>
                     </div>
                     <button onClick={() => removeSection(si)} className="btn-danger" style={{ padding: '10px 12px', fontSize: 12.5 }}>🗑</button>
                   </div>
 
-                  {(() => { const st = weightStatus(itemSum); return (
-                    <div className="muted" style={{ fontSize: 11.5, marginBottom: 6, color: st.tone === 'ok' ? undefined : st.color }}>
-                      {t('rubric.itemWeightSum')}: {itemSum.toFixed(1)}%{st.tone === 'under' ? ` · ${t('rubric.weightUnder')}` : ''}
-                    </div>
-                  ); })()}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+                    <span className="muted" style={{ fontSize: 11.5 }}>{t('rubric.sectionFullMarks')}: {totalMarks(s.items)}</span>
+                    {(() => { const st = weightStatus(itemSum); return (
+                      <span className="muted" style={{ fontSize: 11.5, color: st.tone === 'ok' ? undefined : st.color }}>
+                        · {t('rubric.itemWeightSum')}: {itemSum.toFixed(1)}%{st.tone === 'under' ? ` · ${t('rubric.weightUnder')}` : ''}
+                      </span>
+                    ); })()}
+                    <button onClick={() => distributeItems(si)} className="glass hairline" title={t('rubric.splitByMarksHint')}
+                      style={{ padding: '3px 8px', borderRadius: 8, fontSize: 11, fontWeight: 600, cursor: 'pointer', color: 'var(--text-1)' }}>
+                      {t('rubric.splitByMarks')}
+                    </button>
+                  </div>
 
                   {s.items.map((it, ii) => (
                     <div key={ii} style={{ display: 'flex', gap: 8, alignItems: 'flex-end', marginBottom: 8, paddingLeft: 10, borderLeft: '2px solid var(--glass-hairline)' }}>
                       <F label={`${t('rubric.itemTextEn')} *`}><input className="input" value={it.textEn} onChange={(e) => updateItem(si, ii, { textEn: e.target.value })} /></F>
                       <F label={t('rubric.itemTextTh')}><input className="input" value={it.textTh} onChange={(e) => updateItem(si, ii, { textTh: e.target.value })} /></F>
-                      <div style={{ width: 70 }}>
-                        <F label="%"><input type="number" min={0} max={100} className="input" value={it.weightPercent} onChange={(e) => updateItem(si, ii, { weightPercent: Number(e.target.value) })} /></F>
+                      <div style={{ width: 74 }}>
+                        <F label={t('rubric.maxRating')}><input type="number" min={2} max={100} className="input" title={t('rubric.maxRatingHint')} value={it.maxRating} onChange={(e) => updateItem(si, ii, { maxRating: Number(e.target.value) })} /></F>
                       </div>
-                      <div style={{ width: 60 }}>
-                        <F label={t('rubric.maxRating')}><input type="number" min={2} max={10} className="input" value={it.maxRating} onChange={(e) => updateItem(si, ii, { maxRating: Number(e.target.value) })} /></F>
+                      <div style={{ width: 70 }}>
+                        <F label="%"><input type="number" min={0} max={100} step={0.1} className="input" title={t('rubric.itemShareHint')} value={it.weightPercent} onChange={(e) => updateItem(si, ii, { weightPercent: Number(e.target.value) })} /></F>
                       </div>
                       <label title={t('as.criticalItem')} style={{ display: 'flex', alignItems: 'center', gap: 4, paddingBottom: 12, cursor: 'pointer' }}>
                         <input type="checkbox" checked={it.isCritical} onChange={(e) => updateItem(si, ii, { isCritical: e.target.checked })} style={{ width: 16, height: 16, cursor: 'pointer' }} />

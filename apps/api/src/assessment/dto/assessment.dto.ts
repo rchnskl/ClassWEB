@@ -94,6 +94,10 @@ export class UpdateSubjectRubricsDto {
 // ---- Rubric builder (create / fully replace structure) --------------------
 
 export class RubricItemInputDto {
+  @ApiPropertyOptional({ description: 'Existing item id — present when editing, so the item (and any scores recorded against it) is updated in place instead of recreated' })
+  @IsOptional() @IsString()
+  id?: string;
+
   @ApiProperty()
   @IsString() @MinLength(1) @MaxLength(2000)
   textEn!: string;
@@ -102,14 +106,18 @@ export class RubricItemInputDto {
   @IsOptional() @IsString() @MaxLength(2000)
   textTh?: string;
 
-  @ApiProperty({ minimum: 0, maximum: 100 })
-  @Type(() => Number) @IsNumber() @Min(0) @Max(100)
-  weightPercent!: number;
+  @ApiPropertyOptional({
+    minimum: 0, maximum: 100,
+    description:
+      "How much this item counts within its section. Independent of the full mark — a 50-mark midterm can still be worth 15% of the grade. Omit it and the section is split proportionally to the items' full marks.",
+  })
+  @IsOptional() @Type(() => Number) @IsNumber() @Min(0) @Max(100)
+  weightPercent?: number;
 
   @ApiPropertyOptional({
     default: 5, minimum: 2, maximum: 100,
     description:
-      'Top of this item\'s scale. 5 for an observation rubric; for a score component it is the full mark (e.g. 25 for a 25-mark midterm), so the raw mark can be entered as-is.',
+      'Top of this item\'s scale — the raw mark it is scored out of (5 for an observation rubric, 25 for a 25-mark midterm). Separate from weightPercent, which is what the mark is worth toward the grade.',
   })
   @IsOptional() @Type(() => Number) @IsInt() @Min(2) @Max(100)
   maxRating?: number;
@@ -120,6 +128,10 @@ export class RubricItemInputDto {
 }
 
 export class RubricSectionInputDto {
+  @ApiPropertyOptional({ description: 'Existing section id — present when editing, so the section is updated in place instead of recreated' })
+  @IsOptional() @IsString()
+  id?: string;
+
   @ApiProperty()
   @IsString() @MinLength(1) @MaxLength(300)
   nameEn!: string;
@@ -128,9 +140,13 @@ export class RubricSectionInputDto {
   @IsOptional() @IsString() @MaxLength(300)
   nameTh?: string;
 
-  @ApiProperty({ minimum: 0, maximum: 100 })
-  @Type(() => Number) @IsNumber() @Min(0) @Max(100)
-  weightPercent!: number;
+  @ApiPropertyOptional({
+    minimum: 0, maximum: 100,
+    description:
+      "What this section is worth toward the rubric — set independently of its full marks (a 50-mark midterm section can be worth 15%). Omit it and sections are split proportionally to their full marks.",
+  })
+  @IsOptional() @Type(() => Number) @IsNumber() @Min(0) @Max(100)
+  weightPercent?: number;
 
   @ApiProperty({ type: [RubricItemInputDto] })
   @IsArray() @ArrayMinSize(1) @ValidateNested({ each: true }) @Type(() => RubricItemInputDto)
