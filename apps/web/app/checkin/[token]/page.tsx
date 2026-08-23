@@ -39,6 +39,7 @@ export default function CheckInPage({ params }: { params: Promise<{ token: strin
     try {
       const res = await apiFetch<Result>('/attendance/checkin', {
         method: 'POST',
+        silentSuccess: true,
         body: JSON.stringify({ token, studentCode: code.trim(), confirm }),
       });
       if (res.result === 'unmatched_confirm') {

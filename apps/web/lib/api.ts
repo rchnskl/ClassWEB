@@ -13,6 +13,8 @@
  * definition, since it ends up in the client bundle), so a normal build picks
  * it up without anyone having to remember.
  */
+import { showToast } from './toast';
+
 function resolveApiBase(): string {
   const configured = process.env.NEXT_PUBLIC_API_URL;
   if (configured) return configured;
@@ -52,6 +54,39 @@ function beginRequest() {
 function endRequest() {
   activeRequests = Math.max(0, activeRequests - 1);
   if (activeRequests === 0) loadingListeners.forEach((l) => l());
+}
+
+// ---------------------------------------------------------------------------
+// Save feedback. Every mutating call reports itself, so a page does not have
+// to remember to tell the user whether the save landed — the app used to be
+// silent on both success and failure, which leaves people re-clicking Save.
+// ---------------------------------------------------------------------------
+
+/** Overrides for the automatic toast on a single call. */
+export interface FeedbackOptions {
+  /** Say nothing at all — background sync, polling, a flow with its own UI. */
+  silent?: boolean;
+  /** Say nothing on success only; failures still surface. */
+  silentSuccess?: boolean;
+  /** Replace the default "Saved" wording. */
+  successMessage?: string;
+}
+
+const MUTATING = new Set(['POST', 'PATCH', 'PUT', 'DELETE']);
+
+/**
+ * Wording lives here rather than in i18n.tsx because api.ts is not a
+ * component and cannot read the provider; the language is mirrored from the
+ * same localStorage key I18nProvider persists.
+ */
+function defaultMessages(method: string): { saved: string; failed: string } {
+  const th = (() => {
+    try { return (localStorage.getItem('lang') ?? 'th') !== 'en'; } catch { return true; }
+  })();
+  if (method === 'DELETE') return th ? { saved: 'ลบเรียบร้อย', failed: 'ลบไม่สำเร็จ' } : { saved: 'Deleted', failed: "Couldn't delete" };
+  // GET here only ever reports a failure — a download or preview that never arrived.
+  if (method === 'GET') return th ? { saved: '', failed: 'ดำเนินการไม่สำเร็จ' } : { saved: '', failed: "That didn't work" };
+  return th ? { saved: 'บันทึกเรียบร้อย', failed: 'บันทึกไม่สำเร็จ' } : { saved: 'Saved', failed: "Couldn't save" };
 }
 
 export class ApiError extends Error {
@@ -103,16 +138,21 @@ export async function refreshAccessToken(): Promise<string | null> {
   return refreshInFlight;
 }
 
-export async function apiFetch<T>(path: string, init: RequestInit = {}, _retried = false): Promise<T> {
+export async function apiFetch<T>(path: string, init: RequestInit & FeedbackOptions = {}, _retried = false): Promise<T> {
+  const { silent, silentSuccess, successMessage, ...request } = init;
+  const method = (request.method ?? 'GET').toUpperCase();
+  // Auth calls own their own messaging (the login form, the lock screen), and
+  // a GET has nothing to report — only mutations speak up.
+  const announce = !silent && MUTATING.has(method) && !path.startsWith('/auth/');
   beginRequest();
   try {
     const accessToken = token();
     const res = await fetch(`${API_BASE}${path}`, {
-      ...init,
+      ...request,
       headers: {
         'content-type': 'application/json',
         ...(accessToken ? { authorization: `Bearer ${accessToken}` } : {}),
-        ...(init.headers ?? {}),
+        ...(request.headers ?? {}),
       },
     });
 
@@ -126,8 +166,13 @@ export async function apiFetch<T>(path: string, init: RequestInit = {}, _retried
     const body = await res.json().catch(() => ({}));
     if (!res.ok) {
       const message = Array.isArray(body?.message) ? body.message.join(', ') : body?.message;
+      // The server's own message is far more useful than a generic failure
+      // ("This rubric has 3 recorded evaluations and cannot be deleted"), so
+      // it is what the toast shows when there is one.
+      if (announce) showToast('error', message ?? defaultMessages(method).failed);
       throw new ApiError(res.status, message ?? res.statusText);
     }
+    if (announce && !silentSuccess) showToast('success', successMessage ?? defaultMessages(method).saved);
     return body as T;
   } finally {
     endRequest();
@@ -139,7 +184,7 @@ export async function apiFetch<T>(path: string, init: RequestInit = {}, _retried
  * content-type header: the browser has to add its own multipart boundary,
  * and setting it by hand produces a body the server cannot parse.
  */
-export async function uploadFile<T>(path: string, form: FormData): Promise<T> {
+export async function uploadFile<T>(path: string, form: FormData, feedback: FeedbackOptions = {}): Promise<T> {
   beginRequest();
   try {
     const accessToken = token();
@@ -151,8 +196,10 @@ export async function uploadFile<T>(path: string, form: FormData): Promise<T> {
     const body = await res.json().catch(() => ({}));
     if (!res.ok) {
       const message = Array.isArray(body?.message) ? body.message.join(', ') : body?.message;
+      if (!feedback.silent) showToast('error', message ?? defaultMessages('POST').failed);
       throw new ApiError(res.status, message ?? res.statusText);
     }
+    if (!feedback.silent && !feedback.silentSuccess) showToast('success', feedback.successMessage ?? defaultMessages('POST').saved);
     return body as T;
   } finally {
     endRequest();
@@ -165,7 +212,12 @@ export async function downloadFile(path: string, fallbackName: string): Promise<
   const res = await fetch(`${API_BASE}${path}`, {
     headers: token ? { authorization: `Bearer ${token}` } : {},
   });
-  if (!res.ok) throw new ApiError(res.status, 'Export failed');
+  if (!res.ok) {
+    // A failed export is otherwise completely silent — the browser simply
+    // never starts a download and the user is left clicking the button again.
+    showToast('error', defaultMessages('GET').failed);
+    throw new ApiError(res.status, 'Export failed');
+  }
   const blob = await res.blob();
   const cd = res.headers.get('content-disposition');
   const match = cd ? /filename="?([^"]+)"?/.exec(cd) : null;
@@ -191,7 +243,10 @@ export async function fetchPreviewUrl(path: string): Promise<string> {
   const res = await fetch(`${API_BASE}${path}`, {
     headers: token ? { authorization: `Bearer ${token}` } : {},
   });
-  if (!res.ok) throw new ApiError(res.status, 'Preview failed');
+  if (!res.ok) {
+    showToast('error', defaultMessages('GET').failed);
+    throw new ApiError(res.status, 'Preview failed');
+  }
   const blob = await res.blob();
   return URL.createObjectURL(blob);
 }

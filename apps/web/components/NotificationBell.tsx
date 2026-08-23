@@ -65,7 +65,7 @@ export default function NotificationBell() {
   async function markRead(id: string, alreadyRead: boolean) {
     if (alreadyRead) return;
     try {
-      const d = await apiFetch<{ unread: number }>(`/notifications/${id}/read`, { method: 'PATCH' });
+      const d = await apiFetch<{ unread: number }>(`/notifications/${id}/read`, { method: 'PATCH', silent: true });
       setUnread(d.unread);
       setItems((prev) => prev.map((n) => (n.id === id ? { ...n, readAt: new Date().toISOString() } : n)));
     } catch { /* ignore */ }
@@ -74,7 +74,7 @@ export default function NotificationBell() {
     if (markingAll) return;
     setMarkingAll(true);
     try {
-      await apiFetch('/notifications/read-all', { method: 'PATCH' });
+      await apiFetch('/notifications/read-all', { method: 'PATCH', silent: true });
       setUnread(0);
       setItems((prev) => prev.map((n) => ({ ...n, readAt: n.readAt ?? new Date().toISOString() })));
     } catch { /* ignore */ } finally {

@@ -33,6 +33,7 @@ export async function enablePush(): Promise<{ ok: boolean; reason?: string }> {
   const json = sub.toJSON();
   await apiFetch('/notifications/push/subscribe', {
     method: 'POST',
+    silent: true,
     body: JSON.stringify({ endpoint: json.endpoint, keys: { p256dh: json.keys?.p256dh, auth: json.keys?.auth } }),
   });
   return { ok: true };
@@ -41,6 +42,6 @@ export async function enablePush(): Promise<{ ok: boolean; reason?: string }> {
 export async function disablePush(): Promise<void> {
   const sub = await currentPushSubscription();
   if (!sub) return;
-  await apiFetch('/notifications/push/subscribe', { method: 'DELETE', body: JSON.stringify({ endpoint: sub.endpoint }) });
+  await apiFetch('/notifications/push/subscribe', { method: 'DELETE', silent: true, body: JSON.stringify({ endpoint: sub.endpoint }) });
   await sub.unsubscribe();
 }
