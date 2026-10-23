@@ -7,7 +7,12 @@
 # everything else is pre-configured — no manual field-by-field setup needed.
 services:
   - type: web
-    name: classweb-api
+    # Renamed from `classweb-api` (Render's default region, Oregon) when moving to
+    # Singapore: Render can't change an existing service's region, so this is a new
+    # service. Singapore puts the API next to the Neon database (ap-southeast-1) —
+    # every query used to cross the Pacific, adding ~0.2–0.5s each.
+    name: classweb-api-sg
+    region: singapore
     runtime: docker
     dockerfilePath: ./apps/api/Dockerfile
     dockerContext: .

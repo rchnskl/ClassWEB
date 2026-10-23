@@ -69,7 +69,8 @@ build, health check, JWT secrets auto-generated) so you don't set anything up by
 
 1. [render.com](https://render.com) → sign in with GitHub.
 2. Dashboard → **New +** → **Blueprint** → connect this repo (`rchnskl/ClassWEB`).
-3. Render reads `render.yaml` and shows the `classweb-api` service. It asks for the values
+3. Render reads `render.yaml` and shows the `classweb-api-sg` service, in the **Singapore**
+   region (same region as Neon — keep them together, or every query crosses an ocean). It asks for the values
    marked `sync: false`:
    - `DATABASE_URL` → your Neon **pooled** connection string (`...-pooler...neon.tech/...?sslmode=require`)
    - `DIRECT_URL` → your Neon **direct** connection string (same host, no `-pooler`) — see step 1
