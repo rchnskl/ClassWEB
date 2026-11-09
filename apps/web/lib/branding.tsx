@@ -2,6 +2,7 @@
 
 import { createContext, useContext, useEffect, useState } from 'react';
 import { apiFetch } from './api';
+import { useLocalStorage } from './local-store';
 
 interface Branding {
   systemName: string | null;
@@ -31,19 +32,25 @@ function applyBrandColor(varName: string, hex: string | undefined, fallback: str
 export function BrandingProvider({ children }: { children: React.ReactNode }) {
   const [systemName, setSystemName] = useState<string | null>(null);
 
+  // Re-read on sign-in: the provider mounts on the login page, before there is
+  // a token, so a mount-only fetch never applied the branding until a reload.
+  const token = useLocalStorage('accessToken');
+
   useEffect(() => {
-    if (!localStorage.getItem('accessToken')) return;
+    if (!token) return;
     apiFetch<BrandingResponse>('/settings/branding')
       .then((b) => {
         if (b['system.name']) {
           setSystemName(b['system.name']);
-          document.title = document.title.replace(/^ClassWeb/, b['system.name']);
+          // Set, don't splice: replacing a "ClassWeb" prefix with a name that
+          // itself starts with "ClassWeb" grew the tab title on every run.
+          document.title = b['system.name'];
         }
         applyBrandColor('--brand', b['theme.primaryColor'], '#ff8a4c');
         applyBrandColor('--brand-blue', b['theme.secondaryColor'], '#6fa3d6');
       })
       .catch(() => {});
-  }, []);
+  }, [token]);
 
   return <BrandingContext.Provider value={{ systemName }}>{children}</BrandingContext.Provider>;
 }

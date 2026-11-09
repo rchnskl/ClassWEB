@@ -71,8 +71,10 @@ export default function Sidebar({ active = 'Dashboard' }: { active?: string }) {
       <div style={{ display: 'flex', alignItems: 'center', gap: 11, padding: '6px 8px 16px', justifyContent: sidebarCollapsed ? 'center' : 'flex-start' }}>
         <Logo size={38} float />
         {!sidebarCollapsed && (
-          <div>
-            <div style={{ fontWeight: 700, fontSize: 16.5, letterSpacing: -0.3, whiteSpace: 'nowrap' }}>
+          <div style={{ minWidth: 0 }}>
+            {/* A custom system name can be long ("ClassWeb — Smart System"): let it
+                wrap onto a second line instead of running under the sidebar edge. */}
+            <div style={{ fontWeight: 700, fontSize: 16.5, letterSpacing: -0.3, lineHeight: 1.2, overflowWrap: 'anywhere' }}>
               {systemName && systemName !== 'ClassWeb' ? systemName : (<>Class<span className="brand-text">Web</span></>)}
             </div>
             <div className="muted" style={{ fontSize: 11, whiteSpace: 'nowrap' }}>{t('brand.short')}</div>

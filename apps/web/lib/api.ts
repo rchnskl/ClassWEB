@@ -14,6 +14,7 @@
  * it up without anyone having to remember.
  */
 import { showToast } from './toast';
+import { writeLocalStorage } from './local-store';
 
 function resolveApiBase(): string {
   const configured = process.env.NEXT_PUBLIC_API_URL;
@@ -319,9 +320,11 @@ export interface StudentNote {
 }
 
 export function saveSession(res: LoginResponse) {
-  localStorage.setItem('accessToken', res.accessToken);
   localStorage.setItem('refreshToken', res.refreshToken);
-  localStorage.setItem('user', JSON.stringify(res.user));
+  // Through the store, so components subscribed to the session (branding,
+  // sidebar, signed-in user) update immediately rather than on next reload.
+  writeLocalStorage('accessToken', res.accessToken);
+  writeLocalStorage('user', JSON.stringify(res.user));
   // Anchor the client-side absolute-timeout clock. The server enforces the same 3h cap
   // independently on refresh, so this is a UX convenience, not the security boundary.
   localStorage.setItem('sessionStartAt', String(Date.now()));
@@ -334,9 +337,9 @@ export function getSessionStartAt(): number | null {
 }
 
 export function clearSession() {
-  localStorage.removeItem('accessToken');
+  writeLocalStorage('accessToken', null);
   localStorage.removeItem('refreshToken');
-  localStorage.removeItem('user');
+  writeLocalStorage('user', null);
   localStorage.removeItem('sessionStartAt');
 }
 
