@@ -6,7 +6,8 @@ import { useI18n } from '@/lib/i18n';
 
 interface Item { id: string; textEn: string; textTh: string | null; weightPercent: number; maxRating: number; isCritical: boolean }
 interface RSection { id: string; nameEn: string; nameTh: string | null; weightPercent: number; items: Item[] }
-export interface Rubric { id: string; code: string; nameEn: string; nameTh: string | null; weightPercent: number; sections: RSection[] }
+export interface Rubric { id: string; code: string; nameEn: string; nameTh: string | null; weightPercent: number; perSession?: boolean; sections: RSection[] }
+interface SessionDay { id: string; sessionDate: string; startTime: string; endTime: string; topic: string | null; scorePercent: number | null }
 interface Summary {
   total: number; gradedWeight: number;
   grade: { grade: string; gpa: number; label: string } | null;
@@ -101,6 +102,13 @@ export default function GradingDrawer({
   const [error, setError] = useState<string | null>(null);
 
   const active = rubrics.find((r) => r.id === activeId);
+  // A per-session rubric (daily clinical performance) is marked one practice
+  // day at a time; the chosen day belongs to the rubric it was picked under.
+  const perSession = !!active?.perSession;
+  const [chosenDay, setChosenDay] = useState<{ rubricId: string; sessionId: string } | null>(null);
+  const dayId = perSession && chosenDay?.rubricId === activeId ? chosenDay.sessionId : null;
+  const [days, setDays] = useState<SessionDay[]>([]);
+  const [reloadKey, setReloadKey] = useState(0);
 
   const loadSummary = useCallback(async () => {
     try {
@@ -114,12 +122,16 @@ export default function GradingDrawer({
   // eslint-disable-next-line react-hooks/set-state-in-effect -- fetches from the API on mount / when its inputs change; state is set as the request starts and settles
   useEffect(() => { void loadSummary(); }, [loadSummary]);
 
-  // Load existing scores + item weights when the active rubric changes.
+  // Load existing scores when the active rubric (or, for a daily rubric, the day) changes.
   useEffect(() => {
     if (!activeId) return;
-    apiFetch<{ evaluation: { scores: Record<string, number>; passed: Record<string, boolean>; scorePercent: number | null; rawScore: number | null; rawMax: number | null } | null }>(`/assessment/evaluation?rubricId=${activeId}&studentId=${studentId}&sectionId=${sectionId}`)
+    const dayParam = dayId ? `&classSessionId=${dayId}` : '';
+    apiFetch<{ sessions?: SessionDay[]; evaluation: { scores: Record<string, number>; passed: Record<string, boolean>; scorePercent: number | null; rawScore: number | null; rawMax: number | null } | null }>(`/assessment/evaluation?rubricId=${activeId}&studentId=${studentId}&sectionId=${sectionId}${dayParam}`)
       .then((d) => {
-        const ev = d.evaluation;
+        setDays(d.sessions ?? []);
+        // Without a day picked, a daily rubric's row is the computed average —
+        // nothing to edit, so the form starts empty until a day is chosen.
+        const ev = d.sessions && !dayParam ? null : d.evaluation;
         setRatings(ev?.scores ?? {});
         setPassed(ev?.passed ?? {});
         // Reopen in whichever way it was graded, so a re-save doesn't quietly
@@ -131,10 +143,11 @@ export default function GradingDrawer({
         setDirectPercent(wasDirect && ev?.rawScore == null && ev?.scorePercent != null ? String(ev.scorePercent) : '');
       })
       .catch(() => { setRatings({}); setPassed({}); setDirectMode(false); setRawScore(''); setRawMax(''); setDirectPercent(''); });
-  }, [activeId, studentId, sectionId]);
+  }, [activeId, studentId, sectionId, dayId, reloadKey]);
 
   async function save() {
     if (!active) return;
+    if (perSession && !dayId) { setError(t('as.dayPick')); return; }
     setSaving(true);
     setError(null);
     try {
@@ -149,8 +162,9 @@ export default function GradingDrawer({
             ? { rawScore: Number(rawScore), rawMax: Number(rawMax) }
             : { scorePercent: Number(directPercent) })
         : undefined;
-      await apiFetch('/assessment/evaluation', { method: 'POST', body: JSON.stringify({ rubricId: active.id, studentId, sectionId, scores, ...(direct ? { direct } : {}) }) });
+      await apiFetch('/assessment/evaluation', { method: 'POST', body: JSON.stringify({ rubricId: active.id, studentId, sectionId, ...(dayId ? { classSessionId: dayId } : {}), scores, ...(direct ? { direct } : {}) }) });
       await loadSummary();
+      if (perSession) setReloadKey((k) => k + 1);
       onSaved();
     } catch (err) {
       // Never let a failed save look like success — the grade would be lost silently.
@@ -220,7 +234,37 @@ export default function GradingDrawer({
               })}
             </div>
 
-            {active && (
+            {active && perSession && (
+              <div className="glass hairline" style={{ padding: 12, borderRadius: 12, marginBottom: 14 }}>
+                <div style={{ fontSize: 12.5, fontWeight: 650, marginBottom: 8 }}>
+                  {t('as.day')}
+                  {(() => {
+                    const done = days.filter((d) => d.scorePercent != null);
+                    if (done.length === 0) return null;
+                    const avg = Math.round((done.reduce((a, d) => a + (d.scorePercent ?? 0), 0) / done.length) * 100) / 100;
+                    return <span className="muted" style={{ fontWeight: 500, marginLeft: 8 }}>· {t('as.dayAverage')} {avg} ({done.length}/{days.length})</span>;
+                  })()}
+                </div>
+                {days.length === 0 ? (
+                  <div className="muted" style={{ fontSize: 12.5 }}>{t('as.dayNone')}</div>
+                ) : (
+                  <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                    {days.map((d) => (
+                      <button key={d.id} onClick={() => setChosenDay({ rubricId: activeId, sessionId: d.id })}
+                        title={d.topic ?? undefined}
+                        style={{ padding: '6px 10px', borderRadius: 10, fontSize: 12, fontWeight: 600, cursor: 'pointer',
+                          border: d.id === dayId ? '1.5px solid var(--brand)' : '1px solid var(--glass-hairline)',
+                          background: d.id === dayId ? 'var(--popover-hover)' : 'transparent', color: 'var(--text-0)' }}>
+                        {new Date(d.sessionDate).toLocaleDateString(lang === 'th' ? 'th-TH' : 'en-GB', { day: 'numeric', month: 'short', timeZone: 'UTC' })}
+                        {d.scorePercent != null && <span style={{ color: 'var(--success)', marginLeft: 5 }}>✓{d.scorePercent}</span>}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {active && (!perSession || dayId) && (
               <>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12, position: 'sticky', top: 0, background: 'var(--popover-bg)', padding: '6px 0', zIndex: 2 }}>
                   <div style={{ fontSize: 13 }}>

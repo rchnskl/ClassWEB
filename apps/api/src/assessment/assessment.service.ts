@@ -124,6 +124,7 @@ export class AssessmentService {
         nameTh: dto.nameTh,
         description: dto.description,
         weightPercent: dto.weightPercent ?? 0,
+        perSession: dto.perSession ?? false,
         order: (maxOrder._max.order ?? 0) + 1,
         sections: {
           create: sections.map((s, si) => ({
@@ -195,6 +196,7 @@ export class AssessmentService {
           nameTh: dto.nameTh,
           description: dto.description,
           ...(dto.weightPercent !== undefined && { weightPercent: dto.weightPercent }),
+          ...(dto.perSession !== undefined && { perSession: dto.perSession }),
         },
       });
 
@@ -444,15 +446,22 @@ export class AssessmentService {
     return { rawScore: null, rawMax: null, scorePercent };
   }
 
-  async getEvaluation(user: AuthenticatedUser, rubricId: string, studentId: string, sectionId?: string) {
+  async getEvaluation(user: AuthenticatedUser, rubricId: string, studentId: string, sectionId?: string, classSessionId?: string) {
     const universityId = user.universityId;
     await this.assertGradingScope(user, sectionId);
+    const rubric = await this.getRubric(universityId, rubricId);
     const evaluation = await this.prisma.evaluation.findFirst({
-      where: { universityId, rubricId, studentId, sectionId: sectionId ?? null },
+      where: { universityId, rubricId, studentId, sectionId: sectionId ?? null, classSessionId: classSessionId ?? null },
       include: { scores: true },
     });
+    // A per-session rubric also lists the section's sessions with each day's
+    // score, so the form can offer the days and show the running average.
+    const sessions = rubric.perSession && sectionId
+      ? await this.sessionScores(universityId, rubricId, studentId, sectionId)
+      : undefined;
     return {
-      rubric: await this.getRubric(universityId, rubricId),
+      rubric,
+      sessions,
       evaluation: evaluation
         ? { id: evaluation.id, status: evaluation.status, scorePercent: evaluation.scorePercent, criticalFailed: evaluation.criticalFailed, note: evaluation.note,
             rawScore: evaluation.rawScore, rawMax: evaluation.rawMax,
@@ -462,11 +471,69 @@ export class AssessmentService {
     };
   }
 
+  /** Every session of the section, with this student's score on that day (null if not yet assessed). */
+  private async sessionScores(universityId: string, rubricId: string, studentId: string, sectionId: string) {
+    const [sessions, days] = await Promise.all([
+      this.prisma.classSession.findMany({
+        where: { sectionId, status: { not: 'CANCELLED' } },
+        select: { id: true, sessionDate: true, startTime: true, endTime: true, topic: true },
+        orderBy: [{ sessionDate: 'asc' }, { startTime: 'asc' }],
+      }),
+      this.prisma.evaluation.findMany({
+        where: { universityId, rubricId, studentId, sectionId, classSessionId: { not: null } },
+        select: { classSessionId: true, scorePercent: true },
+      }),
+    ]);
+    const byDay = new Map(days.map((d) => [d.classSessionId, d.scorePercent]));
+    return sessions.map((s) => ({ ...s, scorePercent: byDay.get(s.id) ?? null }));
+  }
+
+  /**
+   * Re-derive a per-session rubric's component score: the average of the days
+   * assessed so far, written to the row with classSessionId = null — the row
+   * every summary and report reads.
+   */
+  private async refreshSessionAverage(universityId: string, rubricId: string, studentId: string, sectionId: string, userId: string, userName: string) {
+    const days = await this.prisma.evaluation.findMany({
+      where: { universityId, rubricId, studentId, sectionId, classSessionId: { not: null }, scorePercent: { not: null } },
+      select: { scorePercent: true, criticalFailed: true },
+    });
+    const existing = await this.prisma.evaluation.findFirst({
+      where: { universityId, rubricId, studentId, sectionId, classSessionId: null },
+      select: { id: true },
+    });
+    if (days.length === 0) {
+      if (existing) await this.prisma.evaluation.delete({ where: { id: existing.id } });
+      return null;
+    }
+    const scorePercent = Math.round((days.reduce((a, d) => a + (d.scorePercent ?? 0), 0) / days.length) * 100) / 100;
+    const data = {
+      evaluatorId: userId, evaluatorName: userName, status: 'SUBMITTED' as const, scorePercent,
+      criticalFailed: days.some((d) => d.criticalFailed), rawScore: null, rawMax: null,
+      note: `Average of ${days.length} session${days.length === 1 ? '' : 's'}`,
+    };
+    if (existing) await this.prisma.evaluation.update({ where: { id: existing.id }, data });
+    else await this.prisma.evaluation.create({ data: { universityId, rubricId, studentId, sectionId, ...data } });
+    return { scorePercent, sessions: days.length };
+  }
+
   async save(user: AuthenticatedUser, userName: string, dto: SaveEvaluationDto) {
     const universityId = user.universityId;
     const userId = user.id;
     await this.assertGradingScope(user, dto.sectionId);
     const rubric = await this.getRubric(universityId, dto.rubricId);
+    // A per-session rubric is marked per day; its term score is derived, never typed.
+    if (rubric.perSession && !dto.classSessionId) {
+      throw new BadRequestException('This component is assessed per session — choose the day being assessed');
+    }
+    if (!rubric.perSession && dto.classSessionId) {
+      throw new BadRequestException('This component is assessed once for the term, not per session');
+    }
+    if (dto.classSessionId) {
+      if (!dto.sectionId) throw new BadRequestException('A sectionId is required with a classSessionId');
+      const session = await this.prisma.classSession.findFirst({ where: { id: dto.classSessionId, sectionId: dto.sectionId }, select: { id: true } });
+      if (!session) throw new BadRequestException("That session doesn't belong to this section");
+    }
     const student = await this.prisma.student.findFirst({ where: { id: dto.studentId, universityId, deletedAt: null }, select: { id: true } });
     if (!student) throw new BadRequestException('Student does not exist in this tenant');
     if (dto.sectionId) {
@@ -503,7 +570,7 @@ export class AssessmentService {
     if (direct) { ratings.clear(); passed.clear(); }
 
     const existing = await this.prisma.evaluation.findFirst({
-      where: { universityId, rubricId: dto.rubricId, studentId: dto.studentId, sectionId: dto.sectionId ?? null },
+      where: { universityId, rubricId: dto.rubricId, studentId: dto.studentId, sectionId: dto.sectionId ?? null, classSessionId: dto.classSessionId ?? null },
       select: { id: true },
     });
     const evaluation = existing
@@ -520,6 +587,7 @@ export class AssessmentService {
             rubric: { connect: { id: dto.rubricId } },
             student: { connect: { id: dto.studentId } },
             ...(dto.sectionId ? { section: { connect: { id: dto.sectionId } } } : {}),
+            ...(dto.classSessionId ? { classSession: { connect: { id: dto.classSessionId } } } : {}),
             evaluatorId: userId, evaluatorName: userName, status: 'SUBMITTED', scorePercent, criticalFailed, note: dto.note,
             rawScore: direct?.rawScore ?? null, rawMax: direct?.rawMax ?? null,
           },
@@ -540,7 +608,10 @@ export class AssessmentService {
     if (dto.sectionId) {
       await this.notifyIfCrossSectionEdit(user, userName, dto.sectionId, dto.studentId, evaluation.id, scorePercent);
     }
-    return { id: evaluation.id, scorePercent, criticalFailed };
+    const sessionAverage = dto.classSessionId && dto.sectionId
+      ? await this.refreshSessionAverage(universityId, dto.rubricId, dto.studentId, dto.sectionId, userId, userName)
+      : undefined;
+    return { id: evaluation.id, scorePercent, criticalFailed, sessionAverage };
   }
 
   /**
@@ -614,7 +685,7 @@ export class AssessmentService {
     }
 
     const [evaluations, scheme] = await Promise.all([
-      this.prisma.evaluation.findMany({ where: { universityId, studentId, sectionId: sectionId ?? null }, select: { rubricId: true, scorePercent: true, criticalFailed: true } }),
+      this.prisma.evaluation.findMany({ where: { universityId, studentId, sectionId: sectionId ?? null, classSessionId: null }, select: { rubricId: true, scorePercent: true, criticalFailed: true } }),
       this.gradeScheme(universityId),
     ]);
     const evalByRubric = new Map(evaluations.map((e) => [e.rubricId, e]));
@@ -656,7 +727,7 @@ export class AssessmentService {
 
     const [enrollments, evaluations, scheme] = await Promise.all([
       this.prisma.enrollment.findMany({ where: { sectionId, status: 'ENROLLED' }, select: { studentId: true, student: { select: { studentCode: true, nameEn: true, nameTh: true } } }, orderBy: { student: { studentCode: 'asc' } } }),
-      this.prisma.evaluation.findMany({ where: { universityId, sectionId }, select: { studentId: true, rubricId: true, scorePercent: true, criticalFailed: true } }),
+      this.prisma.evaluation.findMany({ where: { universityId, sectionId, classSessionId: null }, select: { studentId: true, rubricId: true, scorePercent: true, criticalFailed: true } }),
       this.gradeScheme(universityId),
     ]);
 

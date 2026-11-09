@@ -57,6 +57,11 @@ export class SaveEvaluationDto {
   @IsString()
   sectionId?: string;
 
+  @ApiPropertyOptional({ description: "For a per-session rubric: the class session (practice day) being assessed" })
+  @IsOptional()
+  @IsString()
+  classSessionId?: string;
+
   @ApiPropertyOptional()
   @IsOptional()
   @IsString()
@@ -197,6 +202,10 @@ export class SaveRubricDto {
   @ApiPropertyOptional({ description: "Suggested overall weight; actual grading weight per subject comes from SubjectRubric", default: 0 })
   @IsOptional() @Type(() => Number) @IsNumber() @Min(0) @Max(100)
   weightPercent?: number;
+
+  @ApiPropertyOptional({ description: 'Assessed once per class session (e.g. each practicum day); the component score is the average of the days', default: false })
+  @IsOptional() @IsBoolean()
+  perSession?: boolean;
 
   @ApiProperty({ type: [RubricSectionInputDto] })
   @IsArray() @ArrayMinSize(1) @ValidateNested({ each: true }) @Type(() => RubricSectionInputDto)

@@ -6,7 +6,7 @@ import { useI18n } from '@/lib/i18n';
 
 interface ItemForm { id?: string; textEn: string; textTh: string; weightPercent: number; maxRating: number; isCritical: boolean }
 interface SectionForm { id?: string; nameEn: string; nameTh: string; weightPercent: number; items: ItemForm[] }
-interface RubricForm { code: string; nameEn: string; nameTh: string; description: string; weightPercent: number; sections: SectionForm[] }
+interface RubricForm { code: string; nameEn: string; nameTh: string; description: string; weightPercent: number; perSession: boolean; sections: SectionForm[] }
 
 interface RubricListItem { id: string; code: string | null; nameEn: string; nameTh: string | null; weightPercent: number; sections: { items: unknown[] }[] }
 
@@ -41,7 +41,7 @@ function weightStatus(sum: number): { tone: 'ok' | 'over' | 'under' | 'empty'; c
 
 const EMPTY_ITEM = (): ItemForm => ({ textEn: '', textTh: '', weightPercent: 0, maxRating: 5, isCritical: false });
 const EMPTY_SECTION = (): SectionForm => ({ nameEn: '', nameTh: '', weightPercent: 0, items: [EMPTY_ITEM()] });
-const EMPTY_RUBRIC = (): RubricForm => ({ code: '', nameEn: '', nameTh: '', description: '', weightPercent: 0, sections: [EMPTY_SECTION()] });
+const EMPTY_RUBRIC = (): RubricForm => ({ code: '', nameEn: '', nameTh: '', description: '', weightPercent: 0, perSession: false, sections: [EMPTY_SECTION()] });
 
 export default function RubricBuilderDrawer({ onClose, onChanged }: { onClose: () => void; onChanged: () => void }) {
   const { t, lang } = useI18n();
@@ -66,9 +66,9 @@ export default function RubricBuilderDrawer({ onClose, onChanged }: { onClose: (
   }
 
   async function startEdit(id: string) {
-    const r = await apiFetch<{ code: string | null; nameEn: string; nameTh: string | null; description: string | null; weightPercent: number; sections: { id: string; nameEn: string; nameTh: string | null; weightPercent: number; items: { id: string; textEn: string; textTh: string | null; weightPercent: number; maxRating: number; isCritical: boolean }[] }[] }>(`/assessment/rubrics/${id}`);
+    const r = await apiFetch<{ code: string | null; nameEn: string; nameTh: string | null; description: string | null; weightPercent: number; perSession?: boolean; sections: { id: string; nameEn: string; nameTh: string | null; weightPercent: number; items: { id: string; textEn: string; textTh: string | null; weightPercent: number; maxRating: number; isCritical: boolean }[] }[] }>(`/assessment/rubrics/${id}`);
     setForm({
-      code: r.code ?? '', nameEn: r.nameEn, nameTh: r.nameTh ?? '', description: r.description ?? '', weightPercent: r.weightPercent,
+      code: r.code ?? '', nameEn: r.nameEn, nameTh: r.nameTh ?? '', description: r.description ?? '', weightPercent: r.weightPercent, perSession: r.perSession ?? false,
       // ids ride along so the server updates these rows in place — recreating
       // them would orphan (and, with a restricted FK, refuse to drop) the
       // scores already recorded against them.
@@ -185,6 +185,10 @@ export default function RubricBuilderDrawer({ onClose, onChanged }: { onClose: (
               <F label={t('rubric.suggestedWeight')}><input type="number" min={0} max={100} className="input" value={form.weightPercent} onChange={(e) => setForm({ ...form, weightPercent: Number(e.target.value) })} /></F>
             </div>
             <F label={t('rubric.description')}><input className="input" value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} /></F>
+            <label style={{ display: 'flex', gap: 8, alignItems: 'flex-start', fontSize: 13, margin: '4px 0 8px' }}>
+              <input type="checkbox" checked={form.perSession} onChange={(e) => setForm({ ...form, perSession: e.target.checked })} style={{ marginTop: 3 }} />
+              <span><b>{t('rubric.perSession')}</b><br /><span className="muted">{t('rubric.perSessionHint')}</span></span>
+            </label>
 
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', margin: '18px 0 10px' }}>
               <div style={{ fontWeight: 700, fontSize: 13.5 }}>{t('rubric.sections')}</div>

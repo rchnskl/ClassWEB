@@ -714,6 +714,7 @@ model ClassSession {
   lecturer           Lecturer?           @relation(fields: [lecturerId], references: [id])
   attendance         AttendanceRecord[]
   attendanceSessions AttendanceSession[]
+  evaluations        Evaluation[]
 
   @@unique([sectionId, sessionDate, startTime])
   @@index([sectionId])
@@ -1510,6 +1511,10 @@ model Rubric {
   weightPercent Float     @default(0)
   order         Int       @default(0)
   isActive      Boolean   @default(true)
+  /// Assessed once per class session (e.g. each clinical practicum day) rather
+  /// than once per term. The component score is the average of the sessions
+  /// assessed so far, kept on the evaluation row whose classSessionId is null.
+  perSession    Boolean   @default(false)
   metadata      Json?
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
@@ -1591,6 +1596,9 @@ model Evaluation {
   rubricId       String
   studentId      String
   sectionId      String?
+  /// Set for one day's assessment of a perSession rubric; null for the row that
+  /// carries the component score (every summary and report reads that one).
+  classSessionId String?
   evaluatorId    String?
   evaluatorName  String?
   status         EvaluationStatus @default(DRAFT)
@@ -1611,13 +1619,15 @@ model Evaluation {
   createdAt      DateTime         @default(now())
   updatedAt      DateTime         @updatedAt
 
-  university University        @relation(fields: [universityId], references: [id])
-  rubric     Rubric            @relation(fields: [rubricId], references: [id])
-  student    Student           @relation(fields: [studentId], references: [id])
-  section    Section?          @relation(fields: [sectionId], references: [id])
-  scores     EvaluationScore[]
+  university   University        @relation(fields: [universityId], references: [id])
+  rubric       Rubric            @relation(fields: [rubricId], references: [id])
+  student      Student           @relation(fields: [studentId], references: [id])
+  section      Section?          @relation(fields: [sectionId], references: [id])
+  classSession ClassSession?     @relation(fields: [classSessionId], references: [id])
+  scores       EvaluationScore[]
 
-  @@unique([rubricId, studentId, sectionId])
+  @@unique([rubricId, studentId, sectionId, classSessionId])
+  @@index([classSessionId])
   @@index([universityId])
   @@index([studentId])
   @@index([sectionId])

@@ -563,7 +563,7 @@ export class ReportsService {
       this.assessment.activeRubricsForSubject(universityId, section.subjectId),
       this.assessment.sectionSummary(user, sectionId),
       this.prisma.evaluation.findMany({
-        where: { universityId, sectionId },
+        where: { universityId, sectionId, classSessionId: null },
         select: {
           id: true, studentId: true, rubricId: true, scorePercent: true, rawScore: true, rawMax: true,
           scores: { select: { rubricItemId: true, rating: true } },
@@ -863,7 +863,7 @@ export class ReportsService {
     const [rubrics, evaluations] = await Promise.all([
       this.assessment.activeRubricsForSubject(universityId, subjectId),
       this.prisma.evaluation.findMany({
-        where: { universityId, studentId, sectionId },
+        where: { universityId, studentId, sectionId, classSessionId: null },
         select: { rubricId: true, rawScore: true, rawMax: true, scores: { select: { rubricItemId: true, rating: true, passed: true } } },
       }),
     ]);

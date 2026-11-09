@@ -96,8 +96,9 @@ export class AssessmentController {
     @Query('rubricId') rubricId: string,
     @Query('studentId') studentId: string,
     @Query('sectionId') sectionId?: string,
+    @Query('classSessionId') classSessionId?: string,
   ) {
-    return this.assessment.getEvaluation(user, rubricId, studentId, sectionId);
+    return this.assessment.getEvaluation(user, rubricId, studentId, sectionId, classSessionId);
   }
 
   @Post('evaluation')
