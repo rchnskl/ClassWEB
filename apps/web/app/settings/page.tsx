@@ -1055,6 +1055,93 @@ function MaintenanceTab() {
           </button>
         )}
       </div>
+      <ResetPanel />
+    </div>
+  );
+}
+
+const RESET_ROWS: string[] = [
+  'students', 'studentGroups', 'academicYears', 'semesters', 'programs', 'courses', 'subjects', 'sections',
+  'classSessions', 'enrollments', 'attendanceRecords', 'attendanceSessions', 'attendanceCheckIns',
+  'evaluations', 'reports', 'studentNotes', 'notifications', 'calendarEvents', 'calendarEntries',
+  'sectionSchedules', 'sectionLecturers', 'subjectMemberships', 'sectionAttendanceRules',
+];
+
+/** Archive & reset: clears teaching/assessment data for a new start (see ResetService). */
+function ResetPanel() {
+  const { t } = useI18n();
+  const [preview, setPreview] = useState<{ counts: Record<string, number>; total: number; confirmation: string } | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [archived, setArchived] = useState(false);
+  const [phrase, setPhrase] = useState('');
+  const [running, setRunning] = useState(false);
+  const [done, setDone] = useState<{ total: number } | null>(null);
+
+  const load = useCallback(() => {
+    return apiFetch<{ counts: Record<string, number>; total: number; confirmation: string }>('/maintenance/reset-preview')
+      .then(setPreview)
+      .catch((err) => setError(err instanceof Error ? err.message : 'Failed to load'));
+  }, []);
+  useEffect(() => { void load(); }, [load]);
+
+  async function run() {
+    if (!preview) return;
+    setRunning(true);
+    setError(null);
+    try {
+      const res = await apiFetch<{ total: number }>('/maintenance/reset', {
+        method: 'POST',
+        body: JSON.stringify({ confirmation: phrase, archived }),
+      });
+      setDone(res);
+      setPhrase('');
+      setArchived(false);
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Reset failed');
+    } finally {
+      setRunning(false);
+    }
+  }
+
+  const ready = !!preview && archived && phrase === preview.confirmation && !running;
+
+  return (
+    <div className="glass rise" style={{ padding: 24, border: '1px solid var(--danger)' }}>
+      <h3 style={{ margin: '0 0 6px', fontSize: 16, fontWeight: 700 }}>{t('set.reset.title')}</h3>
+      <p className="muted" style={{ fontSize: 13, margin: '0 0 10px', maxWidth: 680 }}>{t('set.reset.hint')}</p>
+      <p className="muted" style={{ fontSize: 12.5, margin: '0 0 16px', maxWidth: 680 }}>{t('set.reset.keeps')}</p>
+
+      {error && <div className="chip chip-danger" style={{ display: 'block', marginBottom: 14 }}>{error}</div>}
+      {done && <div className="chip" style={{ display: 'block', marginBottom: 14 }}>{t('set.reset.done')} {done.total}</div>}
+
+      {preview && (
+        <>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 8, marginBottom: 16 }}>
+            {RESET_ROWS.map((k) => (
+              <div key={k} className="glass hairline" style={{ padding: '8px 12px', borderRadius: 10, fontSize: 12 }}>
+                <div style={{ fontSize: 17, fontWeight: 700 }}>{preview.counts[k] ?? 0}</div>
+                <div className="muted">{t(`set.reset.row.${k}`)}</div>
+              </div>
+            ))}
+          </div>
+
+          <label style={{ display: 'flex', gap: 8, alignItems: 'flex-start', fontSize: 13.5, marginBottom: 12, maxWidth: 680 }}>
+            <input type="checkbox" checked={archived} onChange={(e) => setArchived(e.target.checked)} style={{ marginTop: 3 }} />
+            <span>{t('set.reset.archivedCheck')}</span>
+          </label>
+          <div style={{ fontSize: 13, marginBottom: 6 }}>
+            {t('set.reset.typePhrase')} <b style={{ fontFamily: 'monospace' }}>{preview.confirmation}</b>
+          </div>
+          <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+            <input value={phrase} onChange={(e) => setPhrase(e.target.value)} aria-label={t('set.reset.typePhrase')}
+              className="glass hairline" style={{ padding: '9px 12px', borderRadius: 10, minWidth: 240, fontFamily: 'monospace' }} />
+            <button onClick={run} disabled={!ready} className="btn-danger" style={{ padding: '10px 18px', fontSize: 13.5, opacity: ready ? 1 : 0.5 }}>
+              {running ? t('set.reset.running') : `${t('set.reset.action')} (${preview.total})`}
+            </button>
+          </div>
+        </>
+      )}
     </div>
   );
 }
