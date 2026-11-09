@@ -75,6 +75,24 @@ export default function AttendancePage() {
       setOpenBusy(false);
     }
   }
+  // Closing is a two-tap action (tap, then confirm) so a stray tap during
+  // a busy ward round doesn't end check-in for everyone.
+  const [closeArmed, setCloseArmed] = useState(false);
+  async function closeWindow() {
+    if (!selected || openBusy) return;
+    if (!closeArmed) { setCloseArmed(true); return; }
+    setActionError(null);
+    setOpenBusy(true);
+    try {
+      await apiFetch(`/attendance/sessions/${selected}/close`, { method: 'POST' });
+      await loadState(selected);
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : 'Failed to close attendance.');
+    } finally {
+      setOpenBusy(false);
+      setCloseArmed(false);
+    }
+  }
   async function mark(studentId: string, status: string) {
     // Guard against a rapid double-tap firing the same mark twice while the
     // first request is still in flight — only blocks this one student's row.
@@ -157,6 +175,18 @@ export default function AttendancePage() {
                       <a href={`/checkin/${state.open.token}`} target="_blank" rel="noreferrer" className="muted" style={{ fontSize: 11, display: 'block', marginTop: 6, textDecoration: 'underline' }}>
                         {t('att.orLink')}
                       </a>
+                      <div style={{ display: 'flex', gap: 8, justifyContent: 'center', marginTop: 14 }}>
+                        <button onClick={closeWindow} disabled={openBusy}
+                          style={{ padding: '9px 16px', fontSize: 13.5, fontWeight: 700, borderRadius: 10, cursor: openBusy ? 'wait' : 'pointer',
+                            border: '1px solid var(--danger)', background: closeArmed ? 'var(--danger)' : 'transparent', color: closeArmed ? '#fff' : 'var(--danger)' }}>
+                          {closeArmed ? t('att.closeConfirm') : t('att.closeCheckin')}
+                        </button>
+                        {closeArmed && (
+                          <button onClick={() => setCloseArmed(false)} className="glass hairline" style={{ padding: '9px 14px', fontSize: 13, borderRadius: 10, cursor: 'pointer', color: 'var(--text-1)' }}>
+                            {t('att.closeCancel')}
+                          </button>
+                        )}
+                      </div>
                     </>
                   ) : (
                     <>
