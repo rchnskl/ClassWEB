@@ -1,13 +1,15 @@
-// classweb-keepalive — Cloudflare Worker (cron trigger: */10 * * * *)
+// classweb-keepalive — Cloudflare Worker
+// Cron trigger: */10 0-11 * * 1-6  (every 10 min, Mon–Sat 07:00–18:59 Bangkok)
 //
 // Render's free instance sleeps after 15 minutes without traffic, and the next
-// visitor then waits ~50 s for it to boot. This pings the API's liveness
-// endpoint every 10 minutes so it stays up — which also lets the 02:00 nightly
-// backup job actually run (a sleeping instance never fires it).
+// visitor then waits ~50 s for it to boot. During teaching hours this pings the
+// API's liveness endpoint every 10 minutes so it stays up; outside them it
+// lets the instance sleep.
 //
-// It hits /health/live, which does NOT query the database, so Neon's compute
-// can still auto-suspend when nobody is using the system. One always-on free
-// instance fits inside Render's 750 free instance-hours a month.
+// Quota: /health/live does NOT query the database, so these pings never wake
+// Neon — its compute still auto-suspends whenever nobody is using the system,
+// and only real use spends Neon compute-hours. Limiting the pings to teaching
+// hours also keeps Render's free instance-hours well under the monthly cap.
 //
 // Deployed from the Cloudflare dashboard (Workers & Pages → classweb-keepalive);
 // this file is the source of record. To stop keeping the API awake, delete the
