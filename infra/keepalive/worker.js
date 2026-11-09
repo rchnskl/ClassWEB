@@ -11,7 +11,9 @@
 // and only real use spends Neon compute-hours. Limiting the pings to teaching
 // hours also keeps Render's free instance-hours well under the monthly cap.
 //
-// Deployed from the Cloudflare dashboard (Workers & Pages → classweb-keepalive);
+// Deployed with `npx wrangler deploy --config infra/keepalive/wrangler.toml`
+// to the rachanonskl Cloudflare account — the same one as the web app
+// (classweb-keepalive.rachanonskl-c20.workers.dev);
 // this file is the source of record. To stop keeping the API awake, delete the
 // Worker or remove its cron trigger.
 
