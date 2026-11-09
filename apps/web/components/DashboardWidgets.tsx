@@ -1,19 +1,38 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useSyncExternalStore } from 'react';
 import { apiFetch, type Environment } from '@/lib/api';
 import { useI18n } from '@/lib/i18n';
 
 /* ----------------------------- Realtime clock ---------------------------- */
+// One shared one-second clock. The server render has no time (null → '—'),
+// which keeps hydration stable; the client snapshot is set as it subscribes.
+let clockNow: Date | null = null;
+let clockTimer: ReturnType<typeof setInterval> | undefined;
+const clockListeners = new Set<() => void>();
+
+function subscribeClock(onTick: () => void) {
+  clockListeners.add(onTick);
+  if (!clockTimer) {
+    clockNow = new Date();
+    clockTimer = setInterval(() => {
+      clockNow = new Date();
+      clockListeners.forEach((l) => l());
+    }, 1000);
+  }
+  return () => {
+    clockListeners.delete(onTick);
+    if (clockListeners.size === 0) { clearInterval(clockTimer); clockTimer = undefined; }
+  };
+}
+
+function useNow(): Date | null {
+  return useSyncExternalStore(subscribeClock, () => clockNow, () => null);
+}
+
 export function ClockWidget() {
   const { lang, t } = useI18n();
-  const [now, setNow] = useState<Date | null>(null);
-
-  useEffect(() => {
-    setNow(new Date());
-    const id = setInterval(() => setNow(new Date()), 1000);
-    return () => clearInterval(id);
-  }, []);
+  const now = useNow();
 
   const locale = lang === 'th' ? 'th-TH-u-ca-buddhist' : 'en-GB';
   const time = now

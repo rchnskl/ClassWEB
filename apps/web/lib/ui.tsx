@@ -1,6 +1,7 @@
 'use client';
 
-import { createContext, useContext, useEffect, useState } from 'react';
+import { createContext, useContext, useState } from 'react';
+import { useLocalStorage, writeLocalStorage } from './local-store';
 
 interface UIContextValue {
   sidebarOpen: boolean;
@@ -18,15 +19,10 @@ const COLLAPSE_KEY = 'sidebarCollapsed';
 
 export function UIProvider({ children }: { children: React.ReactNode }) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  const [sidebarCollapsed, setSidebarCollapsedState] = useState(false);
-
-  useEffect(() => {
-    try { setSidebarCollapsedState(localStorage.getItem(COLLAPSE_KEY) === '1'); } catch {}
-  }, []);
+  const sidebarCollapsed = useLocalStorage(COLLAPSE_KEY) === '1';
 
   function setSidebarCollapsed(collapsed: boolean) {
-    setSidebarCollapsedState(collapsed);
-    try { localStorage.setItem(COLLAPSE_KEY, collapsed ? '1' : '0'); } catch {}
+    writeLocalStorage(COLLAPSE_KEY, collapsed ? '1' : '0');
   }
 
   return (

@@ -7,6 +7,7 @@ import Topbar from '@/components/Topbar';
 import { IconSearch, IconTeacher } from '@/components/icons';
 import { apiFetch, type MeResponse, type Paginated } from '@/lib/api';
 import { useI18n } from '@/lib/i18n';
+import { useStoredUser } from '@/lib/local-store';
 
 interface LecturerRow {
   id: string;
@@ -31,7 +32,7 @@ const PAGE = 10;
 export default function LecturersPage() {
   const router = useRouter();
   const { t } = useI18n();
-  const [email, setEmail] = useState('');
+  const email = useStoredUser()?.email ?? '';
   const [isAdmin, setIsAdmin] = useState(false);
   const [rows, setRows] = useState<LecturerRow[]>([]);
   const [total, setTotal] = useState(0);
@@ -69,10 +70,9 @@ export default function LecturersPage() {
 
   useEffect(() => {
     if (!localStorage.getItem('accessToken')) { router.replace('/login'); return; }
-    const u = localStorage.getItem('user');
-    if (u) { try { setEmail(JSON.parse(u).email); } catch {} }
     apiFetch<MeResponse>('/users/me').then((me) => setIsAdmin(me.roles.some((r) => r.role.code === 'ADMIN'))).catch(() => {});
     apiFetch<DepartmentRef[]>('/departments').then(setDepartments).catch(() => {});
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- fetches from the API on mount / when its inputs change; state is set as the request starts and settles
     void load(0, '');
   }, [router, load]);
 

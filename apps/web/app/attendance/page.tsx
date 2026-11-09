@@ -7,6 +7,7 @@ import Sidebar from '@/components/Sidebar';
 import Topbar from '@/components/Topbar';
 import { apiFetch } from '@/lib/api';
 import { useI18n } from '@/lib/i18n';
+import { useStoredUser, useWindowOrigin } from '@/lib/local-store';
 
 interface SessionItem {
   id: string; startTime: string; endTime: string; status: string;
@@ -30,11 +31,11 @@ const REASONS = ['MAKEUP_OTHER_SECTION', 'WRONG_CODE', 'LATE_REGISTRATION', 'OTH
 export default function AttendancePage() {
   const router = useRouter();
   const { t } = useI18n();
-  const [email, setEmail] = useState('');
+  const email = useStoredUser()?.email ?? '';
   const [sessions, setSessions] = useState<SessionItem[]>([]);
   const [selected, setSelected] = useState<string | null>(null);
   const [state, setState] = useState<State | null>(null);
-  const [origin, setOrigin] = useState('');
+  const origin = useWindowOrigin();
   const [actionError, setActionError] = useState<string | null>(null);
   const [openBusy, setOpenBusy] = useState(false);
   const [markingId, setMarkingId] = useState<string | null>(null);
@@ -48,9 +49,6 @@ export default function AttendancePage() {
 
   useEffect(() => {
     if (!localStorage.getItem('accessToken')) { router.replace('/login'); return; }
-    setOrigin(window.location.origin);
-    const u = localStorage.getItem('user');
-    if (u) { try { setEmail(JSON.parse(u).email); } catch {} }
     apiFetch<{ items: SessionItem[] }>(`/timetable/sessions?date=${today}`)
       .then((d) => { setSessions(d.items); if (d.items[0]) { setSelected(d.items[0].id); void loadState(d.items[0].id); } })
       .catch(() => {});

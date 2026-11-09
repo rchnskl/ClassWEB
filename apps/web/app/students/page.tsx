@@ -10,6 +10,7 @@ import PdfPreviewModal from '@/components/PdfPreviewModal';
 import StudentImportModal from '@/components/StudentImportModal';
 import { apiFetch, downloadFile, fetchPreviewUrl, type MeResponse, type Paginated } from '@/lib/api';
 import { useI18n } from '@/lib/i18n';
+import { useStoredUser } from '@/lib/local-store';
 
 interface StudentRow {
   id: string;
@@ -42,11 +43,12 @@ function StudentsPageInner() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const { t, lang } = useI18n();
-  const [email, setEmail] = useState('');
+  const email = useStoredUser()?.email ?? '';
   const [rows, setRows] = useState<StudentRow[]>([]);
   const [total, setTotal] = useState(0);
   const [skip, setSkip] = useState(0);
-  const [search, setSearch] = useState('');
+  // Arriving from the global search box: start with that search filled in.
+  const [search, setSearch] = useState(() => searchParams.get('search') ?? '');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -108,16 +110,13 @@ function StudentsPageInner() {
       router.replace('/login');
       return;
     }
-    const u = localStorage.getItem('user');
-    if (u) { try { setEmail(JSON.parse(u).email); } catch {} }
     apiFetch<MeResponse>('/users/me')
       .then((me) => setIsAdmin(me.roles.some((r) => r.role.code === 'ADMIN')))
       .catch(() => {});
     apiFetch<ProgramRef[]>('/programs').then(setPrograms).catch(() => {});
-    // Arriving from the global search box: prefill and run that search immediately.
-    const fromSearch = searchParams.get('search');
-    if (fromSearch) setSearch(fromSearch);
-    void load(0, fromSearch ?? '');
+    // Run the prefilled search (if any) immediately rather than after the debounce.
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- fetches from the API on mount / when its inputs change; state is set as the request starts and settles
+    void load(0, search);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [router]);
 

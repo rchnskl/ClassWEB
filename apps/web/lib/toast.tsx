@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useSyncExternalStore } from 'react';
 
 /**
  * Global toasts.
@@ -15,7 +15,7 @@ import { useEffect, useState } from 'react';
 export type ToastTone = 'success' | 'error' | 'info';
 export interface Toast { id: number; tone: ToastTone; message: string }
 
-const listeners = new Set<(toasts: Toast[]) => void>();
+const listeners = new Set<() => void>();
 let toasts: Toast[] = [];
 let nextId = 1;
 
@@ -28,8 +28,7 @@ const DURATION: Record<ToastTone, number> = {
 };
 
 function emit() {
-  const snapshot = toasts;
-  listeners.forEach((l) => l(snapshot));
+  listeners.forEach((l) => l());
 }
 
 export function dismissToast(id: number) {
@@ -56,14 +55,17 @@ export const toast = {
   info: (m: string) => showToast('info', m),
 };
 
+const NO_TOASTS: Toast[] = [];
+
+function subscribe(onChange: () => void) {
+  listeners.add(onChange);
+  return () => { listeners.delete(onChange); };
+}
+
 function useToasts(): Toast[] {
-  const [items, setItems] = useState<Toast[]>([]);
-  useEffect(() => {
-    setItems(toasts);
-    listeners.add(setItems);
-    return () => { listeners.delete(setItems); };
-  }, []);
-  return items;
+  // `toasts` is replaced (never mutated) on every change, so it is a valid
+  // snapshot as-is. The server render has none.
+  return useSyncExternalStore(subscribe, () => toasts, () => NO_TOASTS);
 }
 
 const TONE_STYLE: Record<ToastTone, { bg: string; border: string; icon: string }> = {

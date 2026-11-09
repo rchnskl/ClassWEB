@@ -31,6 +31,7 @@ export default function StudentNotesDrawer({
       setLoading(false);
     }
   }, [studentId]);
+  // eslint-disable-next-line react-hooks/set-state-in-effect -- fetches from the API on mount / when its inputs change; state is set as the request starts and settles
   useEffect(() => { void load(); }, [load]);
 
   async function submit(e: React.FormEvent) {

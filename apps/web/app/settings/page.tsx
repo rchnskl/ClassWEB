@@ -6,30 +6,28 @@ import Sidebar from '@/components/Sidebar';
 import Topbar from '@/components/Topbar';
 import { apiFetch, downloadFile } from '@/lib/api';
 import { useI18n } from '@/lib/i18n';
+import { useLocalStorage, useStoredUser } from '@/lib/local-store';
 
 type Tab = 'general' | 'academic' | 'attendance' | 'users' | 'audit' | 'backup' | 'maintenance';
 
 export default function SettingsPage() {
   const router = useRouter();
   const { t } = useI18n();
-  const [email, setEmail] = useState('');
+  const token = useLocalStorage('accessToken');
+  const user = useStoredUser();
+  const email = user?.email ?? '';
   const [tab, setTab] = useState<Tab>('general');
-  const [checked, setChecked] = useState(false);
+  // Admin-only page: render nothing until the stored session is readable (it
+  // isn't during the server render), and bounce anyone who isn't an admin.
+  const nonAdmin = user !== null && !(user.roleCodes ?? []).includes('ADMIN');
+  const allowed = token !== null && !nonAdmin;
 
   useEffect(() => {
-    if (!localStorage.getItem('accessToken')) { router.replace('/login'); return; }
-    const u = localStorage.getItem('user');
-    if (u) {
-      try {
-        const parsed = JSON.parse(u);
-        setEmail(parsed.email);
-        if (!(parsed.roleCodes ?? []).includes('ADMIN')) { router.replace('/dashboard'); return; }
-      } catch {}
-    }
-    setChecked(true);
-  }, [router]);
+    if (!localStorage.getItem('accessToken')) router.replace('/login');
+    else if (nonAdmin) router.replace('/dashboard');
+  }, [router, nonAdmin]);
 
-  if (!checked) return null;
+  if (!allowed) return null;
 
   return (
     <div className="app-shell">
@@ -90,6 +88,7 @@ function GeneralTab() {
     }
   }, []);
 
+  // eslint-disable-next-line react-hooks/set-state-in-effect -- fetches from the API on mount / when its inputs change; state is set as the request starts and settles
   useEffect(() => { void load(); }, [load]);
 
   function set(key: string, value: string) {
@@ -217,6 +216,7 @@ function AcademicTab() {
       setLoadError(err instanceof Error ? err.message : 'Failed to load academic years/semesters');
     }
   }, []);
+  // eslint-disable-next-line react-hooks/set-state-in-effect -- fetches from the API on mount / when its inputs change; state is set as the request starts and settles
   useEffect(() => { void load(); }, [load]);
 
   async function submitYear(e: React.FormEvent) {
@@ -416,6 +416,7 @@ function AttendanceTab() {
     apiFetch<AttendanceRule>('/settings/attendance-rule').then(setRule)
       .catch((err) => setLoadError(err instanceof Error ? err.message : 'Failed to load'));
   }, []);
+  // eslint-disable-next-line react-hooks/set-state-in-effect -- fetches from the API on mount / when its inputs change; state is set as the request starts and settles
   useEffect(() => { load(); }, [load]);
 
   function set<K extends keyof AttendanceRule>(key: K, value: AttendanceRule[K]) {
@@ -539,6 +540,7 @@ function UsersTab() {
       setLoadError(err instanceof Error ? err.message : 'Failed to load users');
     }
   }, []);
+  // eslint-disable-next-line react-hooks/set-state-in-effect -- fetches from the API on mount / when its inputs change; state is set as the request starts and settles
   useEffect(() => { void load(); }, [load]);
 
   function openCreate() {
@@ -754,6 +756,7 @@ function AuditTab() {
     }
   }, [action, entityType, skip]);
 
+  // eslint-disable-next-line react-hooks/set-state-in-effect -- fetches from the API on mount / when its inputs change; state is set as the request starts and settles
   useEffect(() => { void load(); }, [load]);
 
   const fmt = (iso: string) => new Date(iso).toLocaleString(lang === 'th' ? 'th-TH' : 'en-US', { dateStyle: 'medium', timeStyle: 'short' });
@@ -838,6 +841,7 @@ function BackupTab() {
     try { setBackups(await apiFetch<Backup[]>('/backups')); }
     catch (err) { setLoadError(err instanceof Error ? err.message : 'Failed to load backups'); }
   }, []);
+  // eslint-disable-next-line react-hooks/set-state-in-effect -- fetches from the API on mount / when its inputs change; state is set as the request starts and settles
   useEffect(() => { void load(); }, [load]);
 
   const fmt = (iso: string) => new Date(iso).toLocaleString(lang === 'th' ? 'th-TH' : 'en-US', { dateStyle: 'medium', timeStyle: 'short' });
@@ -974,6 +978,7 @@ function MaintenanceTab() {
     try { setPreview(await apiFetch<MaintenancePreview>('/maintenance/preview')); }
     catch (err) { setLoadError(err instanceof Error ? err.message : 'Failed to load'); }
   }, []);
+  // eslint-disable-next-line react-hooks/set-state-in-effect -- fetches from the API on mount / when its inputs change; state is set as the request starts and settles
   useEffect(() => { void load(); }, [load]);
 
   async function run() {

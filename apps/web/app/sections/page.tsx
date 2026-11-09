@@ -1,34 +1,27 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Sidebar from '@/components/Sidebar';
 import Topbar from '@/components/Topbar';
 import SectionDetailDrawer from '@/components/SectionDetailDrawer';
 import { apiFetch, type Paginated } from '@/lib/api';
 import { useI18n } from '@/lib/i18n';
+import { useStoredUser } from '@/lib/local-store';
 
 type Tab = 'subjects' | 'sections' | 'departments' | 'programs' | 'locations';
 
 export default function SectionsPage() {
   const router = useRouter();
   const { t } = useI18n();
-  const [email, setEmail] = useState('');
+  const user = useStoredUser();
+  const email = user?.email ?? '';
   const [tab, setTab] = useState<Tab>('sections');
-  const [isAdmin, setIsAdmin] = useState(false);
-  const [userId, setUserId] = useState('');
+  const isAdmin = (user?.roleCodes ?? []).includes('ADMIN');
+  const userId = user?.id ?? '';
 
   useEffect(() => {
-    if (!localStorage.getItem('accessToken')) { router.replace('/login'); return; }
-    const u = localStorage.getItem('user');
-    if (u) {
-      try {
-        const parsed = JSON.parse(u);
-        setEmail(parsed.email);
-        setIsAdmin((parsed.roleCodes ?? []).includes('ADMIN'));
-        setUserId(parsed.id);
-      } catch {}
-    }
+    if (!localStorage.getItem('accessToken')) router.replace('/login');
   }, [router]);
 
   return (
@@ -359,6 +352,7 @@ function SubjectsTab({ isAdmin }: { isAdmin: boolean }) {
   useEffect(() => {
     apiFetch<ProgramRef[]>('/programs').then(setPrograms).catch(() => {});
     apiFetch<CourseRef[]>('/courses').then(setCourses).catch(() => {});
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- fetches from the API on mount / when its inputs change; state is set as the request starts and settles
     if (!isAdmin) void loadMemberships();
   }, [isAdmin, loadMemberships]);
   useEffect(() => { const timer = setTimeout(() => void load(), 250); return () => clearTimeout(timer); }, [load]);
@@ -624,6 +618,7 @@ function SubjectTeamModal({ subjectId, onClose }: { subjectId: string; onClose: 
   }, [subjectId]);
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- fetches from the API on mount / when its inputs change; state is set as the request starts and settles
     void load();
     apiFetch<Paginated<{ id: string; nameEn: string; employeeCode: string }>>('/lecturers?take=200')
       .then((d) => setAllLecturers(d.items)).catch(() => {});
@@ -709,7 +704,6 @@ interface DepartmentRow {
   head: { id: string; nameEn: string; nameTh: string | null } | null;
   _count: { lecturers: number };
 }
-interface FacultyRef { id: string; code: string; nameEn: string }
 interface LecturerHeadRef { id: string; nameEn: string; employeeCode: string }
 
 const EMPTY_DEPT_FORM = { facultyId: '', code: '', nameEn: '', nameTh: '', headId: '' };
@@ -719,7 +713,11 @@ function DepartmentsTab({ isAdmin }: { isAdmin: boolean }) {
   const name = (en: string, th: string | null) => (lang === 'th' && th ? th : en);
 
   const [rows, setRows] = useState<DepartmentRow[]>([]);
-  const [faculties, setFaculties] = useState<FacultyRef[]>([]);
+  // The faculty picker offers the faculties the loaded rows belong to.
+  const faculties = useMemo(
+    () => [...new Map(rows.map((r) => [r.faculty.id, r.faculty])).values()],
+    [rows],
+  );
   const [lecturers, setLecturers] = useState<LecturerHeadRef[]>([]);
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -730,6 +728,7 @@ function DepartmentsTab({ isAdmin }: { isAdmin: boolean }) {
 
   const load = useCallback(async () => { setRows(await apiFetch<DepartmentRow[]>('/departments')); }, []);
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- fetches from the API on mount / when its inputs change; state is set as the request starts and settles
     void load();
     apiFetch<Paginated<LecturerHeadRef>>('/lecturers?take=200').then((d) => setLecturers(d.items)).catch(() => {});
   }, [load]);
@@ -743,12 +742,8 @@ function DepartmentsTab({ isAdmin }: { isAdmin: boolean }) {
   function openEdit(row: DepartmentRow) {
     setEditingId(row.id);
     setForm({ facultyId: row.faculty.id, code: row.code, nameEn: row.nameEn, nameTh: row.nameTh ?? '', headId: row.head?.id ?? '' });
-    setFacultiesFromRow(row);
     setFormError(null);
     setShowForm(true);
-  }
-  function setFacultiesFromRow(row: DepartmentRow) {
-    setFaculties((prev) => (prev.some((f) => f.id === row.faculty.id) ? prev : [...prev, row.faculty]));
   }
 
   async function submitForm(e: React.FormEvent) {
@@ -774,12 +769,6 @@ function DepartmentsTab({ isAdmin }: { isAdmin: boolean }) {
     finally { setBusyId(null); }
   }
 
-  useEffect(() => {
-    if (rows.length && faculties.length === 0) {
-      const uniq = new Map(rows.map((r) => [r.faculty.id, r.faculty]));
-      setFaculties([...uniq.values()]);
-    }
-  }, [rows, faculties.length]);
 
   return (
     <div>
@@ -871,7 +860,11 @@ function ProgramsTab({ isAdmin }: { isAdmin: boolean }) {
   const name = (en: string, th: string | null) => (lang === 'th' && th ? th : en);
 
   const [rows, setRows] = useState<ProgramRow[]>([]);
-  const [faculties, setFaculties] = useState<FacultyRef[]>([]);
+  // The faculty picker offers the faculties the loaded rows belong to.
+  const faculties = useMemo(
+    () => [...new Map(rows.map((r) => [r.faculty.id, r.faculty])).values()],
+    [rows],
+  );
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [form, setForm] = useState(EMPTY_PROGRAM_FORM);
@@ -880,14 +873,9 @@ function ProgramsTab({ isAdmin }: { isAdmin: boolean }) {
   const [busyId, setBusyId] = useState<string | null>(null);
 
   const load = useCallback(async () => { setRows(await apiFetch<ProgramRow[]>('/programs')); }, []);
+  // eslint-disable-next-line react-hooks/set-state-in-effect -- fetches from the API on mount / when its inputs change; state is set as the request starts and settles
   useEffect(() => { void load(); }, [load]);
 
-  useEffect(() => {
-    if (rows.length && faculties.length === 0) {
-      const uniq = new Map(rows.map((r) => [r.faculty.id, r.faculty]));
-      setFaculties([...uniq.values()]);
-    }
-  }, [rows, faculties.length]);
 
   function openCreate() {
     setEditingId(null);
@@ -1056,6 +1044,7 @@ function LocationsTab({ isAdmin }: { isAdmin: boolean }) {
     const data = await apiFetch<Paginated<BuildingRow>>('/locations/buildings?take=200');
     setBuildings(data.items);
   }, []);
+  // eslint-disable-next-line react-hooks/set-state-in-effect -- fetches from the API on mount / when its inputs change; state is set as the request starts and settles
   useEffect(() => { void loadCampuses(); void loadBuildings(); }, [loadCampuses, loadBuildings]);
 
   function openCreateCampus() {

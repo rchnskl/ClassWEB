@@ -7,6 +7,7 @@ import { apiFetch } from '@/lib/api';
 import { useI18n } from '@/lib/i18n';
 import { useUI } from '@/lib/ui';
 import { useBranding } from '@/lib/branding';
+import { useStoredUser } from '@/lib/local-store';
 import {
   IconGrid, IconStudents, IconTeacher, IconBook, IconCalendar,
   IconCheck, IconReport, IconSettings, IconGrade, IconChevronLeft,
@@ -43,13 +44,11 @@ export default function Sidebar({ active = 'Dashboard' }: { active?: string }) {
 
   const [currentYear, setCurrentYear] = useState<YearRef | null>(null);
   const [currentSemester, setCurrentSemester] = useState<SemesterRef | null>(null);
-  const [isAdmin, setIsAdmin] = useState(false);
+  const isAdmin = (useStoredUser()?.roleCodes ?? []).includes('ADMIN');
   useEffect(() => {
     if (!localStorage.getItem('accessToken')) return;
     apiFetch<YearRef[]>('/academic-years').then((years) => setCurrentYear(years.find((y) => y.isCurrent) ?? null)).catch(() => {});
     apiFetch<SemesterRef[]>('/semesters').then((sems) => setCurrentSemester(sems.find((s) => s.isCurrent) ?? null)).catch(() => {});
-    const u = localStorage.getItem('user');
-    if (u) { try { setIsAdmin((JSON.parse(u).roleCodes ?? []).includes('ADMIN')); } catch {} }
   }, []);
 
   const nav = NAV.filter((item) => item.id !== 'Settings' || isAdmin);

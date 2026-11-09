@@ -1,6 +1,7 @@
 'use client';
 
-import { createContext, useCallback, useContext, useEffect, useState } from 'react';
+import { createContext, useCallback, useContext, useEffect } from 'react';
+import { useLocalStorage, writeLocalStorage } from './local-store';
 
 export type Lang = 'en' | 'th';
 
@@ -1541,18 +1542,16 @@ const I18nContext = createContext<I18nContextValue>({
 });
 
 export function I18nProvider({ children }: { children: React.ReactNode }) {
-  const [lang, setLangState] = useState<Lang>('th');
+  const stored = useLocalStorage('lang');
+  const lang: Lang = stored === 'en' ? 'en' : 'th';
 
+  // Keep <html lang> in step with the chosen language (screen readers, fonts).
   useEffect(() => {
-    const stored = localStorage.getItem('lang') as Lang | null;
-    if (stored === 'en' || stored === 'th') setLangState(stored);
-    document.documentElement.setAttribute('lang', stored ?? 'th');
-  }, []);
+    document.documentElement.setAttribute('lang', lang);
+  }, [lang]);
 
   const setLang = useCallback((next: Lang) => {
-    setLangState(next);
-    localStorage.setItem('lang', next);
-    document.documentElement.setAttribute('lang', next);
+    writeLocalStorage('lang', next);
   }, []);
 
   const t = useCallback((key: string) => DICTS[lang][key] ?? DICTS.en[key] ?? key, [lang]);

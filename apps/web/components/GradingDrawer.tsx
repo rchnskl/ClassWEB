@@ -78,11 +78,17 @@ export default function GradingDrawer({
   const [onlySectionId, setOnlySectionId] = useState<string | null>(null);
 
   const [summary, setSummary] = useState<Summary | null>(null);
-  const [activeId, setActiveId] = useState<string>(rubrics[0]?.id ?? '');
+  const [chosenId, setActiveId] = useState<string>(rubrics[0]?.id ?? '');
+  // Fall back to the first rubric when the chosen one isn't in the list (yet).
+  const activeId = rubrics.some((r) => r.id === chosenId) ? chosenId : (rubrics[0]?.id ?? '');
   const [ratings, setRatings] = useState<Record<string, number>>({});
   const [passed, setPassed] = useState<Record<string, boolean>>({});
-  const [weights, setWeights] = useState<Record<string, number>>({});
-  const [weightsDirty, setWeightsDirty] = useState(false);
+  // Unsaved weight edits belong to one rubric. Picking a rubric discards them
+  // (as before); they are also ignored if the list changes under them.
+  const [weightEdits, setWeightEdits] = useState<{ rubricId: string; values: Record<string, number>; dirty: boolean } | null>(null);
+  const ownEdits = weightEdits?.rubricId === activeId ? weightEdits : null;
+  const weights = ownEdits?.values ?? {};
+  const weightsDirty = ownEdits?.dirty ?? false;
   // Direct entry: some components are marked outside the app (a written exam,
   // a case study) and come back as one number. Working out per-item marks to
   // fit them into a checklist is arithmetic no one should have to do.
@@ -105,12 +111,8 @@ export default function GradingDrawer({
     }
   }, [studentId, sectionId]);
 
+  // eslint-disable-next-line react-hooks/set-state-in-effect -- fetches from the API on mount / when its inputs change; state is set as the request starts and settles
   useEffect(() => { void loadSummary(); }, [loadSummary]);
-
-  useEffect(() => {
-    if (rubrics.length && !rubrics.some((r) => r.id === activeId)) setActiveId(rubrics[0].id);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [rubrics]);
 
   // Load existing scores + item weights when the active rubric changes.
   useEffect(() => {
@@ -129,11 +131,7 @@ export default function GradingDrawer({
         setDirectPercent(wasDirect && ev?.rawScore == null && ev?.scorePercent != null ? String(ev.scorePercent) : '');
       })
       .catch(() => { setRatings({}); setPassed({}); setDirectMode(false); setRawScore(''); setRawMax(''); setDirectPercent(''); });
-    const r = rubrics.find((x) => x.id === activeId);
-    const w: Record<string, number> = {};
-    r?.sections.forEach((s) => s.items.forEach((i) => { w[i.id] = i.weightPercent; }));
-    setWeights(w); setWeightsDirty(false);
-  }, [activeId, studentId, sectionId, rubrics]);
+  }, [activeId, studentId, sectionId]);
 
   async function save() {
     if (!active) return;
@@ -168,7 +166,7 @@ export default function GradingDrawer({
       const items = active.sections.flatMap((s) => s.items).map((i) => ({ id: i.id, weightPercent: weights[i.id] ?? i.weightPercent }));
       await apiFetch(`/assessment/rubrics/${active.id}/weights`, { method: 'PATCH', body: JSON.stringify({ items }) });
       active.sections.forEach((s) => s.items.forEach((i) => { i.weightPercent = weights[i.id] ?? i.weightPercent; }));
-      setWeightsDirty(false);
+      setWeightEdits((e) => (e ? { ...e, dirty: false } : e));
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to save weights. Please try again.');
     } finally { setSavingW(false); }
@@ -210,7 +208,7 @@ export default function GradingDrawer({
               {rubrics.map((r) => {
                 const row = summary?.rubrics.find((x) => x.rubricId === r.id);
                 return (
-                  <button key={r.id} onClick={() => setActiveId(r.id)}
+                  <button key={r.id} onClick={() => { setActiveId(r.id); setWeightEdits(null); }}
                     style={{ padding: '8px 12px', borderRadius: 12, cursor: 'pointer', fontSize: 12.5, fontWeight: 600,
                       border: r.id === activeId ? '1.5px solid var(--brand)' : row?.criticalFailed ? '1px solid var(--danger)' : '1px solid var(--glass-hairline)',
                       background: r.id === activeId ? 'var(--popover-hover)' : 'transparent', color: 'var(--text-0)' }}>
@@ -331,7 +329,7 @@ export default function GradingDrawer({
                           {name(it.textEn, it.textTh)}
                         </div>
                         <input type="number" min={0} max={100} value={weights[it.id] ?? it.weightPercent}
-                          onChange={(e) => { setWeights({ ...weights, [it.id]: Number(e.target.value) }); setWeightsDirty(true); }}
+                          onChange={(e) => setWeightEdits({ rubricId: activeId, values: { ...weights, [it.id]: Number(e.target.value) }, dirty: true })}
                           title={t('as.weight')}
                           style={{ width: 52, padding: '4px 6px', fontSize: 11.5, textAlign: 'right', borderRadius: 8, border: '1px solid var(--glass-hairline)', background: 'transparent', color: 'var(--text-2)' }} />
                         <span className="muted" style={{ fontSize: 10 }}>%</span>

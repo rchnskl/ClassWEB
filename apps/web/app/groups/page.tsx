@@ -7,6 +7,7 @@ import Topbar from '@/components/Topbar';
 import StudentPicker, { type StudentHit } from '@/components/StudentPicker';
 import { apiFetch, type MeResponse, type Paginated } from '@/lib/api';
 import { useI18n } from '@/lib/i18n';
+import { useStoredUser } from '@/lib/local-store';
 
 interface ProgramRef { id: string; code: string; nameEn: string }
 interface GroupRow {
@@ -29,7 +30,7 @@ export default function GroupsPage() {
   const { t, lang } = useI18n();
   const name = (en: string, th: string | null) => (lang === 'th' && th ? th : en);
 
-  const [email, setEmail] = useState('');
+  const email = useStoredUser()?.email ?? '';
   const [isAdmin, setIsAdmin] = useState(false);
   const [programs, setPrograms] = useState<ProgramRef[]>([]);
   const [rows, setRows] = useState<GroupRow[]>([]);
@@ -65,8 +66,6 @@ export default function GroupsPage() {
 
   useEffect(() => {
     if (!localStorage.getItem('accessToken')) { router.replace('/login'); return; }
-    const u = localStorage.getItem('user');
-    if (u) { try { setEmail(JSON.parse(u).email); } catch {} }
     apiFetch<MeResponse>('/users/me')
       .then((me) => setIsAdmin(me.roles.some((r) => r.role.code === 'ADMIN')))
       .catch(() => {});
@@ -75,6 +74,7 @@ export default function GroupsPage() {
       .catch(() => {});
   }, [router]);
 
+  // eslint-disable-next-line react-hooks/set-state-in-effect -- fetches from the API on mount / when its inputs change; state is set as the request starts and settles
   useEffect(() => { void load(); }, [load]);
 
   async function openDetail(id: string) {

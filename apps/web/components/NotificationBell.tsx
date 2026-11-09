@@ -30,6 +30,7 @@ export default function NotificationBell() {
   }, []);
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- fetches from the API on mount / when its inputs change; state is set as the request starts and settles
     void load();
     const id = setInterval(() => {
       apiFetch<{ unread: number }>('/notifications/unread-count').then((d) => setUnread(d.unread)).catch(() => {});

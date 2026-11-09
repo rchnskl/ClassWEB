@@ -7,6 +7,7 @@ import Topbar from '@/components/Topbar';
 import PdfPreviewModal from '@/components/PdfPreviewModal';
 import { apiFetch, downloadFile, fetchPreviewUrl } from '@/lib/api';
 import { useI18n } from '@/lib/i18n';
+import { useStoredUser } from '@/lib/local-store';
 
 interface StudentRow {
   studentId: string; studentCode: string; nameEn: string; nameTh: string | null; program: string;
@@ -29,7 +30,7 @@ const TIER_COLOR: Record<string, string> = {
 export default function ReportsPage() {
   const router = useRouter();
   const { t, lang } = useI18n();
-  const [email, setEmail] = useState('');
+  const email = useStoredUser()?.email ?? '';
   const [data, setData] = useState<Overview | null>(null);
   const [loading, setLoading] = useState(true);
   const [exporting, setExporting] = useState<string | null>(null);
@@ -56,8 +57,6 @@ export default function ReportsPage() {
 
   useEffect(() => {
     if (!localStorage.getItem('accessToken')) { router.replace('/login'); return; }
-    const u = localStorage.getItem('user');
-    if (u) { try { setEmail(JSON.parse(u).email); } catch {} }
     apiFetch<Overview>('/analytics/overview').then(setData).catch(() => {}).finally(() => setLoading(false));
   }, [router]);
 

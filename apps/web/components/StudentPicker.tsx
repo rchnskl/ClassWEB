@@ -44,6 +44,7 @@ export default function StudentPicker({
   // so don't spend a request on it.
   useEffect(() => {
     const term = q.trim();
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- shows the spinner / clears stale hits as the debounced lookup starts
     if (term.length < 2) { setHits([]); setLoading(false); return; }
     setLoading(true);
     const timer = setTimeout(async () => {

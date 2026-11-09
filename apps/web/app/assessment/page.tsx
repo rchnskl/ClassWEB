@@ -9,6 +9,7 @@ import RubricBuilderDrawer from '@/components/RubricBuilderDrawer';
 import PdfPreviewModal from '@/components/PdfPreviewModal';
 import { apiFetch, downloadFile, fetchPreviewUrl } from '@/lib/api';
 import { useI18n } from '@/lib/i18n';
+import { useStoredUser } from '@/lib/local-store';
 
 interface SectionRef { id: string; sectionNo: string; subject: { id: string; code: string; nameEn: string } }
 interface Row { studentId: string; studentCode: string; nameEn: string; nameTh: string | null; total: number; gradedWeight: number; gradedCount: number; isComplete?: boolean; grade: string | null; gpa: number | null; hasCriticalFail?: boolean }
@@ -24,7 +25,7 @@ export default function AssessmentPage() {
   const { t, lang } = useI18n();
   const name = (en: string, th: string | null) => (lang === 'th' && th ? th : en);
 
-  const [email, setEmail] = useState('');
+  const email = useStoredUser()?.email ?? '';
   const [sections, setSections] = useState<SectionRef[]>([]);
   const [sectionId, setSectionId] = useState('');
   const [rubrics, setRubrics] = useState<Rubric[]>([]);
@@ -79,8 +80,6 @@ export default function AssessmentPage() {
 
   useEffect(() => {
     if (!localStorage.getItem('accessToken')) { router.replace('/login'); return; }
-    const u = localStorage.getItem('user');
-    if (u) { try { setEmail(JSON.parse(u).email); } catch {} }
     apiFetch<{ items: SectionRef[] }>('/sections').then((d) => {
       setSections(d.items);
       if (d.items[0]) {

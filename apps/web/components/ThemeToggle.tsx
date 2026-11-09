@@ -1,31 +1,35 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useSyncExternalStore } from 'react';
 import { IconMoon, IconSun } from './icons';
+import { useLocalStorage, writeLocalStorage } from '@/lib/local-store';
 
 type Theme = 'light' | 'dark';
 
 export function applyTheme(theme: Theme) {
   document.documentElement.setAttribute('data-theme', theme);
-  localStorage.setItem('theme', theme);
+  writeLocalStorage('theme', theme);
+}
+
+const DARK_QUERY = '(prefers-color-scheme: dark)';
+
+function subscribeToScheme(onChange: () => void) {
+  const mq = window.matchMedia(DARK_QUERY);
+  mq.addEventListener('change', onChange);
+  return () => mq.removeEventListener('change', onChange);
 }
 
 export default function ThemeToggle() {
-  const [theme, setTheme] = useState<Theme>('light');
+  const stored = useLocalStorage('theme');
+  const prefersDark = useSyncExternalStore(subscribeToScheme, () => window.matchMedia(DARK_QUERY).matches, () => false);
+  // An explicit choice wins; otherwise follow the OS setting.
+  const theme: Theme = stored === 'dark' || stored === 'light' ? stored : prefersDark ? 'dark' : 'light';
 
   useEffect(() => {
-    const stored = (localStorage.getItem('theme') as Theme | null) ?? null;
-    const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
-    const initial: Theme = stored ?? (prefersDark ? 'dark' : 'light');
-    setTheme(initial);
-    document.documentElement.setAttribute('data-theme', initial);
-  }, []);
+    document.documentElement.setAttribute('data-theme', theme);
+  }, [theme]);
 
-  const toggle = () => {
-    const next: Theme = theme === 'dark' ? 'light' : 'dark';
-    setTheme(next);
-    applyTheme(next);
-  };
+  const toggle = () => applyTheme(theme === 'dark' ? 'light' : 'dark');
 
   return (
     <button
