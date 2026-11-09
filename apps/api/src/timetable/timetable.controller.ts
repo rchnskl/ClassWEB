@@ -1,7 +1,7 @@
 import { Body, Controller, Get, Post, Query } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { TimetableService } from './timetable.service';
-import { CreateScheduleDto, GenerateSessionsDto, TimetableQueryDto } from './dto/timetable.dto';
+import { CreateDatedSessionsDto, CreateScheduleDto, GenerateSessionsDto, TimetableQueryDto } from './dto/timetable.dto';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { Permissions } from '../common/decorators/permissions.decorator';
 import { AuthenticatedUser } from '../common/authenticated-user';
@@ -31,6 +31,13 @@ export class TimetableController {
   @ApiOperation({ summary: 'Expand a section schedule into concrete class sessions' })
   generate(@CurrentUser() user: AuthenticatedUser, @Body() dto: GenerateSessionsDto) {
     return this.timetable.generateSessions(user, dto);
+  }
+
+  @Post('sessions')
+  @Permissions('timetable:create')
+  @ApiOperation({ summary: 'Create class sessions on specific dates (e.g. clinical practicum days); room/teacher clash-checked per day' })
+  createSessions(@CurrentUser() user: AuthenticatedUser, @Body() dto: CreateDatedSessionsDto) {
+    return this.timetable.createDatedSessions(user, dto);
   }
 
   @Get('sessions')

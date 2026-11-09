@@ -3,7 +3,7 @@ import { DayOfWeek, Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuthenticatedUser } from '../common/authenticated-user';
 import { LecturerScopeService } from '../common/lecturer-scope.service';
-import { CreateScheduleDto, GenerateSessionsDto } from './dto/timetable.dto';
+import { CreateDatedSessionsDto, CreateScheduleDto, GenerateSessionsDto } from './dto/timetable.dto';
 
 const JS_DAY_TO_ENUM: DayOfWeek[] = [
   DayOfWeek.SUNDAY, DayOfWeek.MONDAY, DayOfWeek.TUESDAY, DayOfWeek.WEDNESDAY,
@@ -182,6 +182,71 @@ export class TimetableService {
     return { sectionId: section.id, generated: result.count, totalPlanned: rows.length };
   }
 
+  /**
+   * Create class sessions on specific dates. Each date is checked against the
+   * semester and against other sessions that day for the same room or
+   * lecturer; re-sending a date that already has a session at that start time
+   * is a no-op.
+   */
+  async createDatedSessions(user: AuthenticatedUser, dto: CreateDatedSessionsDto) {
+    const universityId = user.universityId;
+    if (toMinutes(dto.startTime) >= toMinutes(dto.endTime)) {
+      throw new BadRequestException('startTime must be before endTime');
+    }
+    const section = await this.prisma.section.findFirst({
+      where: { id: dto.sectionId, universityId, deletedAt: null },
+      select: { id: true, roomId: true, lecturerId: true, semester: { select: { startDate: true, endDate: true } } },
+    });
+    if (!section) throw new BadRequestException('Section does not exist in this tenant');
+    await this.lecturerScope.assertTeachesOrManages(user, section.id);
+
+    const roomId = dto.roomId ?? section.roomId;
+    const lecturerId = dto.lecturerId ?? section.lecturerId;
+    if (roomId && !(await this.prisma.room.findFirst({ where: { id: roomId, building: { campus: { universityId } } }, select: { id: true } }))) {
+      throw new BadRequestException('Room does not exist in this tenant');
+    }
+    if (lecturerId && !(await this.prisma.lecturer.findFirst({ where: { id: lecturerId, universityId }, select: { id: true } }))) {
+      throw new BadRequestException('Lecturer does not exist in this tenant');
+    }
+
+    const dates = [...new Set(dto.dates)].sort().map((d) => new Date(`${d}T00:00:00.000Z`));
+    for (const d of dates) {
+      if (Number.isNaN(d.getTime())) throw new BadRequestException('Invalid date');
+      if (d < section.semester.startDate || d > section.semester.endDate) {
+        throw new BadRequestException(`${d.toISOString().slice(0, 10)} is outside the section's semester`);
+      }
+    }
+
+    // Same-day clashes with any other section's session in this room or with this lecturer.
+    if (roomId || lecturerId) {
+      const clashes = await this.prisma.classSession.findMany({
+        where: {
+          sessionDate: { in: dates },
+          sectionId: { not: section.id },
+          status: { not: 'CANCELLED' },
+          section: { universityId, deletedAt: null },
+          OR: [...(roomId ? [{ roomId }] : []), ...(lecturerId ? [{ lecturerId }] : [])],
+        },
+        select: { sessionDate: true, startTime: true, endTime: true, roomId: true, lecturerId: true },
+      });
+      for (const c of clashes) {
+        if (!overlaps(dto.startTime, dto.endTime, c.startTime, c.endTime)) continue;
+        const day = c.sessionDate.toISOString().slice(0, 10);
+        if (roomId && c.roomId === roomId) throw new ConflictException(`Room conflict on ${day}: already booked ${c.startTime}–${c.endTime}`);
+        throw new ConflictException(`Teacher conflict on ${day}: lecturer already teaches ${c.startTime}–${c.endTime}`);
+      }
+    }
+
+    const result = await this.prisma.classSession.createMany({
+      data: dates.map((d) => ({
+        sectionId: section.id, sessionDate: d, startTime: dto.startTime, endTime: dto.endTime,
+        roomId, lecturerId, topic: dto.topic ?? null,
+      })),
+      skipDuplicates: true,
+    });
+    return { sectionId: section.id, created: result.count, requested: dates.length };
+  }
+
   async sessions(user: AuthenticatedUser, sectionId?: string, date?: string) {
     const universityId = user.universityId;
     if (sectionId) {
@@ -202,7 +267,7 @@ export class TimetableService {
     const items = await this.prisma.classSession.findMany({
       where,
       select: {
-        id: true, sessionDate: true, startTime: true, endTime: true, status: true,
+        id: true, sessionDate: true, startTime: true, endTime: true, status: true, topic: true,
         section: { select: { sectionNo: true, subject: { select: { code: true, nameEn: true } } } },
         room: { select: { roomNumber: true } },
         lecturer: { select: { nameEn: true } },

@@ -1,5 +1,5 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { IsEnum, IsOptional, IsString, Matches } from 'class-validator';
+import { ArrayMaxSize, ArrayNotEmpty, IsArray, IsEnum, IsOptional, IsString, Matches, MaxLength } from 'class-validator';
 import { DayOfWeek } from '@prisma/client';
 
 const TIME = /^([01]\d|2[0-3]):[0-5]\d$/;
@@ -43,4 +43,49 @@ export class GenerateSessionsDto {
   @ApiProperty({ description: 'Section id whose schedule to expand into class sessions' })
   @IsString()
   sectionId!: string;
+}
+
+
+const DATE = /^\d{4}-\d{2}-\d{2}$/;
+
+/**
+ * Concrete sessions on chosen dates — for blocks that don't repeat weekly,
+ * such as clinical practicum days (10–12 and 17–19 Nov) or a one-off
+ * case-presentation day.
+ */
+export class CreateDatedSessionsDto {
+  @ApiProperty({ description: 'Section id' })
+  @IsString()
+  sectionId!: string;
+
+  @ApiProperty({ type: [String], example: ['2026-11-10', '2026-11-11'], description: 'Dates, YYYY-MM-DD' })
+  @IsArray()
+  @ArrayNotEmpty()
+  @ArrayMaxSize(60)
+  @Matches(DATE, { each: true, message: 'each date must be YYYY-MM-DD' })
+  dates!: string[];
+
+  @ApiProperty({ example: '07:00' })
+  @Matches(TIME, { message: 'startTime must be HH:mm' })
+  startTime!: string;
+
+  @ApiProperty({ example: '16:00' })
+  @Matches(TIME, { message: 'endTime must be HH:mm' })
+  endTime!: string;
+
+  @ApiPropertyOptional({ description: 'Room / ward id (defaults to the section room)' })
+  @IsOptional()
+  @IsString()
+  roomId?: string;
+
+  @ApiPropertyOptional({ description: 'Lecturer id (defaults to the section lecturer)' })
+  @IsOptional()
+  @IsString()
+  lecturerId?: string;
+
+  @ApiPropertyOptional({ example: 'Clinical practice', description: 'What happens in these sessions' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(200)
+  topic?: string;
 }
