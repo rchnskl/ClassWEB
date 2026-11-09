@@ -475,7 +475,7 @@ export class AssessmentService {
   private async sessionScores(universityId: string, rubricId: string, studentId: string, sectionId: string) {
     const [sessions, days] = await Promise.all([
       this.prisma.classSession.findMany({
-        where: { sectionId, status: { not: 'CANCELLED' } },
+        where: { sectionId, status: { not: 'CANCELLED' }, dailyAssessment: true },
         select: { id: true, sessionDate: true, startTime: true, endTime: true, topic: true },
         orderBy: [{ sessionDate: 'asc' }, { startTime: 'asc' }],
       }),
@@ -531,8 +531,9 @@ export class AssessmentService {
     }
     if (dto.classSessionId) {
       if (!dto.sectionId) throw new BadRequestException('A sectionId is required with a classSessionId');
-      const session = await this.prisma.classSession.findFirst({ where: { id: dto.classSessionId, sectionId: dto.sectionId }, select: { id: true } });
+      const session = await this.prisma.classSession.findFirst({ where: { id: dto.classSessionId, sectionId: dto.sectionId }, select: { id: true, dailyAssessment: true } });
       if (!session) throw new BadRequestException("That session doesn't belong to this section");
+      if (!session.dailyAssessment) throw new BadRequestException('That day is not a day for daily assessment');
     }
     const student = await this.prisma.student.findFirst({ where: { id: dto.studentId, universityId, deletedAt: null }, select: { id: true } });
     if (!student) throw new BadRequestException('Student does not exist in this tenant');

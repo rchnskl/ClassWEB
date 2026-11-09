@@ -702,6 +702,9 @@ model ClassSession {
   status           ClassSessionStatus @default(SCHEDULED)
   topic            String?
   isMakeup         Boolean            @default(false)
+  /// Offered as a day in per-session (daily) assessment. Off for days that are
+  /// not practice days, e.g. a case-presentation day.
+  dailyAssessment  Boolean            @default(true)
   /// When attendance capture closes (derived from AttendanceRule.lockAfterMinutes).
   attendanceLockAt DateTime?
   cancelReason     String?

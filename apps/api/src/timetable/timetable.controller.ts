@@ -1,7 +1,7 @@
-import { Body, Controller, Get, Post, Query } from '@nestjs/common';
+import { Body, Controller, Get, Param, Patch, Post, Query } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { TimetableService } from './timetable.service';
-import { CreateDatedSessionsDto, CreateScheduleDto, GenerateSessionsDto, TimetableQueryDto } from './dto/timetable.dto';
+import { CreateDatedSessionsDto, CreateScheduleDto, GenerateSessionsDto, TimetableQueryDto, UpdateSessionDto } from './dto/timetable.dto';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { Permissions } from '../common/decorators/permissions.decorator';
 import { AuthenticatedUser } from '../common/authenticated-user';
@@ -38,6 +38,13 @@ export class TimetableController {
   @ApiOperation({ summary: 'Create class sessions on specific dates (e.g. clinical practicum days); room/teacher clash-checked per day' })
   createSessions(@CurrentUser() user: AuthenticatedUser, @Body() dto: CreateDatedSessionsDto) {
     return this.timetable.createDatedSessions(user, dto);
+  }
+
+  @Patch('sessions/:id')
+  @Permissions('timetable:update')
+  @ApiOperation({ summary: "Edit a session's topic or whether it is a day for daily assessment" })
+  updateSession(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string, @Body() dto: UpdateSessionDto) {
+    return this.timetable.updateSession(user, id, dto);
   }
 
   @Get('sessions')

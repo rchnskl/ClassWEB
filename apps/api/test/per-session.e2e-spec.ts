@@ -89,4 +89,20 @@ describe('Per-session (daily) assessment', () => {
     const termRubric = await prisma.rubric.findFirstOrThrow({ where: { perSession: false } });
     await save({ rubricId: termRubric.id, studentId, sectionId, classSessionId: sessionIds[2], scores: [] }).expect(400);
   });
+
+  it('leaves a non-practice day (e.g. a presentation day) out of daily assessment', async () => {
+    const patch = (id: string, body: object) =>
+      http.patch(`/api/v1/timetable/sessions/${id}`).set('Authorization', `Bearer ${token}`).send(body);
+    // A day that already holds daily marks can't be taken out.
+    await patch(sessionIds[0], { dailyAssessment: false }).expect(409);
+
+    const res = await patch(sessionIds[2], { dailyAssessment: false, topic: 'Case presentation' }).expect(200);
+    expect(res.body).toMatchObject({ dailyAssessment: false, topic: 'Case presentation' });
+    await day(sessionIds[2], 5, 5).expect(400);
+
+    const form = await http.get('/api/v1/assessment/evaluation')
+      .query({ rubricId, studentId, sectionId })
+      .set('Authorization', `Bearer ${token}`).expect(200);
+    expect(form.body.sessions.map((s: { id: string }) => s.id)).toEqual(sessionIds.slice(0, 2).reverse());
+  });
 });

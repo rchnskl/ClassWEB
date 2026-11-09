@@ -1,9 +1,9 @@
-import { BadRequestException, ConflictException, Injectable } from '@nestjs/common';
+import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { DayOfWeek, Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuthenticatedUser } from '../common/authenticated-user';
 import { LecturerScopeService } from '../common/lecturer-scope.service';
-import { CreateDatedSessionsDto, CreateScheduleDto, GenerateSessionsDto } from './dto/timetable.dto';
+import { CreateDatedSessionsDto, CreateScheduleDto, GenerateSessionsDto, UpdateSessionDto } from './dto/timetable.dto';
 
 const JS_DAY_TO_ENUM: DayOfWeek[] = [
   DayOfWeek.SUNDAY, DayOfWeek.MONDAY, DayOfWeek.TUESDAY, DayOfWeek.WEDNESDAY,
@@ -240,7 +240,7 @@ export class TimetableService {
     const result = await this.prisma.classSession.createMany({
       data: dates.map((d) => ({
         sectionId: section.id, sessionDate: d, startTime: dto.startTime, endTime: dto.endTime,
-        roomId, lecturerId, topic: dto.topic ?? null,
+        roomId, lecturerId, topic: dto.topic ?? null, dailyAssessment: dto.dailyAssessment ?? true,
       })),
       skipDuplicates: true,
     });
@@ -267,7 +267,7 @@ export class TimetableService {
     const items = await this.prisma.classSession.findMany({
       where,
       select: {
-        id: true, sessionDate: true, startTime: true, endTime: true, status: true, topic: true,
+        id: true, sessionDate: true, startTime: true, endTime: true, status: true, topic: true, dailyAssessment: true,
         section: { select: { sectionNo: true, subject: { select: { code: true, nameEn: true } } } },
         room: { select: { roomNumber: true } },
         lecturer: { select: { nameEn: true } },
@@ -276,5 +276,33 @@ export class TimetableService {
       take: 200,
     });
     return { total: items.length, items };
+  }
+
+  /**
+   * Edit a session's topic, or whether it is offered as a day for daily
+   * assessment. A day that already holds daily marks can't be taken out of
+   * daily assessment — those marks feed the term score.
+   */
+  async updateSession(user: AuthenticatedUser, id: string, dto: UpdateSessionDto) {
+    const session = await this.prisma.classSession.findFirst({
+      where: { id, section: { universityId: user.universityId, deletedAt: null } },
+      select: { id: true, sectionId: true },
+    });
+    if (!session) throw new NotFoundException('Session not found');
+    await this.lecturerScope.assertTeachesOrManages(user, session.sectionId);
+    if (dto.dailyAssessment === false) {
+      const marked = await this.prisma.evaluation.count({ where: { classSessionId: id } });
+      if (marked > 0) {
+        throw new ConflictException(`This day already has ${marked} daily assessment(s); remove them before taking the day out of daily assessment`);
+      }
+    }
+    return this.prisma.classSession.update({
+      where: { id },
+      data: {
+        ...(dto.topic !== undefined && { topic: dto.topic }),
+        ...(dto.dailyAssessment !== undefined && { dailyAssessment: dto.dailyAssessment }),
+      },
+      select: { id: true, sessionDate: true, startTime: true, endTime: true, topic: true, dailyAssessment: true },
+    });
   }
 }

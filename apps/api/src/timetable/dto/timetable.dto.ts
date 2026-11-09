@@ -1,5 +1,5 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { ArrayMaxSize, ArrayNotEmpty, IsArray, IsEnum, IsOptional, IsString, Matches, MaxLength } from 'class-validator';
+import { ArrayMaxSize, ArrayNotEmpty, IsArray, IsBoolean, IsEnum, IsOptional, IsString, Matches, MaxLength } from 'class-validator';
 import { DayOfWeek } from '@prisma/client';
 
 const TIME = /^([01]\d|2[0-3]):[0-5]\d$/;
@@ -88,4 +88,22 @@ export class CreateDatedSessionsDto {
   @IsString()
   @MaxLength(200)
   topic?: string;
+
+  @ApiPropertyOptional({ default: true, description: 'Offer these days for per-session (daily) assessment; false for e.g. a presentation day' })
+  @IsOptional()
+  @IsBoolean()
+  dailyAssessment?: boolean;
+}
+
+export class UpdateSessionDto {
+  @ApiPropertyOptional({ example: 'Case presentation' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(200)
+  topic?: string;
+
+  @ApiPropertyOptional({ description: 'Offer this day for per-session (daily) assessment' })
+  @IsOptional()
+  @IsBoolean()
+  dailyAssessment?: boolean;
 }
