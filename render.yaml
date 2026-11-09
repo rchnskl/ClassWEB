@@ -41,7 +41,11 @@ services:
       - key: JWT_REFRESH_TTL
         value: 7d
       - key: TRUST_PROXY_HOPS
-        value: "1" # Render's edge proxy — lets rate limits and audit logs see the real client address
+        # Measured with GET /maintenance/client-ip: X-Forwarded-For arrives as
+        # "client, cloudflare-edge, render-internal" over a local proxy socket,
+        # so three hops are trusted to reach the real client address (and a
+        # client-supplied X-Forwarded-For entry, further left, is ignored).
+        value: "3"
       - key: CORS_ORIGINS
         sync: false # set to your Cloudflare Pages URL once it exists, e.g. https://classweb.pages.dev
       - key: WEB_BASE_URL
