@@ -1682,6 +1682,8 @@ model GradeBand {
   /// Minimum combined score (0–100) to earn this grade. Editable per use.
   minScore Float
   order    Int    @default(0)
+  /// Off for a grade this scheme doesn't award (e.g. D/F); it is then never assigned.
+  isActive Boolean @default(true)
 
   scheme GradeScheme @relation(fields: [schemeId], references: [id], onDelete: Cascade)
 

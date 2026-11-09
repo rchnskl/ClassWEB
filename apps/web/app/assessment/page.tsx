@@ -14,7 +14,7 @@ import { useStoredUser } from '@/lib/local-store';
 interface SectionRef { id: string; sectionNo: string; subject: { id: string; code: string; nameEn: string } }
 interface Row { studentId: string; studentCode: string; nameEn: string; nameTh: string | null; total: number; gradedWeight: number; gradedCount: number; isComplete?: boolean; grade: string | null; gpa: number | null; hasCriticalFail?: boolean }
 interface SectionSummary { section: { sectionNo: string; subject: { code: string; nameEn: string } }; rubricCount: number; students: Row[] }
-interface Band { id: string; grade: string; gpa: number; label: string; minScore: number }
+interface Band { id: string; grade: string; gpa: number; label: string; minScore: number; isActive: boolean }
 interface RubricConfigRow { rubricId: string; code: string; nameEn: string; nameTh: string | null; weightPercent: number; isActive: boolean }
 
 const GRADE_COLOR = (g: string | null) =>
@@ -112,7 +112,7 @@ export default function AssessmentPage() {
     setSavingScheme(true);
     setActionError(null);
     try {
-      await apiFetch('/assessment/grade-scheme', { method: 'PATCH', body: JSON.stringify({ bands: scheme.map((b) => ({ id: b.id, minScore: b.minScore })) }) });
+      await apiFetch('/assessment/grade-scheme', { method: 'PATCH', body: JSON.stringify({ bands: scheme.map((b) => ({ id: b.id, minScore: b.minScore, isActive: b.isActive })) }) });
       setShowScheme(false);
       await loadSummary(sectionId);
     } catch (err) {
@@ -279,12 +279,14 @@ export default function AssessmentPage() {
             <p className="muted" style={{ fontSize: 12, margin: '0 0 14px' }}>{t('as.schemeHint')}</p>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
               {scheme.map((b, i) => (
-                <div key={b.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 10px', borderRadius: 10, background: 'var(--popover-hover)' }}>
+                <div key={b.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 10px', borderRadius: 10, background: 'var(--popover-hover)', opacity: b.isActive ? 1 : 0.45 }}>
+                  <input type="checkbox" checked={b.isActive} aria-label={`${t('as.bandOn')} ${b.grade}`} title={t('as.bandOn')}
+                    onChange={(e) => { const on = e.target.checked; setScheme(scheme.map((x, xi) => xi === i ? { ...x, isActive: on } : x)); }} />
                   <span style={{ width: 34, fontWeight: 800, color: GRADE_COLOR(b.grade) }}>{b.grade}</span>
                   <span style={{ width: 40, fontFamily: 'ui-monospace, monospace', fontSize: 12.5 }}>{b.gpa.toFixed(2)}</span>
                   <span className="muted" style={{ flex: 1, fontSize: 12 }}>{b.label}</span>
                   <span className="muted" style={{ fontSize: 11.5 }}>≥</span>
-                  <input type="number" min={0} max={100} value={b.minScore}
+                  <input type="number" min={0} max={100} value={b.minScore} disabled={!b.isActive}
                     onChange={(e) => { const v = Number(e.target.value); setScheme(scheme.map((x, xi) => xi === i ? { ...x, minScore: v } : x)); }}
                     style={{ width: 64, padding: '6px 8px', fontSize: 13, textAlign: 'right', borderRadius: 8, border: '1px solid var(--glass-hairline)', background: 'transparent', color: 'var(--text-0)' }} />
                 </div>

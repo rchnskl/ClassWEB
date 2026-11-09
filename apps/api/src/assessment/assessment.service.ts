@@ -9,7 +9,7 @@ import { LecturerScopeService } from '../common/lecturer-scope.service';
 type WeightedItem = RubricItemInputDto & { weightPercent: number };
 type WeightedSection = Omit<RubricSectionInputDto, 'items'> & { weightPercent: number; items: WeightedItem[] };
 
-interface GradeBand { grade: string; gpa: number; label: string; minScore: number }
+interface GradeBand { grade: string; gpa: number; label: string; minScore: number; isActive: boolean }
 
 @Injectable()
 export class AssessmentService {
@@ -407,16 +407,28 @@ export class AssessmentService {
   async updateBands(universityId: string, dto: UpdateGradeBandsDto) {
     const scheme = await this.gradeScheme(universityId);
     const valid = new Set(scheme.bands.map((b) => b.id));
+    const sent = new Map(dto.bands.filter((b) => valid.has(b.id)).map((b) => [b.id, b]));
+    // A scheme must still award something, and something that every score
+    // reaches — otherwise a low total would end up with no grade at all.
+    const after = scheme.bands.map((b) => ({ minScore: sent.get(b.id)?.minScore ?? b.minScore, isActive: sent.get(b.id)?.isActive ?? b.isActive }));
+    const active = after.filter((b) => b.isActive);
+    if (active.length === 0) throw new BadRequestException('Keep at least one grade switched on');
+    if (Math.min(...active.map((b) => b.minScore)) > 0) {
+      throw new BadRequestException('The lowest grade switched on must start at 0, so every score gets a grade');
+    }
     await this.prisma.$transaction(
-      dto.bands.filter((b) => valid.has(b.id)).map((b) =>
-        this.prisma.gradeBand.update({ where: { id: b.id }, data: { minScore: b.minScore } }),
+      [...sent.values()].map((b) =>
+        this.prisma.gradeBand.update({
+          where: { id: b.id },
+          data: { minScore: b.minScore, ...(b.isActive !== undefined && { isActive: b.isActive }) },
+        }),
       ),
     );
     return this.gradeScheme(universityId);
   }
 
   private gradeFor(total: number, bands: GradeBand[]): GradeBand | null {
-    const sorted = [...bands].sort((a, b) => b.minScore - a.minScore);
+    const sorted = bands.filter((b) => b.isActive).sort((a, b) => b.minScore - a.minScore);
     return sorted.find((b) => total >= b.minScore) ?? sorted[sorted.length - 1] ?? null;
   }
 

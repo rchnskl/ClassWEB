@@ -100,6 +100,7 @@ export class UpdateRubricWeightsDto {
 class BandDto {
   @IsString() id!: string;
   @Type(() => Number) @IsNumber() @Min(0) @Max(100) minScore!: number;
+  @IsOptional() @IsBoolean() isActive?: boolean;
 }
 
 export class UpdateGradeBandsDto {

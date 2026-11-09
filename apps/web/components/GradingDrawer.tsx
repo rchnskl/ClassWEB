@@ -109,6 +109,27 @@ export default function GradingDrawer({
   const dayId = perSession && chosenDay?.rubricId === activeId ? chosenDay.sessionId : null;
   const [days, setDays] = useState<SessionDay[]>([]);
   const [reloadKey, setReloadKey] = useState(0);
+  // "Manage days": every session of the section, so a day that isn't a
+  // practice day (a presentation day) can be taken out of daily assessment.
+  const [allDays, setAllDays] = useState<{ id: string; sessionDate: string; topic: string | null; dailyAssessment: boolean }[] | null>(null);
+  const [dayBusy, setDayBusy] = useState<string | null>(null);
+  async function openManageDays() {
+    if (allDays) { setAllDays(null); return; }
+    try {
+      const r = await apiFetch<{ items: { id: string; sessionDate: string; topic: string | null; dailyAssessment: boolean }[] }>(`/timetable/sessions?sectionId=${sectionId}`);
+      setAllDays(r.items);
+    } catch (err) { setError(err instanceof Error ? err.message : String(err)); }
+  }
+  async function toggleDaily(id: string, on: boolean) {
+    setDayBusy(id); setError(null);
+    try {
+      await apiFetch(`/timetable/sessions/${id}`, { method: 'PATCH', body: JSON.stringify({ dailyAssessment: on }) });
+      setAllDays((cur) => cur?.map((d) => (d.id === id ? { ...d, dailyAssessment: on } : d)) ?? null);
+      if (!on && dayId === id) setChosenDay(null);
+      setReloadKey((k) => k + 1);
+    } catch (err) { setError(err instanceof Error ? err.message : String(err)); }
+    finally { setDayBusy(null); }
+  }
 
   const loadSummary = useCallback(async () => {
     try {
@@ -236,15 +257,34 @@ export default function GradingDrawer({
 
             {active && perSession && (
               <div className="glass hairline" style={{ padding: 12, borderRadius: 12, marginBottom: 14 }}>
-                <div style={{ fontSize: 12.5, fontWeight: 650, marginBottom: 8 }}>
-                  {t('as.day')}
+                <div style={{ fontSize: 12.5, fontWeight: 650, marginBottom: 8, display: 'flex', alignItems: 'baseline', gap: 0 }}>
+                  <span style={{ flex: 1 }}>{t('as.day')}
                   {(() => {
                     const done = days.filter((d) => d.scorePercent != null);
                     if (done.length === 0) return null;
                     const avg = Math.round((done.reduce((a, d) => a + (d.scorePercent ?? 0), 0) / done.length) * 100) / 100;
                     return <span className="muted" style={{ fontWeight: 500, marginLeft: 8 }}>· {t('as.dayAverage')} {avg} ({done.length}/{days.length})</span>;
                   })()}
+                  </span>
+                  <button onClick={openManageDays} className="muted" style={{ background: 'none', border: 'none', padding: 0, fontSize: 12, fontWeight: 600, cursor: 'pointer', textDecoration: 'underline' }}>
+                    {allDays ? t('as.dayManageDone') : t('as.dayManage')}
+                  </button>
                 </div>
+                {allDays && (
+                  <div style={{ marginBottom: 10, padding: 10, borderRadius: 10, background: 'var(--popover-hover)' }}>
+                    <div className="muted" style={{ fontSize: 11.5, marginBottom: 6 }}>{t('as.dayManageHint')}</div>
+                    {allDays.map((d) => (
+                      <label key={d.id} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12.5, padding: '3px 0', cursor: 'pointer' }}>
+                        <input type="checkbox" checked={d.dailyAssessment} disabled={dayBusy === d.id}
+                          onChange={(e) => void toggleDaily(d.id, e.target.checked)} />
+                        <span style={{ fontWeight: 600, minWidth: 64 }}>
+                          {new Date(d.sessionDate).toLocaleDateString(lang === 'th' ? 'th-TH' : 'en-GB', { day: 'numeric', month: 'short', timeZone: 'UTC' })}
+                        </span>
+                        {d.topic && <span className="muted">{d.topic}</span>}
+                      </label>
+                    ))}
+                  </div>
+                )}
                 {days.length === 0 ? (
                   <div className="muted" style={{ fontSize: 12.5 }}>{t('as.dayNone')}</div>
                 ) : (

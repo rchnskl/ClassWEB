@@ -261,11 +261,11 @@ describe('AssessmentService (pure scoring logic)', () => {
   describe('gradeFor', () => {
     // Mirrors the faculty's real A–F scale from the seed data.
     const bands = [
-      { grade: 'A', gpa: 4.0, label: 'Excellent', minScore: 80 },
-      { grade: 'B+', gpa: 3.25, label: 'Very Good', minScore: 75 },
-      { grade: 'B', gpa: 3.0, label: 'Good', minScore: 70 },
-      { grade: 'C', gpa: 2.0, label: 'Satisfactory', minScore: 60 },
-      { grade: 'F', gpa: 0.0, label: 'Failure', minScore: 0 },
+      { grade: 'A', gpa: 4.0, label: 'Excellent', minScore: 80, isActive: true },
+      { grade: 'B+', gpa: 3.25, label: 'Very Good', minScore: 75, isActive: true },
+      { grade: 'B', gpa: 3.0, label: 'Good', minScore: 70, isActive: true },
+      { grade: 'C', gpa: 2.0, label: 'Satisfactory', minScore: 60, isActive: true },
+      { grade: 'F', gpa: 0.0, label: 'Failure', minScore: 0, isActive: true },
     ];
 
     it('picks the highest band the score clears', () => {
@@ -289,6 +289,12 @@ describe('AssessmentService (pure scoring logic)', () => {
 
     it('never returns null when at least one band exists', () => {
       expect(service.gradeFor(-100, bands)).not.toBeNull();
+    });
+
+    it('never assigns a band that is switched off', () => {
+      const noF = bands.map((b) => (b.grade === 'F' ? { ...b, isActive: false } : b.grade === 'C' ? { ...b, minScore: 0 } : b));
+      expect(service.gradeFor(10, noF).grade).toBe('C');
+      expect(service.gradeFor(-100, noF).grade).toBe('C');
     });
   });
 });
