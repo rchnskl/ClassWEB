@@ -26,7 +26,9 @@ test.describe('Login', () => {
     await page.getByRole('button', { name: 'เข้าสู่ระบบ' }).click();
 
     await expect(page).toHaveURL(/\/dashboard/);
-    await expect(page.getByText('admin@nursing.au.edu')).toBeVisible();
+    // The email shows twice on the dashboard (account button + "signed in as"
+    // line); assert on the account button so the match is unambiguous.
+    await expect(page.getByRole('button', { name: /admin@nursing\.au\.edu/ })).toBeVisible();
   });
 
   test('logout returns to the login page and blocks a back-navigation to authed pages', async ({ page }) => {

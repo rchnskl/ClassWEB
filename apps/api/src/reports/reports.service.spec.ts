@@ -1,3 +1,4 @@
+import { writeFileSync } from 'node:fs';
 import ExcelJS from 'exceljs';
 import { ReportsService } from './reports.service';
 import { AuthenticatedUser } from '../common/authenticated-user';
@@ -165,7 +166,7 @@ describe('ReportsService — section grade sheet', () => {
 
   it('fits a small class on one page', async () => {
     const { buffer } = await service.sectionGradesPdf(user, 'sec1', 'u1', 'A. Rachanon Sakol');
-    if (process.env.DUMP_SECTION_PDF) require('fs').writeFileSync(process.env.DUMP_SECTION_PDF, buffer);
+    if (process.env.DUMP_SECTION_PDF) writeFileSync(process.env.DUMP_SECTION_PDF, buffer);
     expect(buffer.subarray(0, 5).toString()).toBe('%PDF-');
     // Two students and two rubrics have no business spilling onto a second
     // sheet — the legend and signature used to force two.
