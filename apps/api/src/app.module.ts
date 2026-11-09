@@ -1,7 +1,8 @@
 import { Module } from '@nestjs/common';
-import { ConfigModule } from '@nestjs/config';
+import { ConfigModule, ConfigService } from '@nestjs/config';
 import { APP_FILTER, APP_GUARD, APP_INTERCEPTOR } from '@nestjs/core';
-import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
+import { ThrottlerModule } from '@nestjs/throttler';
+import { ClientThrottlerGuard } from './common/guards/client-throttler.guard';
 import { ScheduleModule } from '@nestjs/schedule';
 import configuration from './config/configuration';
 import { validateEnv } from './config/env.validation';
@@ -45,7 +46,16 @@ import { AllExceptionsFilter } from './common/filters/all-exceptions.filter';
       load: [configuration],
       validate: validateEnv,
     }),
-    ThrottlerModule.forRoot([{ ttl: 60_000, limit: 100 }]),
+    // Per-person allowance (see ClientThrottlerGuard for how a person is keyed).
+    ThrottlerModule.forRootAsync({
+      inject: [ConfigService],
+      useFactory: (config: ConfigService) => [
+        {
+          ttl: config.get<number>('throttle.ttlSeconds')! * 1000,
+          limit: config.get<number>('throttle.limit')!,
+        },
+      ],
+    }),
     ScheduleModule.forRoot(),
     PrismaModule,
     LecturerScopeModule,
@@ -77,9 +87,12 @@ import { AllExceptionsFilter } from './common/filters/all-exceptions.filter';
     MaintenanceModule,
   ],
   providers: [
-    // Order matters: rate-limit → authenticate → authorize.
-    { provide: APP_GUARD, useClass: ThrottlerGuard },
+    // Order matters: authenticate → rate-limit → authorize. Rate-limiting after
+    // authentication lets the limiter count per signed-in user instead of per
+    // network address; a forged token fails the signature check before any DB
+    // work, so nothing expensive runs ahead of the limiter.
     { provide: APP_GUARD, useClass: JwtAuthGuard },
+    { provide: APP_GUARD, useClass: ClientThrottlerGuard },
     { provide: APP_GUARD, useClass: PermissionsGuard },
     { provide: APP_INTERCEPTOR, useClass: AuditInterceptor },
     { provide: APP_FILTER, useClass: AllExceptionsFilter },

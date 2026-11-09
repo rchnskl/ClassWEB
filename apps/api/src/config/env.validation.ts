@@ -1,5 +1,5 @@
 import { plainToInstance } from 'class-transformer';
-import { IsIn, IsNotEmpty, IsOptional, IsString, MinLength, validateSync } from 'class-validator';
+import { IsIn, IsNotEmpty, IsOptional, IsString, Matches, MinLength, validateSync } from 'class-validator';
 
 /**
  * Fail-fast environment validation. The app refuses to boot with a missing or
@@ -29,6 +29,9 @@ class EnvironmentVariables {
 
   @IsOptional() @IsString()
   CORS_ORIGINS?: string;
+
+  @IsOptional() @Matches(/^\d+$/, { message: 'TRUST_PROXY_HOPS must be a whole number' })
+  TRUST_PROXY_HOPS?: string;
 }
 
 export function validateEnv(config: Record<string, unknown>) {

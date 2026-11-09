@@ -2,14 +2,21 @@ import 'reflect-metadata';
 import { Logger, ValidationPipe, VersioningType } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { NestFactory } from '@nestjs/core';
+import type { NestExpressApplication } from '@nestjs/platform-express';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import helmet from 'helmet';
 import { AppModule } from './app.module';
 
 async function bootstrap(): Promise<void> {
-  const app = await NestFactory.create(AppModule);
+  const app = await NestFactory.create<NestExpressApplication>(AppModule);
   const config = app.get(ConfigService);
   const logger = new Logger('Bootstrap');
+
+  // Behind a reverse proxy, take the client address from X-Forwarded-For — but
+  // only as many hops as there really are proxies, so a client can't spoof its
+  // address by sending its own header. Rate limits and audit logs rely on it.
+  const trustProxyHops = config.get<number>('trustProxyHops')!;
+  if (trustProxyHops > 0) app.set('trust proxy', trustProxyHops);
 
   // Security headers.
   app.use(helmet());
