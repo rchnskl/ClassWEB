@@ -35,37 +35,34 @@ export class AttendanceService {
   }
 
   /**
-   * Auto-open/close window: capture is available from 30 minutes before the
-   * session's scheduled start through 45 minutes after it, with no lecturer
-   * action required. The lecturer's manual open()/close() still overrides
-   * this at any time — this only fills the gap when nobody has touched the
-   * toggle. Computed at request time; no cron/scheduler needed since the
-   * window is derived straight from ClassSession.sessionDate/startTime.
+   * Auto-open window: on the session's own day (Bangkok time) check-in is
+   * open and waiting from midnight, with no lecturer action needed, and it
+   * stays open until the lecturer closes it — or the day ends. Lateness is
+   * still judged against the scheduled start by the attendance rule.
+   * Computed at request time; no scheduler needed.
    */
-  private autoWindowBounds(start: Date): { opensAt: Date; closesAt: Date } {
-    return {
-      opensAt: new Date(start.getTime() - 30 * 60_000),
-      closesAt: new Date(start.getTime() + 45 * 60_000),
-    };
+  private autoWindowBounds(sessionDate: Date): { opensAt: Date; closesAt: Date } {
+    const day = this.sessionStart(sessionDate, '00:00');
+    return { opensAt: day, closesAt: new Date(day.getTime() + 24 * 60 * 60_000) };
   }
 
   /**
    * Returns the currently-open AttendanceSession, auto-creating one if we're
-   * inside the auto-window and no manual window is already open. A window
-   * created this way has `openedById: null` so it's distinguishable from an
-   * explicit lecturer open() (which gets a generous fixed 3h expiry instead
-   * of the 45-minute auto-close).
+   * inside the session's day and nothing is open. A window created this way
+   * has `openedById: null`. Once the lecturer has closed check-in it stays
+   * closed: the auto-window never reopens it (they can still reopen it).
    */
-  private async ensureOpenWindow(classSessionId: string, sessionDate: Date, startTime: string) {
+  private async ensureOpenWindow(classSessionId: string, sessionDate: Date) {
     const existing = await this.prisma.attendanceSession.findFirst({
       where: { classSessionId, isOpen: true, expiresAt: { gt: new Date() } },
     });
     if (existing) return existing;
 
-    const start = this.sessionStart(sessionDate, startTime);
     const now = new Date();
-    const { opensAt, closesAt } = this.autoWindowBounds(start);
+    const { opensAt, closesAt } = this.autoWindowBounds(sessionDate);
     if (now < opensAt || now > closesAt) return null;
+    const closedByLecturer = await this.prisma.attendanceSession.count({ where: { classSessionId, closedAt: { not: null } } });
+    if (closedByLecturer > 0) return null;
 
     const token = randomBytes(12).toString('hex');
     return this.prisma.attendanceSession.create({
@@ -121,7 +118,9 @@ export class AttendanceService {
     if (existing) return { token: existing.token, expiresAt: existing.expiresAt, sessionId: existing.id };
 
     const token = randomBytes(12).toString('hex');
-    const expiresAt = new Date(Date.now() + 3 * 60 * 60 * 1000); // 3h window
+    // Open until the lecturer closes it: to the end of the session's day, or
+    // 3 hours from now if that is later (reopening late in the evening).
+    const expiresAt = new Date(Math.max(this.autoWindowBounds(session.sessionDate).closesAt.getTime(), Date.now() + 3 * 60 * 60 * 1000));
     const created = await this.prisma.attendanceSession.create({
       data: { classSessionId, token, openedById: userId, expiresAt },
     });
@@ -147,7 +146,7 @@ export class AttendanceService {
     const universityId = user.universityId;
     const session = await this.loadSession(universityId, classSessionId);
     await this.lecturerScope.assertTeachesOrManages(user, session.section.id);
-    const openWindow = await this.ensureOpenWindow(classSessionId, session.sessionDate, session.startTime);
+    const openWindow = await this.ensureOpenWindow(classSessionId, session.sessionDate);
 
     const enrollments = await this.prisma.enrollment.findMany({
       where: { sectionId: session.section.id, status: 'ENROLLED' },
