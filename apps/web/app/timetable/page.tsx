@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Sidebar from '@/components/Sidebar';
 import Topbar from '@/components/Topbar';
+import { todayBangkok } from '@/lib/dates';
 import { apiFetch, type MeResponse } from '@/lib/api';
 import { useI18n } from '@/lib/i18n';
 
@@ -73,7 +74,7 @@ export default function TimetablePage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const today0 = new Date().toISOString().slice(0, 10);
+  const today0 = todayBangkok();
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState({ type: 'PERSONAL', title: '', location: '', startDate: today0, startTime: '13:00', endDate: today0, endTime: '14:00' });
   const [saving, setSaving] = useState(false);

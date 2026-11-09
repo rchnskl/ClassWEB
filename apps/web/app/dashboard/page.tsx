@@ -7,6 +7,7 @@ import Topbar from '@/components/Topbar';
 import StatCard from '@/components/StatCard';
 import { IconStudents, IconBook, IconCheck, IconCalendar, IconReport } from '@/components/icons';
 import { ClockWidget, EnvironmentWidgets } from '@/components/DashboardWidgets';
+import { todayBangkok } from '@/lib/dates';
 import { apiFetch, type DashboardSummary, type MeResponse } from '@/lib/api';
 import { useI18n } from '@/lib/i18n';
 
@@ -34,7 +35,7 @@ export default function DashboardPage() {
       router.replace('/login');
       return;
     }
-    const today = new Date().toISOString().slice(0, 10);
+    const today = todayBangkok();
     const dayStart = `${today}T00:00:00+07:00`;
     const dayEnd = `${today}T23:59:59+07:00`;
     (async () => {

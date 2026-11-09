@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { QRCodeSVG } from 'qrcode.react';
 import Sidebar from '@/components/Sidebar';
 import Topbar from '@/components/Topbar';
+import { todayBangkok } from '@/lib/dates';
 import { apiFetch } from '@/lib/api';
 import { useI18n } from '@/lib/i18n';
 import { useStoredUser, useWindowOrigin } from '@/lib/local-store';
@@ -41,7 +42,7 @@ export default function AttendancePage() {
   const [markingId, setMarkingId] = useState<string | null>(null);
   const [resolvingId, setResolvingId] = useState<string | null>(null);
 
-  const today = new Date().toISOString().slice(0, 10);
+  const today = todayBangkok();
 
   const loadState = useCallback(async (id: string) => {
     try { setState(await apiFetch<State>(`/attendance/sessions/${id}`)); } catch { /* ignore */ }

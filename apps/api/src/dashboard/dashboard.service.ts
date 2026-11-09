@@ -33,10 +33,12 @@ export class DashboardService {
 
   async summary(user: AuthenticatedUser): Promise<DashboardSummary> {
     const universityId = user.universityId;
-    const startOfDay = new Date();
-    startOfDay.setHours(0, 0, 0, 0);
-    const endOfDay = new Date(startOfDay);
-    endOfDay.setDate(endOfDay.getDate() + 1);
+    // Session dates are calendar days stored as UTC midnight; "today" is the
+    // Bangkok calendar day — the server runs on UTC, which is still yesterday
+    // until 07:00 in Thailand.
+    const todayYmd = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Bangkok', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
+    const startOfDay = new Date(`${todayYmd}T00:00:00Z`);
+    const endOfDay = new Date(startOfDay.getTime() + 86_400_000);
 
     const isAdmin = this.lecturerScope.isAdmin(user);
     // null = no restriction (admin). A course manager's scope includes every
