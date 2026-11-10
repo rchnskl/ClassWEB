@@ -253,7 +253,7 @@ export default function GradingDrawer({
                       background: r.id === activeId ? 'var(--popover-hover)' : 'transparent', color: 'var(--text-0)' }}>
                     {name(r.nameEn, r.nameTh)} · {r.weightPercent}%
                     {row?.criticalFailed ? <span style={{ color: 'var(--danger)', marginLeft: 6 }}>✕ {t('as.criticalFail')}</span>
-                      : row?.graded && <span style={{ color: 'var(--success)', marginLeft: 6 }}>✓{row.scorePercent}</span>}
+                      : row?.graded && <span style={{ color: 'var(--success)', marginLeft: 6 }}>✓{r.perSession ? `${t('as.dayAverage')} ` : ''}{row.scorePercent}%</span>}
                   </button>
                 );
               })}
@@ -262,18 +262,28 @@ export default function GradingDrawer({
             {active && perSession && (
               <div className="glass hairline" style={{ padding: 12, borderRadius: 12, marginBottom: 14 }}>
                 <div style={{ fontSize: 12.5, fontWeight: 650, marginBottom: 8, display: 'flex', alignItems: 'baseline', gap: 0 }}>
-                  <span style={{ flex: 1 }}>{t('as.day')}
-                  {(() => {
-                    const done = days.filter((d) => d.scorePercent != null);
-                    if (done.length === 0) return null;
-                    const avg = Math.round((done.reduce((a, d) => a + (d.scorePercent ?? 0), 0) / done.length) * 100) / 100;
-                    return <span className="muted" style={{ fontWeight: 500, marginLeft: 8 }}>· {t('as.dayAverage')} {avg} ({done.length}/{days.length})</span>;
-                  })()}
-                  </span>
+                  <span style={{ flex: 1 }}>{t('as.day')}</span>
                   <button onClick={openManageDays} className="muted" style={{ background: 'none', border: 'none', padding: 0, fontSize: 12, fontWeight: 600, cursor: 'pointer', textDecoration: 'underline' }}>
                     {allDays ? t('as.dayManageDone') : t('as.dayManage')}
                   </button>
                 </div>
+                {!daysLoading && days.length > 0 && (() => {
+                  // A daily component is the AVERAGE of the days marked, never
+                  // their sum — say so plainly, with what it is worth so far.
+                  const done = days.filter((d) => d.scorePercent != null);
+                  const weight = summary?.rubrics.find((x) => x.rubricId === activeId)?.weightPercent ?? active.weightPercent;
+                  const avg = done.length ? Math.round((done.reduce((a, d) => a + (d.scorePercent ?? 0), 0) / done.length) * 100) / 100 : null;
+                  const worth = avg == null ? null : Math.round(avg * weight) / 100;
+                  return (
+                    <div style={{ marginBottom: 10, padding: '8px 10px', borderRadius: 10, background: 'var(--popover-hover)', fontSize: 12.5, lineHeight: 1.5 }}>
+                      <div style={{ fontWeight: 650 }}>
+                        {t('as.dayDone').replace('{done}', String(done.length)).replace('{total}', String(days.length))}
+                        {avg != null && <> · {t('as.dayAverage')} <b>{avg}%</b> → {t('as.dayWorth').replace('{worth}', String(worth)).replace('{weight}', String(weight))}</>}
+                      </div>
+                      <div className="muted" style={{ fontSize: 11.5 }}>{t('as.dayExplain').replace(/\{weight\}/g, String(weight))}</div>
+                    </div>
+                  );
+                })()}
                 {allDays && (
                   <div style={{ marginBottom: 10, padding: 10, borderRadius: 10, background: 'var(--popover-hover)' }}>
                     <div className="muted" style={{ fontSize: 11.5, marginBottom: 6 }}>{t('as.dayManageHint')}</div>
