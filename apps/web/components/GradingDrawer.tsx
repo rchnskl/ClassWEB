@@ -253,7 +253,7 @@ export default function GradingDrawer({
                       background: r.id === activeId ? 'var(--popover-hover)' : 'transparent', color: 'var(--text-0)' }}>
                     {name(r.nameEn, r.nameTh)} · {r.weightPercent}%
                     {row?.criticalFailed ? <span style={{ color: 'var(--danger)', marginLeft: 6 }}>✕ {t('as.criticalFail')}</span>
-                      : row?.graded && <span style={{ color: 'var(--success)', marginLeft: 6 }}>✓{r.perSession ? `${t('as.dayAverage')} ` : ''}{row.scorePercent}%</span>}
+                      : row?.graded && <span style={{ color: 'var(--success)', marginLeft: 6 }}>✓{r.perSession ? `${row.contribution}/${row.weightPercent}` : `${row.scorePercent}%`}</span>}
                   </button>
                 );
               })}
@@ -268,19 +268,20 @@ export default function GradingDrawer({
                   </button>
                 </div>
                 {!daysLoading && days.length > 0 && (() => {
-                  // A daily component is the AVERAGE of the days marked, never
-                  // their sum — say so plainly, with what it is worth so far.
+                  // A daily component is split across the practice days and builds
+                  // up day by day — show what each day is worth and the running total.
                   const done = days.filter((d) => d.scorePercent != null);
-                  const weight = summary?.rubrics.find((x) => x.rubricId === activeId)?.weightPercent ?? active.weightPercent;
-                  const avg = done.length ? Math.round((done.reduce((a, d) => a + (d.scorePercent ?? 0), 0) / done.length) * 100) / 100 : null;
-                  const worth = avg == null ? null : Math.round(avg * weight) / 100;
+                  const row = summary?.rubrics.find((x) => x.rubricId === activeId);
+                  const weight = row?.weightPercent ?? active.weightPercent;
+                  const perDay = Math.round((weight / days.length) * 100) / 100;
+                  const earned = row?.contribution ?? 0;
                   return (
                     <div style={{ marginBottom: 10, padding: '8px 10px', borderRadius: 10, background: 'var(--popover-hover)', fontSize: 12.5, lineHeight: 1.5 }}>
                       <div style={{ fontWeight: 650 }}>
                         {t('as.dayDone').replace('{done}', String(done.length)).replace('{total}', String(days.length))}
-                        {avg != null && <> · {t('as.dayAverage')} <b>{avg}%</b> → {t('as.dayWorth').replace('{worth}', String(worth)).replace('{weight}', String(weight))}</>}
+                        {' · '}{t('as.dayEarned').replace('{earned}', String(earned)).replace('{weight}', String(weight))}
                       </div>
-                      <div className="muted" style={{ fontSize: 11.5 }}>{t('as.dayExplain').replace(/\{weight\}/g, String(weight))}</div>
+                      <div className="muted" style={{ fontSize: 11.5 }}>{t('as.dayExplain').replace('{perDay}', String(perDay)).replace(/\{weight\}/g, String(weight))}</div>
                     </div>
                   );
                 })()}

@@ -1,4 +1,4 @@
-import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, ForbiddenException, Injectable, Logger, NotFoundException, OnApplicationBootstrap } from '@nestjs/common';
 import { AuditAction } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { RubricItemInputDto, RubricSectionInputDto, SaveEvaluationDto, SaveRubricDto, UpdateGradeBandsDto, UpdateRubricWeightsDto, UpdateSubjectRubricsDto } from './dto/assessment.dto';
@@ -12,11 +12,23 @@ type WeightedSection = Omit<RubricSectionInputDto, 'items'> & { weightPercent: n
 interface GradeBand { grade: string; gpa: number; label: string; minScore: number; isActive: boolean }
 
 @Injectable()
-export class AssessmentService {
+export class AssessmentService implements OnApplicationBootstrap {
   constructor(
     private readonly prisma: PrismaService,
     private readonly lecturerScope: LecturerScopeService,
   ) {}
+
+  private readonly logger = new Logger(AssessmentService.name);
+
+  /** Brings stored daily component scores in line with the current formula (cheap: one row per student per daily rubric). */
+  async onApplicationBootstrap() {
+    try {
+      const n = await this.refreshAllDailyComponents();
+      if (n > 0) this.logger.log(`Recomputed ${n} daily component score(s)`);
+    } catch (err) {
+      this.logger.warn(`Could not recompute daily component scores: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
 
   private rubricInclude = {
     sections: {
@@ -501,32 +513,85 @@ export class AssessmentService {
   }
 
   /**
-   * Re-derive a per-session rubric's component score: the average of the days
-   * assessed so far, written to the row with classSessionId = null — the row
-   * every summary and report reads.
+   * Re-derive a daily (per-session) rubric's component score and write it to
+   * the row with classSessionId = null — the row every summary and report
+   * reads.
+   *
+   * The component is split evenly across the section's practice days and
+   * builds up day by day: each day is worth (component weight ÷ days), so
+   * the score is the SUM of the day scores divided by the number of days
+   * that count — after 1 of 6 days at 51.8% the component stands at 8.63%,
+   * i.e. 6.04 of 70 points, and reaches its full value only once every day
+   * is assessed. A day the student was absent or on leave does not count
+   * (unless it was assessed anyway), so missing a day neither earns nor
+   * costs points; a day they attended but that hasn't been assessed yet is
+   * simply not earned yet.
    */
-  private async refreshSessionAverage(universityId: string, rubricId: string, studentId: string, sectionId: string, userId: string, userName: string) {
-    const days = await this.prisma.evaluation.findMany({
-      where: { universityId, rubricId, studentId, sectionId, classSessionId: { not: null }, scorePercent: { not: null } },
-      select: { scorePercent: true, criticalFailed: true },
-    });
-    const existing = await this.prisma.evaluation.findFirst({
-      where: { universityId, rubricId, studentId, sectionId, classSessionId: null },
-      select: { id: true },
-    });
-    if (days.length === 0) {
+  async refreshDailyComponent(universityId: string, rubricId: string, studentId: string, sectionId: string, actor?: { id: string; name: string }) {
+    const [sessions, dayEvals, absences, existing] = await Promise.all([
+      this.prisma.classSession.findMany({
+        where: { sectionId, status: { not: 'CANCELLED' }, dailyAssessment: true },
+        select: { id: true },
+      }),
+      this.prisma.evaluation.findMany({
+        where: { universityId, rubricId, studentId, sectionId, classSessionId: { not: null }, scorePercent: { not: null } },
+        select: { classSessionId: true, scorePercent: true, criticalFailed: true },
+      }),
+      this.prisma.attendanceRecord.findMany({
+        where: { studentId, classSession: { sectionId }, status: { in: ['ABSENT', 'LEAVE', 'EXCUSED'] } },
+        select: { classSessionId: true },
+      }),
+      this.prisma.evaluation.findFirst({
+        where: { universityId, rubricId, studentId, sectionId, classSessionId: null },
+        select: { id: true },
+      }),
+    ]);
+    const dayIds = new Set(sessions.map((x) => x.id));
+    const days = dayEvals.filter((d) => d.classSessionId && dayIds.has(d.classSessionId));
+    const assessed = new Set(days.map((d) => d.classSessionId));
+    const missed = new Set(absences.map((a) => a.classSessionId).filter((id) => !assessed.has(id)));
+    const countedDays = sessions.filter((x) => !missed.has(x.id)).length;
+
+    if (days.length === 0 || countedDays === 0) {
       if (existing) await this.prisma.evaluation.delete({ where: { id: existing.id } });
       return null;
     }
-    const scorePercent = Math.round((days.reduce((a, d) => a + (d.scorePercent ?? 0), 0) / days.length) * 100) / 100;
+    const scorePercent = Math.round((days.reduce((a, d) => a + (d.scorePercent ?? 0), 0) / countedDays) * 100) / 100;
     const data = {
-      evaluatorId: userId, evaluatorName: userName, status: 'SUBMITTED' as const, scorePercent,
+      ...(actor && { evaluatorId: actor.id, evaluatorName: actor.name }),
+      status: 'SUBMITTED' as const, scorePercent,
       criticalFailed: days.some((d) => d.criticalFailed), rawScore: null, rawMax: null,
-      note: `Average of ${days.length} session${days.length === 1 ? '' : 's'}`,
+      note: `${days.length} of ${countedDays} practice days assessed`,
     };
     if (existing) await this.prisma.evaluation.update({ where: { id: existing.id }, data });
     else await this.prisma.evaluation.create({ data: { universityId, rubricId, studentId, sectionId, ...data } });
-    return { scorePercent, sessions: days.length };
+    return { scorePercent, sessions: days.length, countedDays };
+  }
+
+  /**
+   * Recompute every daily component in a section (or for one student in it)
+   * — after something that changes how many days count: a day taken in or
+   * out of daily assessment, or attendance marked absent/present.
+   */
+  async refreshDailyComponentsForSection(universityId: string, sectionId: string, studentId?: string) {
+    const pairs = await this.prisma.evaluation.findMany({
+      where: { universityId, sectionId, classSessionId: { not: null }, ...(studentId && { studentId }), rubric: { perSession: true } },
+      select: { rubricId: true, studentId: true },
+      distinct: ['rubricId', 'studentId'],
+    });
+    for (const p of pairs) await this.refreshDailyComponent(universityId, p.rubricId, p.studentId, sectionId);
+    return pairs.length;
+  }
+
+  /** Recompute every daily component everywhere — run once at startup so a change of formula reaches existing scores. */
+  async refreshAllDailyComponents() {
+    const pairs = await this.prisma.evaluation.findMany({
+      where: { classSessionId: { not: null }, sectionId: { not: null }, rubric: { perSession: true } },
+      select: { universityId: true, rubricId: true, studentId: true, sectionId: true },
+      distinct: ['universityId', 'rubricId', 'studentId', 'sectionId'],
+    });
+    for (const p of pairs) await this.refreshDailyComponent(p.universityId, p.rubricId, p.studentId, p.sectionId!);
+    return pairs.length;
   }
 
   async save(user: AuthenticatedUser, userName: string, dto: SaveEvaluationDto) {
@@ -622,7 +687,7 @@ export class AssessmentService {
       await this.notifyIfCrossSectionEdit(user, userName, dto.sectionId, dto.studentId, evaluation.id, scorePercent);
     }
     const sessionAverage = dto.classSessionId && dto.sectionId
-      ? await this.refreshSessionAverage(universityId, dto.rubricId, dto.studentId, dto.sectionId, userId, userName)
+      ? await this.refreshDailyComponent(universityId, dto.rubricId, dto.studentId, dto.sectionId, { id: userId, name: userName })
       : undefined;
     return { id: evaluation.id, scorePercent, criticalFailed, sessionAverage };
   }

@@ -2,6 +2,7 @@ import { BadRequestException, Injectable, NotFoundException } from '@nestjs/comm
 import { randomBytes } from 'node:crypto';
 import { AttendanceStatus, AuditAction } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+import { AssessmentService } from '../assessment/assessment.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { ManualMarkDto, ResolveCheckInDto } from './dto/attendance.dto';
 import { AuthenticatedUser } from '../common/authenticated-user';
@@ -18,6 +19,7 @@ export class AttendanceService {
     private readonly prisma: PrismaService,
     private readonly notifications: NotificationsService,
     private readonly lecturerScope: LecturerScopeService,
+    private readonly assessment: AssessmentService,
   ) {}
 
   // --- helpers -----------------------------------------------------------
@@ -361,11 +363,14 @@ export class AttendanceService {
       select: {
         attendanceRate: true, studentId: true,
         student: { select: { nameEn: true, nameTh: true } },
-        section: { select: { universityId: true, subject: { select: { code: true } } } },
+        section: { select: { id: true, universityId: true, subject: { select: { code: true } } } },
       },
     });
     if (!enrollment) return;
     const previous = enrollment.attendanceRate;
+    // Absent / on-leave days don't count toward daily components, so a
+    // change of attendance can change how many days the score is split over.
+    await this.assessment.refreshDailyComponentsForSection(enrollment.section.universityId, enrollment.section.id, enrollment.studentId);
 
     const [total, attended] = await this.prisma.$transaction([
       this.prisma.attendanceRecord.count({ where: { enrollmentId } }),

@@ -8,7 +8,9 @@ const ADMIN = { email: 'admin@nursing.au.edu', password: 'ChangeMe!2026' };
 
 /**
  * A per-session rubric (clinical "Nursing performance") is marked every
- * practice day; its term score is the average of the days marked so far.
+ * practice day. The component is split evenly across the section's practice
+ * days and builds up day by day: score = sum of day scores ÷ days that count.
+ * Days the student was absent or on leave don't count.
  * Built on its own subject/section/rubric so no other suite's data moves.
  */
 describe('Per-session (daily) assessment', () => {
@@ -53,6 +55,8 @@ describe('Per-session (daily) assessment', () => {
 
   afterAll(async () => { await app?.close(); });
 
+  const componentScore = async () =>
+    (await prisma.evaluation.findFirstOrThrow({ where: { rubricId, studentId, sectionId, classSessionId: null } })).scorePercent;
   const save = (body: object) => http.post('/api/v1/assessment/evaluation').set('Authorization', `Bearer ${token}`).send(body);
   const day = (classSessionId: string, a: number, b: number) =>
     save({ rubricId, studentId, sectionId, classSessionId, scores: [{ rubricItemId: itemIds[0], rating: a }, { rubricItemId: itemIds[1], rating: b }] });
@@ -61,18 +65,18 @@ describe('Per-session (daily) assessment', () => {
     await save({ rubricId, studentId, sectionId, scores: [{ rubricItemId: itemIds[0], rating: 5 }] }).expect(400);
   });
 
-  it('averages the days assessed into the component score, and summaries count it once', async () => {
-    const d1 = await day(sessionIds[0], 5, 5).expect(201); // 100%
-    expect(d1.body.sessionAverage).toEqual({ scorePercent: 100, sessions: 1 });
+  it('builds the component up day by day over all practice days, and summaries count it once', async () => {
+    const d1 = await day(sessionIds[0], 5, 5).expect(201); // 100% on day 1 of 3
+    expect(d1.body.sessionAverage).toEqual({ scorePercent: 33.33, sessions: 1, countedDays: 3 });
     const d2 = await day(sessionIds[1], 3, 3).expect(201); // 60%
-    expect(d2.body.sessionAverage).toEqual({ scorePercent: 80, sessions: 2 });
+    expect(d2.body.sessionAverage).toEqual({ scorePercent: 53.33, sessions: 2, countedDays: 3 });
     // Re-marking a day replaces it rather than adding a third.
     const d2b = await day(sessionIds[1], 4, 4).expect(201); // 80%
-    expect(d2b.body.sessionAverage).toEqual({ scorePercent: 90, sessions: 2 });
+    expect(d2b.body.sessionAverage).toEqual({ scorePercent: 60, sessions: 2, countedDays: 3 });
 
     const summary = await http.get(`/api/v1/assessment/sections/${sectionId}/summary`).set('Authorization', `Bearer ${token}`).expect(200);
     const row = summary.body.students.find((s: { studentId: string }) => s.studentId === studentId);
-    expect(row.total).toBe(90);
+    expect(row.total).toBe(60);
     expect(row.gradedCount).toBe(1);
 
     const form = await http.get('/api/v1/assessment/evaluation')
@@ -104,5 +108,24 @@ describe('Per-session (daily) assessment', () => {
       .query({ rubricId, studentId, sectionId })
       .set('Authorization', `Bearer ${token}`).expect(200);
     expect(form.body.sessions.map((s: { id: string }) => s.id)).toEqual(sessionIds.slice(0, 2).reverse());
+    // Two days left to split over: (100 + 80) / 2.
+    expect(await componentScore()).toBe(90);
+  });
+
+  it('re-splits when a practice day is added, and leaves out a day the student was absent', async () => {
+    const section = await prisma.section.findUniqueOrThrow({ where: { id: sectionId }, include: { semester: true } });
+    const date = new Date(section.semester.endDate.getTime() - 4 * 86_400_000).toISOString().slice(0, 10);
+    await http.post('/api/v1/timetable/sessions').set('Authorization', `Bearer ${token}`)
+      .send({ sectionId, dates: [date], startTime: '07:00', endTime: '16:00' }).expect(201);
+    expect(await componentScore()).toBe(60); // (100 + 80) / 3 — the new day isn't earned yet
+
+    const added = await prisma.classSession.findFirstOrThrow({ where: { sectionId, sessionDate: new Date(`${date}T00:00:00Z`) } });
+    await http.post('/api/v1/attendance/records').set('Authorization', `Bearer ${token}`)
+      .send({ classSessionId: added.id, studentId, status: 'ABSENT' }).expect(201);
+    expect(await componentScore()).toBe(90); // absent: that day doesn't count
+
+    await http.post('/api/v1/attendance/records').set('Authorization', `Bearer ${token}`)
+      .send({ classSessionId: added.id, studentId, status: 'PRESENT' }).expect(201);
+    expect(await componentScore()).toBe(60); // present again: the day counts, not yet earned
   });
 });

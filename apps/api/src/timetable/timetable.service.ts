@@ -2,6 +2,7 @@ import { BadRequestException, ConflictException, Injectable, NotFoundException }
 import { DayOfWeek, Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuthenticatedUser } from '../common/authenticated-user';
+import { AssessmentService } from '../assessment/assessment.service';
 import { LecturerScopeService } from '../common/lecturer-scope.service';
 import { CreateDatedSessionsDto, CreateScheduleDto, GenerateSessionsDto, UpdateSessionDto } from './dto/timetable.dto';
 
@@ -25,6 +26,7 @@ export class TimetableService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly lecturerScope: LecturerScopeService,
+    private readonly assessment: AssessmentService,
   ) {}
 
   private scheduleSelect = {
@@ -244,6 +246,8 @@ export class TimetableService {
       })),
       skipDuplicates: true,
     });
+    // More days to split daily components over.
+    if (result.count > 0) await this.assessment.refreshDailyComponentsForSection(universityId, section.id);
     return { sectionId: section.id, created: result.count, requested: dates.length };
   }
 
@@ -296,7 +300,7 @@ export class TimetableService {
         throw new ConflictException(`This day already has ${marked} daily assessment(s); remove them before taking the day out of daily assessment`);
       }
     }
-    return this.prisma.classSession.update({
+    const updated = await this.prisma.classSession.update({
       where: { id },
       data: {
         ...(dto.topic !== undefined && { topic: dto.topic }),
@@ -304,5 +308,8 @@ export class TimetableService {
       },
       select: { id: true, sessionDate: true, startTime: true, endTime: true, topic: true, dailyAssessment: true },
     });
+    // The number of days daily components are split over has changed.
+    if (dto.dailyAssessment !== undefined) await this.assessment.refreshDailyComponentsForSection(user.universityId, session.sectionId);
+    return updated;
   }
 }
