@@ -10,7 +10,7 @@ import { useBranding } from '@/lib/branding';
 import { useStoredUser } from '@/lib/local-store';
 import {
   IconGrid, IconStudents, IconTeacher, IconBook, IconCalendar,
-  IconCheck, IconReport, IconSettings, IconGrade, IconChevronLeft,
+  IconCheck, IconReport, IconSettings, IconGrade, IconChevronLeft, IconBed,
 } from './icons';
 
 interface YearRef { id: string; code: string; nameEn: string; nameTh: string | null; isCurrent: boolean }
@@ -31,6 +31,7 @@ const NAV = [
   { key: 'nav.sections', icon: IconBook, href: '/sections', id: 'Sections' },
   { key: 'nav.timetable', icon: IconCalendar, href: '/timetable', id: 'Timetable' },
   { key: 'nav.attendance', icon: IconCheck, href: '/attendance', id: 'Attendance' },
+  { key: 'nav.cases', icon: IconBed, href: '/cases', id: 'Cases' },
   { key: 'nav.assessment', icon: IconGrade, href: '/assessment', id: 'Assessment' },
   { key: 'nav.reports', icon: IconReport, href: '/reports', id: 'Reports' },
   { key: 'nav.settings', icon: IconSettings, href: '/settings', id: 'Settings' },

@@ -60,3 +60,6 @@ export const IconGrade = (p: SVGProps<SVGSVGElement>) => (
 export const IconChevronLeft = (p: SVGProps<SVGSVGElement>) => (
   <svg {...base(p)}><path d="M15 5l-7 7 7 7" /></svg>
 );
+export const IconBed = (p: SVGProps<SVGSVGElement>) => (
+  <svg {...base(p)}><path d="M3 6v13M3 14h18v5M21 14v-2.5A2.5 2.5 0 0 0 18.5 9H11v5" /><circle cx="7" cy="11" r="2" /></svg>
+);

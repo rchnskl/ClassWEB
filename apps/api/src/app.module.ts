@@ -17,6 +17,7 @@ import { AssessmentModule } from './assessment/assessment.module';
 import { AcademicModule } from './academic/academic.module';
 import { StudentsModule } from './students/students.module';
 import { StudentNotesModule } from './student-notes/student-notes.module';
+import { CasesModule } from './cases/cases.module';
 import { LecturersModule } from './lecturers/lecturers.module';
 import { SubjectsModule } from './subjects/subjects.module';
 import { SectionsModule } from './sections/sections.module';
@@ -68,6 +69,7 @@ import { AllExceptionsFilter } from './common/filters/all-exceptions.filter';
     AcademicModule,
     StudentsModule,
     StudentNotesModule,
+    CasesModule,
     LecturersModule,
     SubjectsModule,
     SectionsModule,

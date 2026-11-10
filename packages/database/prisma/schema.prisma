@@ -718,6 +718,8 @@ model ClassSession {
   attendance         AttendanceRecord[]
   attendanceSessions AttendanceSession[]
   evaluations        Evaluation[]
+  studentNotes       StudentNote[]
+  patientCases       PatientCase[]
 
   @@unique([sectionId, sessionDate, startTime])
   @@index([sectionId])
@@ -810,6 +812,7 @@ model Student {
   studentNotes StudentNote[]
   evaluations  Evaluation[]
   groups       StudentGroupMember[]
+  patientCases PatientCaseStudent[]
 
   @@unique([universityId, studentCode])
   @@index([universityId])
@@ -1372,14 +1375,18 @@ model StudentNote {
   authorName   String
   /// Marks notes describing misconduct for quick filtering.
   flagged      Boolean             @default(false)
+  /// The practice day the note is about, for daily clinical notes.
+  classSessionId String?
   metadata     Json?
   createdAt    DateTime            @default(now())
   deletedAt    DateTime?
 
-  university University @relation(fields: [universityId], references: [id])
-  student    Student    @relation(fields: [studentId], references: [id])
+  university   University    @relation(fields: [universityId], references: [id])
+  student      Student       @relation(fields: [studentId], references: [id])
+  classSession ClassSession? @relation(fields: [classSessionId], references: [id], onDelete: Restrict)
 
   @@index([studentId, createdAt])
+  @@index([classSessionId])
   @@index([universityId])
   @@map("student_notes")
 }
@@ -1626,7 +1633,7 @@ model Evaluation {
   rubric       Rubric            @relation(fields: [rubricId], references: [id])
   student      Student           @relation(fields: [studentId], references: [id])
   section      Section?          @relation(fields: [sectionId], references: [id])
-  classSession ClassSession?     @relation(fields: [classSessionId], references: [id])
+  classSession ClassSession?     @relation(fields: [classSessionId], references: [id], onDelete: Restrict)
   scores       EvaluationScore[]
 
   @@unique([rubricId, studentId, sectionId, classSessionId])
@@ -1689,4 +1696,42 @@ model GradeBand {
 
   @@index([schemeId])
   @@map("grade_bands")
+}
+
+/// A patient case assigned for one practice day, cared for by one or more
+/// students (usually a pair). Patient details are sensitive: lecturers of the
+/// section only, every change audited.
+model PatientCase {
+  id             String   @id @default(cuid())
+  universityId   String
+  classSessionId String
+  bed            String?
+  hn             String?
+  patientName    String?
+  /// Free text: paediatric ages read "2 ปี 3 เดือน".
+  patientAge     String?
+  diagnosis      String?
+  note           String?
+  createdById    String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  classSession ClassSession         @relation(fields: [classSessionId], references: [id])
+  students     PatientCaseStudent[]
+
+  @@index([classSessionId])
+  @@index([universityId])
+  @@map("patient_cases")
+}
+
+model PatientCaseStudent {
+  caseId    String
+  studentId String
+
+  case    PatientCase @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  student Student     @relation(fields: [studentId], references: [id])
+
+  @@id([caseId, studentId])
+  @@index([studentId])
+  @@map("patient_case_students")
 }

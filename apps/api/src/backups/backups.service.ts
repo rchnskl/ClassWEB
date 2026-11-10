@@ -174,6 +174,17 @@ const STEPS: Step[] = [
     restore: (p, rows) => p.studentNote.createMany({ data: rows, skipDuplicates: true }),
   },
   {
+    table: 'patientCase',
+    fetch: (p, c) => p.patientCase.findMany({ where: { universityId: c.universityId } }),
+    collect: (rows, c) => ((c as any).patientCaseIds = idsOf(rows)),
+    restore: (p, rows) => p.patientCase.createMany({ data: rows, skipDuplicates: true }),
+  },
+  {
+    table: 'patientCaseStudent',
+    fetch: (p, c) => p.patientCaseStudent.findMany({ where: { caseId: { in: (c as any).patientCaseIds ?? [] } } }),
+    restore: (p, rows) => p.patientCaseStudent.createMany({ data: rows, skipDuplicates: true }),
+  },
+  {
     table: 'rubric',
     fetch: (p, c) => p.rubric.findMany({ where: { universityId: c.universityId } }),
     collect: (rows, c) => (c.rubricIds = idsOf(rows)),

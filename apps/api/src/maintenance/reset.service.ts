@@ -39,7 +39,7 @@ const subject = (u: string) => ({ program: program(u) });
  * CLEARED: students & groups, academic years & semesters, programs, courses,
  * subjects, sections and their timetable, class sessions, enrollments,
  * attendance (records, QR sessions, check-ins), section-level attendance
- * rules, evaluations & scores, reports, student notes,
+ * rules, evaluations & scores, patient cases, reports, student notes,
  * notifications, and calendar events/entries.
  *
  * The data is archived OUTSIDE this tool, before it runs (a Neon branch and a
@@ -59,6 +59,10 @@ const STEPS: Step[] = [
   { key: 'evaluations',
     count: (db, u) => db.evaluation.count({ where: { universityId: u } }),
     clear: (db, u) => db.evaluation.deleteMany({ where: { universityId: u } }) },
+  // Case members go with their case (ON DELETE CASCADE).
+  { key: 'patientCases',
+    count: (db, u) => db.patientCase.count({ where: { universityId: u } }),
+    clear: (db, u) => db.patientCase.deleteMany({ where: { universityId: u } }) },
   { key: 'studentNotes',
     count: (db, u) => db.studentNote.count({ where: { universityId: u } }),
     clear: (db, u) => db.studentNote.deleteMany({ where: { universityId: u } }) },
