@@ -251,7 +251,12 @@ export class TimetableService {
     return { sectionId: section.id, created: result.count, requested: dates.length };
   }
 
-  async sessions(user: AuthenticatedUser, sectionId?: string, date?: string) {
+  /**
+   * Concrete class sessions — by section, by one day, or by a date range
+   * (from/to, YYYY-MM-DD, inclusive). The timetable uses the range to show
+   * dated sessions such as clinical ward days, which have no weekly slot.
+   */
+  async sessions(user: AuthenticatedUser, sectionId?: string, date?: string, from?: string, to?: string) {
     const universityId = user.universityId;
     if (sectionId) {
       await this.lecturerScope.assertTeachesOrManages(user, sectionId);
@@ -267,12 +272,20 @@ export class TimetableService {
       const next = new Date(day);
       next.setDate(next.getDate() + 1);
       where.sessionDate = { gte: day, lt: next };
+    } else if (from || to) {
+      const ymd = /^\d{4}-\d{2}-\d{2}$/;
+      if ((from && !ymd.test(from)) || (to && !ymd.test(to))) throw new BadRequestException('from/to must be YYYY-MM-DD');
+      where.sessionDate = {
+        ...(from && { gte: new Date(`${from}T00:00:00Z`) }),
+        ...(to && { lte: new Date(`${to}T00:00:00Z`) }),
+      };
+      where.status = { not: 'CANCELLED' };
     }
     const items = await this.prisma.classSession.findMany({
       where,
       select: {
         id: true, sessionDate: true, startTime: true, endTime: true, status: true, topic: true, dailyAssessment: true,
-        section: { select: { sectionNo: true, subject: { select: { code: true, nameEn: true } } } },
+        section: { select: { id: true, sectionNo: true, subject: { select: { code: true, nameEn: true } } } },
         room: { select: { roomNumber: true } },
         lecturer: { select: { nameEn: true } },
       },

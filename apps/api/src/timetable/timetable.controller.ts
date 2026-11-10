@@ -49,12 +49,14 @@ export class TimetableController {
 
   @Get('sessions')
   @Permissions('timetable:read')
-  @ApiOperation({ summary: 'List class sessions (filter by section and/or date)' })
+  @ApiOperation({ summary: 'List class sessions (filter by section, one date, or a from/to date range)' })
   sessions(
     @CurrentUser() user: AuthenticatedUser,
     @Query('sectionId') sectionId?: string,
     @Query('date') date?: string,
+    @Query('from') from?: string,
+    @Query('to') to?: string,
   ) {
-    return this.timetable.sessions(user, sectionId, date);
+    return this.timetable.sessions(user, sectionId, date, from, to);
   }
 }

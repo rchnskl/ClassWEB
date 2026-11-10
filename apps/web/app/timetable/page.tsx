@@ -13,7 +13,14 @@ interface Slot {
   dayOfWeek: string;
   startTime: string;
   endTime: string;
-  section: { sectionNo: string; subject: { code: string; nameEn: string } };
+  section: { id: string; sectionNo: string; subject: { code: string; nameEn: string } };
+  room: { roomNumber: string } | null;
+  lecturer: { nameEn: string } | null;
+}
+/** A dated session (e.g. a clinical ward day) — has no weekly slot behind it. */
+interface DatedSession {
+  id: string; sessionDate: string; startTime: string; endTime: string; topic: string | null;
+  section: { id: string; sectionNo: string; subject: { code: string; nameEn: string } };
   room: { roomNumber: string } | null;
   lecturer: { nameEn: string } | null;
 }
@@ -23,9 +30,13 @@ interface CalEntry {
   visibility?: string;
 }
 
-const DAYS = ['MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY'];
-const DAY_LABEL: Record<string, string> = { MONDAY: 'Mon', TUESDAY: 'Tue', WEDNESDAY: 'Wed', THURSDAY: 'Thu', FRIDAY: 'Fri' };
-const START_HOUR = 8;
+const WEEKDAYS = ['MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY', 'SATURDAY', 'SUNDAY'];
+const DAY_LABEL: Record<string, { en: string; th: string }> = {
+  MONDAY: { en: 'Mon', th: 'จ.' }, TUESDAY: { en: 'Tue', th: 'อ.' }, WEDNESDAY: { en: 'Wed', th: 'พ.' },
+  THURSDAY: { en: 'Thu', th: 'พฤ.' }, FRIDAY: { en: 'Fri', th: 'ศ.' }, SATURDAY: { en: 'Sat', th: 'ส.' }, SUNDAY: { en: 'Sun', th: 'อา.' },
+};
+// Clinical practice starts at 07:00, so the grid does too.
+const START_HOUR = 7;
 const END_HOUR = 18;
 const PX_PER_MIN = 1.1;
 
@@ -55,17 +66,25 @@ function bkk(iso: string): { weekday: string; time: string } {
   return { weekday, time };
 }
 
-function weekRange(): { fromISO: string; toISO: string } {
-  const now = new Date();
-  const dow = (now.getDay() + 6) % 7;
-  const monday = new Date(now); monday.setHours(0, 0, 0, 0); monday.setDate(now.getDate() - dow);
-  const nextMon = new Date(monday); nextMon.setDate(monday.getDate() + 7);
-  return { fromISO: monday.toISOString(), toISO: nextMon.toISOString() };
+/**
+ * The Bangkok-calendar week `offset` weeks from this one: its Monday–Sunday
+ * dates (YYYY-MM-DD) and the instant range for calendar entries.
+ */
+function weekRange(offset = 0): { dates: string[]; fromISO: string; toISO: string } {
+  const [y, m, d] = todayBangkok().split('-').map(Number);
+  const today = new Date(Date.UTC(y, m - 1, d));
+  const dow = (today.getUTCDay() + 6) % 7;
+  const monday = new Date(today.getTime() - dow * 86_400_000 + offset * 7 * 86_400_000);
+  const dates = Array.from({ length: 7 }, (_, i) => new Date(monday.getTime() + i * 86_400_000).toISOString().slice(0, 10));
+  return { dates, fromISO: `${dates[0]}T00:00:00+07:00`, toISO: `${dates[6]}T23:59:59+07:00` };
 }
 
 export default function TimetablePage() {
   const router = useRouter();
-  const { t } = useI18n();
+  const { t, lang } = useI18n();
+  const [weekOffset, setWeekOffset] = useState(0);
+  const week = useMemo(() => weekRange(weekOffset), [weekOffset]);
+  const [dated, setDated] = useState<DatedSession[]>([]);
   const [email, setEmail] = useState('');
   const [userId, setUserId] = useState('');
   const [isAdmin, setIsAdmin] = useState(false);
@@ -85,12 +104,19 @@ export default function TimetablePage() {
   const [confirmingId, setConfirmingId] = useState<string | null>(null);
 
   const loadEvents = useCallback(async () => {
-    const { fromISO, toISO } = weekRange();
     try {
-      const d = await apiFetch<{ items: CalEntry[] }>(`/calendar/entries?from=${encodeURIComponent(fromISO)}&to=${encodeURIComponent(toISO)}`);
+      const d = await apiFetch<{ items: CalEntry[] }>(`/calendar/entries?from=${encodeURIComponent(week.fromISO)}&to=${encodeURIComponent(week.toISO)}`);
       setEvents(d.items);
     } catch { /* ignore */ }
-  }, []);
+  }, [week]);
+
+  // Dated sessions in the shown week — clinical ward days and other one-off
+  // teaching that has no weekly slot.
+  useEffect(() => {
+    apiFetch<{ items: DatedSession[] }>(`/timetable/sessions?from=${week.dates[0]}&to=${week.dates[6]}`)
+      .then((d) => setDated(d.items))
+      .catch(() => setDated([]));
+  }, [week]);
 
   useEffect(() => {
     if (!localStorage.getItem('accessToken')) { router.replace('/login'); return; }
@@ -106,14 +132,37 @@ export default function TimetablePage() {
 
   const byDay = useMemo(() => {
     const map: Record<string, Slot[]> = {};
-    for (const d of DAYS) map[d] = [];
+    for (const d of WEEKDAYS) map[d] = [];
     for (const s of slots) if (map[s.dayOfWeek]) map[s.dayOfWeek].push(s);
     return map;
   }, [slots]);
 
+  // A session generated from a weekly slot is already drawn by that slot;
+  // only sessions with no slot behind them (ward days) are drawn here.
+  const datedByDay = useMemo(() => {
+    const map: Record<string, DatedSession[]> = {};
+    for (const d of WEEKDAYS) map[d] = [];
+    for (const s of dated) {
+      if (!week.dates.includes(s.sessionDate.slice(0, 10))) continue;
+      const wd = WEEKDAYS[(new Date(`${s.sessionDate.slice(0, 10)}T00:00:00Z`).getUTCDay() + 6) % 7];
+      const coveredBySlot = (byDay[wd] ?? []).some((sl) => sl.section.id === s.section.id && sl.startTime === s.startTime);
+      if (!coveredBySlot) map[wd].push(s);
+    }
+    return map;
+  }, [dated, byDay, week]);
+
+  // Weekends only appear when something is on them.
+  const DAYS = useMemo(() => WEEKDAYS.filter((d, i) => i < 5
+    || datedByDay[d].length > 0 || byDay[d].length > 0 || events.some((ev) => bkk(ev.startAt).weekday === d)), [datedByDay, byDay, events]);
+  const dateOf = (d: string) => week.dates[WEEKDAYS.indexOf(d)];
+  const weekLabel = (() => {
+    const fmt = (iso: string, withYear: boolean) => new Date(`${iso}T00:00:00Z`).toLocaleDateString(lang === 'th' ? 'th-TH' : 'en-GB', { day: 'numeric', month: 'short', ...(withYear && { year: 'numeric' }), timeZone: 'UTC' });
+    return `${fmt(week.dates[0], false)} – ${fmt(week.dates[6], true)}`;
+  })();
+
   const eventsByDay = useMemo(() => {
     const map: Record<string, (CalEntry & { _wd: string; _s: string; _e: string })[]> = {};
-    for (const d of DAYS) map[d] = [];
+    for (const d of WEEKDAYS) map[d] = [];
     for (const ev of events) {
       const s = bkk(ev.startAt); const e = bkk(ev.endAt);
       if (map[s.weekday]) map[s.weekday].push({ ...ev, _wd: s.weekday, _s: s.time, _e: e.time });
@@ -153,7 +202,7 @@ export default function TimetablePage() {
 
   const hours = Array.from({ length: END_HOUR - START_HOUR + 1 }, (_, i) => START_HOUR + i);
   const gridHeight = (END_HOUR - START_HOUR) * 60 * PX_PER_MIN;
-  const todayDow = DAYS[(new Date().getDay() + 6) % 7];
+  const todayIso = todayBangkok();
 
   return (
     <div className="app-shell">
@@ -165,7 +214,7 @@ export default function TimetablePage() {
           <div>
             <h1 style={{ fontSize: 27, fontWeight: 750, letterSpacing: -0.6, margin: 0 }}>{t('tt.title')}</h1>
             <p className="muted" style={{ margin: '4px 0 0', fontSize: 14.5 }}>
-              {t('tt.subtitle')} · {slots.length} {t('tt.slots')}
+              {t('tt.subtitle')} · {slots.length} {t('tt.slots')}{Object.values(datedByDay).flat().length > 0 ? ` · ${Object.values(datedByDay).flat().length} ${t('tt.wardSessions')}` : ''}
             </p>
           </div>
           <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
@@ -205,14 +254,23 @@ export default function TimetablePage() {
         {error && <div className="glass" style={{ padding: 16, marginBottom: 16 }}><span className="chip chip-danger">{t('common.error')}</span> <span style={{ marginLeft: 8 }}>{error}</span></div>}
 
         <div className="glass rise" style={{ padding: 18, overflowX: 'auto' }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, marginBottom: 12, flexWrap: 'wrap' }}>
+            <div style={{ display: 'flex', gap: 6 }}>
+              <button onClick={() => setWeekOffset((w) => w - 1)} className="glass hairline" aria-label={t('tt.prevWeek')} style={{ padding: '6px 12px', borderRadius: 10, cursor: 'pointer', color: 'var(--text-0)' }}>‹</button>
+              <button onClick={() => setWeekOffset(0)} disabled={weekOffset === 0} className="glass hairline" style={{ padding: '6px 12px', borderRadius: 10, cursor: 'pointer', color: 'var(--text-0)', fontSize: 13, opacity: weekOffset === 0 ? 0.55 : 1 }}>{t('tt.thisWeek')}</button>
+              <button onClick={() => setWeekOffset((w) => w + 1)} className="glass hairline" aria-label={t('tt.nextWeek')} style={{ padding: '6px 12px', borderRadius: 10, cursor: 'pointer', color: 'var(--text-0)' }}>›</button>
+            </div>
+            <div style={{ fontWeight: 700, fontSize: 14 }}>{weekLabel}</div>
+          </div>
           {loading ? (
             <div className="muted" style={{ padding: 40, textAlign: 'center' }}>{t('common.loading')}</div>
           ) : (
-            <div style={{ display: 'grid', gridTemplateColumns: '56px repeat(5, minmax(120px, 1fr))', gap: 8, minWidth: 720 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: `56px repeat(${DAYS.length}, minmax(120px, 1fr))`, gap: 8, minWidth: 140 * DAYS.length + 56 }}>
               <div />
               {DAYS.map((d) => (
-                <div key={d} style={{ textAlign: 'center', fontWeight: 700, fontSize: 14, padding: '4px 0', color: d === todayDow ? 'var(--brand-2)' : 'var(--text-1)' }}>
-                  {DAY_LABEL[d]}{d === todayDow && <div className="muted" style={{ fontSize: 10.5, fontWeight: 600 }}>{t('tt.today')}</div>}
+                <div key={d} style={{ textAlign: 'center', fontWeight: 700, fontSize: 14, padding: '4px 0', color: dateOf(d) === todayIso ? 'var(--brand-2)' : 'var(--text-1)' }}>
+                  {DAY_LABEL[d][lang === 'th' ? 'th' : 'en']} {Number(dateOf(d).slice(8, 10))}
+                  {dateOf(d) === todayIso && <div className="muted" style={{ fontSize: 10.5, fontWeight: 600 }}>{t('tt.today')}</div>}
                 </div>
               ))}
 
@@ -225,7 +283,7 @@ export default function TimetablePage() {
               </div>
 
               {DAYS.map((d) => (
-                <div key={d} className="hairline" style={{ position: 'relative', height: gridHeight, borderLeft: '1px solid var(--glass-hairline)', background: d === todayDow ? 'var(--glass-hairline)' : 'transparent', borderRadius: 10 }}>
+                <div key={d} className="hairline" style={{ position: 'relative', height: gridHeight, borderLeft: '1px solid var(--glass-hairline)', background: dateOf(d) === todayIso ? 'var(--glass-hairline)' : 'transparent', borderRadius: 10 }}>
                   {hours.map((h) => (
                     <div key={h} style={{ position: 'absolute', top: (h - START_HOUR) * 60 * PX_PER_MIN, left: 0, right: 0, borderTop: '1px solid var(--glass-hairline)', opacity: 0.5 }} />
                   ))}
@@ -240,6 +298,27 @@ export default function TimetablePage() {
                         <div style={{ fontWeight: 700, fontSize: 12.5 }}>{s.section.subject.code}</div>
                         <div style={{ fontSize: 10, opacity: 0.95, lineHeight: 1.25, marginTop: 2 }}>{s.section.subject.nameEn}</div>
                         <div style={{ fontSize: 10, opacity: 0.9, marginTop: 3 }}>{s.startTime}–{s.endTime} · {s.room?.roomNumber ?? '—'}</div>
+                      </div>
+                    );
+                  })}
+
+                  {/* dated sessions — clinical ward days (hospital teaching) */}
+                  {datedByDay[d].map((s) => {
+                    const top = (Math.max(toMin(s.startTime), START_HOUR * 60) - START_HOUR * 60) * PX_PER_MIN;
+                    const height = Math.max(36, (Math.min(toMin(s.endTime), END_HOUR * 60) - Math.max(toMin(s.startTime), START_HOUR * 60)) * PX_PER_MIN);
+                    return (
+                      <div key={s.id} title={[s.topic, s.lecturer?.nameEn].filter(Boolean).join(' · ')}
+                        style={{ position: 'absolute', top, height,
+                          // Share the column: weekly classes keep the left side, so a
+                          // ward day beside one moves right; with nothing else that
+                          // day it takes the full width.
+                          ...(byDay[d].length > 0 ? { right: 4, width: 'calc(45% - 6px)' }
+                            : eventsByDay[d].length > 0 ? { left: 4, width: 'calc(55% - 6px)' } : { left: 4, width: 'calc(100% - 8px)' }),
+                          borderRadius: 12, padding: '8px 9px', color: '#fff', background: 'linear-gradient(140deg, #0e9f8f, #0b7a6e)', boxShadow: '0 6px 16px -6px rgba(0,0,0,0.4)', overflow: 'hidden' }}>
+                        <div style={{ fontWeight: 700, fontSize: 12.5 }}>🏥 {s.section.subject.code} · {t('tt.group')} {s.section.sectionNo}</div>
+                        <div style={{ fontSize: 10, opacity: 0.95, lineHeight: 1.25, marginTop: 2 }}>{s.topic ?? s.section.subject.nameEn}</div>
+                        <div style={{ fontSize: 10, opacity: 0.9, marginTop: 3 }}>{s.startTime}–{s.endTime} · {s.room?.roomNumber ?? '—'}</div>
+                        {s.lecturer && <div style={{ fontSize: 10, opacity: 0.85, marginTop: 2 }}>{s.lecturer.nameEn}</div>}
                       </div>
                     );
                   })}
@@ -311,6 +390,7 @@ export default function TimetablePage() {
     return (
       <div style={{ display: 'flex', gap: 10, alignItems: 'center', fontSize: 11.5 }} className="muted">
         <span><span style={{ display: 'inline-block', width: 10, height: 10, borderRadius: 3, background: 'linear-gradient(140deg,#ff8a4c,#f97316)', verticalAlign: 'middle', marginRight: 4 }} />{t('tt.legendClass')}</span>
+        <span><span style={{ display: 'inline-block', width: 10, height: 10, borderRadius: 3, background: 'linear-gradient(140deg,#0e9f8f,#0b7a6e)', verticalAlign: 'middle', marginRight: 4 }} />{t('tt.legendWard')}</span>
         <span>📝 {t('tt.type.EXAM')}</span>
         <span>👤 {t('tt.type.PERSONAL')}</span>
         <span>🎉 {t('tt.type.ACTIVITY')}</span>

@@ -66,4 +66,16 @@ describe('Class sessions on specific dates', () => {
       expect(res.status).toBe(409);
     }
   });
+
+  it('lists sessions in a date range for the timetable (inclusive)', async () => {
+    const sem = await prisma.section.findUniqueOrThrow({ where: { id: sectionId }, include: { semester: true } });
+    const d3 = iso(plus(sem.semester.endDate, -3)); const d2 = iso(plus(sem.semester.endDate, -2));
+    const get = (q: string) => http.get(`/api/v1/timetable/sessions?${q}`).set('Authorization', `Bearer ${token}`);
+    const both = await get(`from=${d3}&to=${d2}`).expect(200);
+    const mine = both.body.items.filter((x: { topic: string | null; section: { id: string } }) => x.section.id === sectionId && x.topic === 'Clinical practice');
+    expect(mine.map((x: { sessionDate: string }) => x.sessionDate.slice(0, 10))).toEqual([d3, d2]);
+    const one = await get(`from=${d2}&to=${d2}`).expect(200);
+    expect(one.body.items.every((x: { sessionDate: string }) => x.sessionDate.slice(0, 10) === d2)).toBe(true);
+    await get('from=10/11/2026').expect(400);
+  });
 });
