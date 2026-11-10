@@ -107,7 +107,11 @@ export default function GradingDrawer({
   const perSession = !!active?.perSession;
   const [chosenDay, setChosenDay] = useState<{ rubricId: string; sessionId: string } | null>(null);
   const dayId = perSession && chosenDay?.rubricId === activeId ? chosenDay.sessionId : null;
-  const [days, setDays] = useState<SessionDay[]>([]);
+  // The day list belongs to the rubric it was loaded for; until the list for
+  // the active rubric arrives it is "loading", not "no days".
+  const [daysFor, setDaysFor] = useState<{ rubricId: string; list: SessionDay[] } | null>(null);
+  const daysLoading = daysFor?.rubricId !== activeId;
+  const days = daysLoading ? [] : (daysFor?.list ?? []);
   const [reloadKey, setReloadKey] = useState(0);
   // "Manage days": every session of the section, so a day that isn't a
   // practice day (a presentation day) can be taken out of daily assessment.
@@ -149,7 +153,7 @@ export default function GradingDrawer({
     const dayParam = dayId ? `&classSessionId=${dayId}` : '';
     apiFetch<{ sessions?: SessionDay[]; evaluation: { scores: Record<string, number>; passed: Record<string, boolean>; scorePercent: number | null; rawScore: number | null; rawMax: number | null } | null }>(`/assessment/evaluation?rubricId=${activeId}&studentId=${studentId}&sectionId=${sectionId}${dayParam}`)
       .then((d) => {
-        setDays(d.sessions ?? []);
+        setDaysFor({ rubricId: activeId, list: d.sessions ?? [] });
         // Without a day picked, a daily rubric's row is the computed average —
         // nothing to edit, so the form starts empty until a day is chosen.
         const ev = d.sessions && !dayParam ? null : d.evaluation;
@@ -163,7 +167,7 @@ export default function GradingDrawer({
         setRawMax(ev?.rawMax != null ? String(ev.rawMax) : '');
         setDirectPercent(wasDirect && ev?.rawScore == null && ev?.scorePercent != null ? String(ev.scorePercent) : '');
       })
-      .catch(() => { setRatings({}); setPassed({}); setDirectMode(false); setRawScore(''); setRawMax(''); setDirectPercent(''); });
+      .catch(() => { setDaysFor({ rubricId: activeId, list: [] }); setRatings({}); setPassed({}); setDirectMode(false); setRawScore(''); setRawMax(''); setDirectPercent(''); });
   }, [activeId, studentId, sectionId, dayId, reloadKey]);
 
   async function save() {
@@ -285,7 +289,9 @@ export default function GradingDrawer({
                     ))}
                   </div>
                 )}
-                {days.length === 0 ? (
+                {daysLoading ? (
+                  <div className="muted" style={{ fontSize: 12.5 }}>{t('common.loading')}</div>
+                ) : days.length === 0 ? (
                   <div className="muted" style={{ fontSize: 12.5 }}>{t('as.dayNone')}</div>
                 ) : (
                   <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
