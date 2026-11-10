@@ -124,7 +124,7 @@ const EN: Dict = {
   'as.overLimit': 'Exceeds 100%',
   'as.noneActive': 'No rubrics selected for this subject yet.',
   'as.export': 'Export',
-  'as.exportStudent': 'Grade report',
+  'as.exportStudent': 'Individual report',
   'nav.semester': 'First Semester · active',
 
   'top.search': 'Search students, sections, rooms…',
@@ -964,7 +964,7 @@ const TH: Dict = {
   'as.overLimit': 'เกิน 100%',
   'as.noneActive': 'ยังไม่ได้เลือกแบบประเมินสำหรับวิชานี้',
   'as.export': 'ส่งออก',
-  'as.exportStudent': 'รายงานคะแนน',
+  'as.exportStudent': 'รายงานรายบุคคล',
   'nav.semester': 'ภาคเรียนที่ 1 · ใช้งาน',
 
   'top.search': 'ค้นหานักศึกษา รายวิชา ห้องเรียน…',

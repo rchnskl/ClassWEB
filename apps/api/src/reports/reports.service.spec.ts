@@ -65,6 +65,16 @@ describe('ReportsService — individual grade report', () => {
     evaluation: { findMany: jest.fn().mockResolvedValue(evaluations) },
     report: { create: jest.fn().mockResolvedValue({}), update: jest.fn().mockResolvedValue({}) },
     auditLog: { create: jest.fn().mockResolvedValue({}) },
+    // One practice day: present, a paired case, two notes.
+    classSession: { findMany: jest.fn().mockResolvedValue([{ id: 'cs1', sessionDate: new Date('2026-11-10T00:00:00Z'), startTime: '07:00', endTime: '16:00', topic: 'Clinical practice — Ward 9/4' }]) },
+    attendanceRecord: { findMany: jest.fn().mockResolvedValue([{ classSessionId: 'cs1', status: 'PRESENT', minutesLate: 0 }]) },
+    patientCase: { findMany: jest.fn().mockResolvedValue([{
+      classSessionId: 'cs1', bed: '12', hn: '6512399', patientName: 'ด.ช. ธนากร มีสุข', patientAge: '2 ปี 3 เดือน', diagnosis: 'Pneumonia',
+      students: [{ student: { id: 'stu1', nameEn: 'Somchai Jaidee', nameTh: 'สมชาย ใจดี' } }, { student: { id: 'stu2', nameEn: 'Suda Rakdee', nameTh: null } }],
+    }]) },
+    studentNote: { findMany: jest.fn().mockResolvedValue([
+      { classSessionId: 'cs1', content: 'Well prepared; explained the drugs clearly', authorName: 'A. Rachanon Sakol', createdAt: new Date('2026-11-10T08:30:00Z') },
+    ]) },
   };
   const assessment = {
     studentSummary: jest.fn().mockResolvedValue(summary),
@@ -95,11 +105,31 @@ describe('ReportsService — individual grade report', () => {
     expect(content).not.toContain('Measures blood pressure');
   });
 
+  it('adds the day-by-day practice record, with patient details masked', async () => {
+    const { content } = await service.studentGradeCsv(user, 'stu1', 'sec1');
+    const day = content.split('\n').find((l) => l.startsWith('2026-11-10'));
+    expect(day).toBeDefined();
+    expect(day).toContain('Present');
+    expect(day).toContain('Bed 12 · HN •••399 · ด.ช. ธ. ม. · age 2 ปี 3 เดือน · Dx Pneumonia');
+    expect(day).toContain('Suda Rakdee'); // the partner, not the student themself
+    expect(day).toContain('Well prepared; explained the drugs clearly (A. Rachanon Sakol, 15:30)');
+    // The report can be opened from its public QR link: never the full name or HN.
+    expect(content).not.toContain('6512399');
+    expect(content).not.toContain('ธนากร');
+
+    const { buffer } = await service.studentGradeXlsx(user, 'stu1', 'sec1');
+    const wb = new ExcelJS.Workbook();
+    await wb.xlsx.load(buffer as unknown as ArrayBuffer);
+    const values = JSON.stringify(wb.getWorksheet('Daily practice')!.getSheetValues());
+    expect(values).toContain('•••399');
+    expect(values).not.toContain('6512399');
+  });
+
   it('adds an item-marks sheet to the workbook', async () => {
     const { buffer } = await service.studentGradeXlsx(user, 'stu1', 'sec1');
     const wb = new ExcelJS.Workbook();
     await wb.xlsx.load(buffer as unknown as ArrayBuffer);
-    expect(wb.worksheets.map((w) => w.name)).toEqual(['Grades', 'Item marks']);
+    expect(wb.worksheets.map((w) => w.name)).toEqual(['Grades', 'Item marks', 'Daily practice']);
     const detail = wb.getWorksheet('Item marks')!;
     const rows = detail.getRows(2, detail.rowCount - 1)!.map((r) => r.values as unknown[]);
     expect(rows).toHaveLength(3); // two examined checklist steps + the midterm

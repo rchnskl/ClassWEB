@@ -915,6 +915,104 @@ export class ReportsService {
     return d && d.fullMarks > 0 ? `${d.marks}/${d.fullMarks}` : '—';
   }
 
+  /**
+   * Patient identifiers on a report are masked. A report PDF's QR code opens
+   * the stored file at a public link, so a printed copy must not carry a
+   * patient's full name or HN: initials and the last 3 HN digits are enough
+   * to recognise the case, and the full details stay in the app, visible only
+   * to the section's lecturers.
+   */
+  private maskPatientName(name: string | null): string | null {
+    if (!name?.trim()) return null;
+    const parts = name.trim().split(/\s+/);
+    // Keep a leading Thai title (ด.ช., ด.ญ., นาย, นาง, น.ส.) and initial the rest.
+    const title = /^(ด\.ช\.|ด\.ญ\.|นาย|นาง|น\.ส\.|เด็กชาย|เด็กหญิง|Mr\.?|Mrs\.?|Ms\.?|Miss)$/i.test(parts[0]) ? parts.shift()! : '';
+    const initials = parts.map((w) => `${[...w][0]}.`).join(' ');
+    return [title, initials].filter(Boolean).join(' ');
+  }
+
+  private maskHn(hn: string | null): string | null {
+    if (!hn?.trim()) return null;
+    const v = hn.trim();
+    return v.length <= 3 ? '•••' : `•••${v.slice(-3)}`;
+  }
+
+  /**
+   * Day-by-day record of the student's clinical practice in a section: every
+   * class session with attendance, the patient case(s) assigned (masked —
+   * see maskPatientName) and who shared them, the daily rubric scores, and
+   * the lecturers' notes for that day.
+   */
+  private async dailyLog(universityId: string, studentId: string, sectionId: string) {
+    const sessions = await this.prisma.classSession.findMany({
+      where: { sectionId, section: { universityId }, status: { not: 'CANCELLED' } },
+      select: { id: true, sessionDate: true, startTime: true, endTime: true, topic: true },
+      orderBy: [{ sessionDate: 'asc' }, { startTime: 'asc' }],
+    });
+    const ids = sessions.map((x) => x.id);
+    const [attendance, cases, evaluations, notes] = await Promise.all([
+      this.prisma.attendanceRecord.findMany({ where: { studentId, classSessionId: { in: ids } }, select: { classSessionId: true, status: true, minutesLate: true } }),
+      this.prisma.patientCase.findMany({
+        where: { classSessionId: { in: ids }, students: { some: { studentId } } },
+        select: {
+          classSessionId: true, bed: true, hn: true, patientName: true, patientAge: true, diagnosis: true,
+          students: { select: { student: { select: { id: true, nameEn: true, nameTh: true } } } },
+        },
+        orderBy: { createdAt: 'asc' },
+      }),
+      this.prisma.evaluation.findMany({
+        where: { universityId, studentId, sectionId, classSessionId: { in: ids }, scorePercent: { not: null } },
+        select: { classSessionId: true, scorePercent: true, rubric: { select: { nameEn: true, nameTh: true, order: true } } },
+      }),
+      this.prisma.studentNote.findMany({
+        where: { studentId, classSessionId: { in: ids }, deletedAt: null },
+        select: { classSessionId: true, content: true, authorName: true, createdAt: true },
+        orderBy: { createdAt: 'asc' },
+      }),
+    ]);
+    return sessions.map((x) => ({
+      ...x,
+      attendance: attendance.find((a) => a.classSessionId === x.id) ?? null,
+      cases: cases.filter((c) => c.classSessionId === x.id).map((c) => ({
+        bed: c.bed, hnMasked: this.maskHn(c.hn), patientMasked: this.maskPatientName(c.patientName),
+        patientAge: c.patientAge, diagnosis: c.diagnosis,
+        partners: c.students.map((m) => m.student).filter((m) => m.id !== studentId),
+      })),
+      scores: evaluations.filter((e) => e.classSessionId === x.id)
+        .sort((a, b) => a.rubric.order - b.rubric.order)
+        .map((e) => ({ nameEn: e.rubric.nameEn, nameTh: e.rubric.nameTh, scorePercent: e.scorePercent! })),
+      notes: notes.filter((n) => n.classSessionId === x.id),
+    }));
+  }
+
+  private attendanceLabel(a: { status: string; minutesLate: number | null } | null, lang: ReportLang): string {
+    if (!a) return L(lang, 'ยังไม่บันทึก', 'Not recorded');
+    const th: Record<string, string> = { PRESENT: 'มาเรียน', LATE: 'มาสาย', ABSENT: 'ขาด', EXCUSED: 'ลา (มีเหตุผล)', LEAVE: 'ลา' };
+    const en: Record<string, string> = { PRESENT: 'Present', LATE: 'Late', ABSENT: 'Absent', EXCUSED: 'Excused', LEAVE: 'Leave' };
+    const base = L(lang, th[a.status] ?? a.status, en[a.status] ?? a.status);
+    return a.status === 'LATE' && a.minutesLate ? `${base} ${a.minutesLate} ${L(lang, 'นาที', 'min')}` : base;
+  }
+
+  private caseText(c: { bed: string | null; hnMasked: string | null; patientMasked: string | null; patientAge: string | null; diagnosis: string | null }, lang: ReportLang): string {
+    return [
+      c.bed ? `${L(lang, 'เตียง', 'Bed')} ${c.bed}` : null,
+      c.hnMasked ? `HN ${c.hnMasked}` : null,
+      c.patientMasked,
+      c.patientAge ? `${L(lang, 'อายุ', 'age')} ${c.patientAge}` : null,
+      c.diagnosis ? `Dx ${c.diagnosis}` : null,
+    ].filter(Boolean).join(' · ') || '—';
+  }
+
+  private dayText(d: Date, lang: ReportLang): string {
+    return lang === 'en'
+      ? new Intl.DateTimeFormat('en-GB', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' }).format(d)
+      : new Intl.DateTimeFormat('th-TH-u-ca-buddhist', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' }).format(d);
+  }
+
+  private timeText(d: Date): string {
+    return new Intl.DateTimeFormat('en-GB', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Bangkok' }).format(d);
+  }
+
   async studentGradePdf(user: AuthenticatedUser, studentId: string, sectionId: string, byId?: string, byName?: string, lang: ReportLang = 'th'): Promise<{ buffer: Buffer; reportNumber: string }> {
     const universityId = user.universityId;
     const [university, faculty, section, summary, settings] = await Promise.all([
@@ -926,7 +1024,10 @@ export class ReportsService {
     ]);
     if (!section) throw new NotFoundException('Section not found in this tenant');
 
-    const detailByRubric = await this.gradeDetail(universityId, section.subjectId, studentId, sectionId);
+    const [detailByRubric, log] = await Promise.all([
+      this.gradeDetail(universityId, section.subjectId, studentId, sectionId),
+      this.dailyLog(universityId, studentId, sectionId),
+    ]);
 
     const checksum = createHash('sha256').update(JSON.stringify({ studentId, sectionId, total: summary.total })).digest('hex');
     const reportNumber = await this.register(universityId, 'PDF', checksum, byId, byName, 'STUDENT_GRADE', `Grade report ${summary.student.studentCode}`);
@@ -1017,6 +1118,59 @@ export class ReportsService {
       .text(`${L(lang, 'รวม', 'Total')}: ${summary.total}/100${rawFull > 0 ? `    ${L(lang, 'คะแนนดิบรวม', 'Raw marks')}: ${Math.round(rawMarks * 100) / 100}/${rawFull}` : ''}`, left, y);
     y += 20;
 
+    // Day-by-day clinical practice: attendance, case, daily scores, notes.
+    if (log.length > 0) {
+      const pageBottom = () => doc.page.height - 90;
+      const ensure = (needed: number) => { if (y + needed > pageBottom()) { doc.addPage(); y = 50; } };
+      ensure(70);
+      y += 6;
+      doc.font(FB).fontSize(14).fillColor('#26303f').text(L(lang, 'บันทึกการฝึกปฏิบัติรายวัน', 'Daily Clinical Practice Record'), left, y); y += 18;
+      doc.font(F).fontSize(9).fillColor('#7c8798')
+        .text(L(lang, 'ข้อมูลผู้ป่วยแสดงเป็นอักษรย่อและ HN 3 หลักท้ายเพื่อคุ้มครองข้อมูลส่วนบุคคล', 'Patient details are shown as initials and the last 3 HN digits to protect patient privacy.'), left, y, { width: right - left });
+      y += 16;
+      const textW = right - left - 24;
+      for (const d of log) {
+        const lines: { text: string; font: string; size: number; color: string }[] = [];
+        for (const c of d.cases) {
+          const partners = c.partners.map((m) => this.personName(m.nameEn, m.nameTh)).join(', ');
+          lines.push({ text: `${L(lang, 'เคส', 'Case')}: ${this.caseText(c, lang)}${partners ? `  ·  ${L(lang, 'คู่', 'with')}: ${partners}` : ''}`, font: F, size: 10, color: '#26303f' });
+        }
+        if (d.scores.length > 0) {
+          lines.push({ text: `${L(lang, 'คะแนนรายวัน', 'Daily scores')}: ${d.scores.map((x) => `${(lang === 'en' ? x.nameEn : x.nameTh) ?? x.nameEn} ${x.scorePercent}%`).join('  ·  ')}`, font: F, size: 10, color: '#26303f' });
+        }
+        for (const n of d.notes) {
+          lines.push({ text: `• ${n.content}  — ${n.authorName}, ${this.timeText(n.createdAt)}`, font: F, size: 10, color: '#4a5666' });
+        }
+        const att = this.attendanceLabel(d.attendance, lang);
+        const attColor = !d.attendance ? '#a0aab8' : d.attendance.status === 'ABSENT' ? '#c0392b' : d.attendance.status === 'LATE' ? '#c47a0b' : '#1e8e5a';
+        const header = `${this.dayText(d.sessionDate, lang)}  ·  ${d.startTime}–${d.endTime}${d.topic ? `  ·  ${d.topic}` : ''}`;
+        if (lines.length === 0) {
+          // Nothing recorded that day beyond attendance: one slim line, no box.
+          ensure(18);
+          doc.font(F).fontSize(10).fillColor('#7c8798').text(header, left + 10, y, { width: right - left - 150, lineBreak: false, ellipsis: true });
+          doc.font(F).fontSize(10).fillColor(attColor).text(att, right - 140, y, { width: 130, align: 'right', lineBreak: false });
+          doc.moveTo(left, y + 15).lineTo(right, y + 15).strokeColor('#eef1f5').lineWidth(0.6).stroke();
+          y += 19;
+          continue;
+        }
+        const heights = lines.map((ln) => { doc.font(ln.font).fontSize(ln.size); return doc.heightOfString(ln.text, { width: textW }) + 2; });
+        const blockH = 22 + heights.reduce((a, h) => a + h, 0) + 8;
+        ensure(Math.min(blockH, 200));
+        const top = y;
+        doc.roundedRect(left, top, right - left, blockH, 6).strokeColor('#e3e8ef').lineWidth(0.8).stroke();
+        doc.font(FB).fontSize(11).fillColor('#0e2a4a')
+          .text(header, left + 10, top + 6, { width: right - left - 150, lineBreak: false, ellipsis: true });
+        doc.font(FB).fontSize(10).fillColor(attColor).text(att, right - 140, top + 7, { width: 130, align: 'right', lineBreak: false });
+        y = top + 22;
+        lines.forEach((ln, i) => {
+          doc.font(ln.font).fontSize(ln.size).fillColor(ln.color).text(ln.text, left + 12, y, { width: textW });
+          y += heights[i];
+        });
+        y = top + blockH + 6;
+      }
+      y += 4;
+    }
+
     // Item-by-item marks. The table above says what each rubric was worth;
     // this says how it was arrived at — which is what a student querying a
     // grade actually asks for, and what a lecturer needs to defend it.
@@ -1101,7 +1255,10 @@ export class ReportsService {
       this.assessment.studentSummary(user, studentId, sectionId),
     ]);
     if (!section) throw new NotFoundException('Section not found in this tenant');
-    const detailByRubric = await this.gradeDetail(universityId, section.subjectId, studentId, sectionId);
+    const [detailByRubric, log] = await Promise.all([
+      this.gradeDetail(universityId, section.subjectId, studentId, sectionId),
+      this.dailyLog(universityId, studentId, sectionId),
+    ]);
 
     const checksum = createHash('sha256').update(JSON.stringify({ studentId, sectionId, total: summary.total })).digest('hex');
     const reportNumber = await this.register(universityId, 'CSV', checksum, byId, byName, 'STUDENT_GRADE', `Grade report ${summary.student.studentCode}`);
@@ -1144,6 +1301,17 @@ export class ReportsService {
           ]),
         );
       }),
+      [],
+      ['Daily clinical practice (patient initials and last 3 HN digits only)'],
+      ['Date', 'Time', 'Topic', 'Attendance', 'Case', 'Partners', 'Daily scores', 'Notes'],
+      ...log.map((d) => [
+        d.sessionDate.toISOString().slice(0, 10), `${d.startTime}-${d.endTime}`, d.topic ?? '',
+        this.attendanceLabel(d.attendance, 'en'),
+        d.cases.map((c) => this.caseText(c, 'en')).join(' | '),
+        d.cases.flatMap((c) => c.partners.map((m) => m.nameEn)).join(', '),
+        d.scores.map((x) => `${x.nameEn} ${x.scorePercent}%`).join('; '),
+        d.notes.map((n) => `${n.content} (${n.authorName}, ${this.timeText(n.createdAt)})`).join(' | '),
+      ]),
     ];
     return { content: '﻿' + rows.map((r) => r.map((c) => esc(String(c))).join(',')).join('\n'), reportNumber };
   }
@@ -1155,7 +1323,10 @@ export class ReportsService {
       this.assessment.studentSummary(user, studentId, sectionId),
     ]);
     if (!section) throw new NotFoundException('Section not found in this tenant');
-    const detailByRubric = await this.gradeDetail(universityId, section.subjectId, studentId, sectionId);
+    const [detailByRubric, log] = await Promise.all([
+      this.gradeDetail(universityId, section.subjectId, studentId, sectionId),
+      this.dailyLog(universityId, studentId, sectionId),
+    ]);
 
     const checksum = createHash('sha256').update(JSON.stringify({ studentId, sectionId, total: summary.total })).digest('hex');
     const reportNumber = await this.register(universityId, 'XLSX', checksum, byId, byName, 'STUDENT_GRADE', `Grade report ${summary.student.studentCode}`);
@@ -1198,6 +1369,23 @@ export class ReportsService {
     });
     detail.columns.forEach((c) => { c.width = 14; });
     detail.getColumn(1).width = 32; detail.getColumn(2).width = 28; detail.getColumn(3).width = 60;
+
+    // Third sheet: the day-by-day clinical practice record.
+    const daily = wb.addWorksheet('Daily practice');
+    daily.addRow(['Patient details are shown as initials and the last 3 HN digits only.']);
+    headerStyle(daily.addRow(['Date', 'Time', 'Topic', 'Attendance', 'Case', 'Partners', 'Daily scores', 'Notes']));
+    log.forEach((d) => {
+      const row = daily.addRow([
+        d.sessionDate.toISOString().slice(0, 10), `${d.startTime}-${d.endTime}`, d.topic ?? '',
+        this.attendanceLabel(d.attendance, 'th'),
+        d.cases.map((c) => this.caseText(c, 'th')).join('\n'),
+        d.cases.flatMap((c) => c.partners.map((m) => this.personName(m.nameEn, m.nameTh))).join(', '),
+        d.scores.map((x) => `${x.nameTh ?? x.nameEn} ${x.scorePercent}%`).join('\n'),
+        d.notes.map((n) => `${n.content} (${n.authorName}, ${this.timeText(n.createdAt)})`).join('\n'),
+      ]);
+      row.alignment = { vertical: 'top', wrapText: true };
+    });
+    [12, 12, 18, 14, 40, 26, 34, 60].forEach((w, i) => { daily.getColumn(i + 1).width = w; });
     return { buffer: Buffer.from(await wb.xlsx.writeBuffer()), reportNumber };
   }
 }
