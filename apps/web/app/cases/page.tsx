@@ -16,8 +16,13 @@ interface Note { id: string; studentId: string; content: string; authorName: str
 interface PatientCase {
   id: string; bed: string | null; hn: string | null; patientName: string | null; patientAge: string | null;
   diagnosis: string | null; note: string | null; students: StudentRef[];
+  dischargedAt: string | null; continuedFromId: string | null; continuedFromDate: string | null;
 }
-interface DayData { session: SessionRef; cases: PatientCase[]; roster: (StudentRef & { notes: Note[] })[] }
+interface DayData {
+  session: SessionRef; cases: PatientCase[]; roster: (StudentRef & { notes: Note[] })[];
+  /** Cases from the previous practice day that can carry on into this one. */
+  previous: { session: { id: string; sessionDate: string }; cases: PatientCase[] } | null;
+}
 type CaseForm = { bed: string; hn: string; patientName: string; patientAge: string; diagnosis: string; note: string; studentIds: string[] };
 
 const EMPTY: CaseForm = { bed: '', hn: '', patientName: '', patientAge: '', diagnosis: '', note: '', studentIds: [] };
@@ -51,6 +56,8 @@ export default function CasesPage() {
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
   const [drafts, setDrafts] = useState<Record<string, string>>({});
   const [savingNote, setSavingNote] = useState<string | null>(null);
+  const [movingBed, setMovingBed] = useState<{ id: string; bed: string } | null>(null);
+  const [confirmHome, setConfirmHome] = useState<string | null>(null);
 
   const loadDay = useCallback(async (id: string) => {
     try { setDay(await apiFetch<DayData>(`/cases?classSessionId=${id}`)); }
@@ -81,7 +88,45 @@ export default function CasesPage() {
   function pickSection(id: string) { setSectionId(id); setEditing(null); setSessions(null); void loadSessions(id); }
   function pickDay(id: string) { setSessionId(id); setEditing(null); void loadDay(id); }
 
-  function startNew() { setForm(EMPTY); setEditing('new'); setError(null); }
+  function startNew(studentIds: string[] = []) { setForm({ ...EMPTY, studentIds }); setEditing('new'); setError(null); }
+
+  /** Carry cases from the previous practice day into this one. */
+  async function carryForward(caseIds: string[]) {
+    if (!sessionId || caseIds.length === 0) return;
+    setBusy(true); setError(null);
+    try {
+      await apiFetch('/cases/carry-forward', { method: 'POST', body: JSON.stringify({ classSessionId: sessionId, caseIds }) });
+      await loadDay(sessionId);
+    } catch (err) { setError(err instanceof Error ? err.message : String(err)); }
+    finally { setBusy(false); }
+  }
+
+  /** The patient moved: change only the bed. */
+  async function saveBed() {
+    if (!movingBed) return;
+    setBusy(true); setError(null);
+    try {
+      await apiFetch(`/cases/${movingBed.id}`, { method: 'PATCH', body: JSON.stringify({ bed: movingBed.bed.trim() }) });
+      setMovingBed(null);
+      await loadDay(sessionId);
+    } catch (err) { setError(err instanceof Error ? err.message : String(err)); }
+    finally { setBusy(false); }
+  }
+
+  /**
+   * The patient went home: mark the case, then open a new case for the same
+   * students so they can be given another patient straight away.
+   */
+  async function dischargeCase(c: PatientCase, discharged: boolean) {
+    if (discharged && confirmHome !== c.id) { setConfirmHome(c.id); return; }
+    setBusy(true); setError(null);
+    try {
+      await apiFetch(`/cases/${c.id}/discharge`, { method: 'PATCH', body: JSON.stringify({ discharged }) });
+      await loadDay(sessionId);
+      if (discharged) startNew(c.students.map((s) => s.id));
+    } catch (err) { setError(err instanceof Error ? err.message : String(err)); }
+    finally { setBusy(false); setConfirmHome(null); }
+  }
   function startEdit(c: PatientCase) {
     setForm({ bed: c.bed ?? '', hn: c.hn ?? '', patientName: c.patientName ?? '', patientAge: c.patientAge ?? '',
       diagnosis: c.diagnosis ?? '', note: c.note ?? '', studentIds: c.students.map((s) => s.id) });
@@ -130,7 +175,8 @@ export default function CasesPage() {
     finally { setSavingNote(null); }
   }
 
-  const caseOf = (studentId: string) => day?.cases.find((c) => c.students.some((s) => s.id === studentId));
+  // A student's current case is one whose patient hasn't gone home.
+  const caseOf = (studentId: string) => day?.cases.find((c) => !c.dischargedAt && c.students.some((s) => s.id === studentId));
   const unassigned = day ? day.roster.filter((r) => !caseOf(r.id)) : [];
 
   return (
@@ -180,9 +226,33 @@ export default function CasesPage() {
             <div className="glass rise" style={{ padding: 18 }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12, gap: 8 }}>
                 <h2 style={{ fontSize: 16, fontWeight: 700, margin: 0 }}>{t('case.cases')} ({day.cases.length})</h2>
-                {editing !== 'new' && <button className="btn-primary" onClick={startNew} style={{ padding: '8px 14px', fontSize: 13.5 }}>+ {t('case.assign')}</button>}
+                {editing !== 'new' && <button className="btn-primary" onClick={() => startNew()} style={{ padding: '8px 14px', fontSize: 13.5 }}>+ {t('case.assign')}</button>}
               </div>
               <p className="muted" style={{ fontSize: 11.5, margin: '0 0 12px' }}>🔒 {t('case.privacy')}</p>
+
+              {day.previous && day.previous.cases.length > 0 && (
+                <div style={{ padding: 12, borderRadius: 12, marginBottom: 12, border: '1px dashed var(--brand)', background: 'var(--popover-hover)' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginBottom: 8 }}>
+                    <div style={{ fontSize: 13, fontWeight: 700 }}>↪ {t('case.prevTitle').replace('{date}', fmtDay(day.previous.session.sessionDate))}</div>
+                    <button className="btn-primary" disabled={busy} onClick={() => carryForward(day.previous!.cases.map((c) => c.id))} style={{ padding: '6px 12px', fontSize: 12.5 }}>
+                      {t('case.carryAll').replace('{n}', String(day.previous.cases.length))}
+                    </button>
+                  </div>
+                  <div className="muted" style={{ fontSize: 11.5, marginBottom: 8 }}>{t('case.prevHint')}</div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                    {day.previous.cases.map((c) => (
+                      <div key={c.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, fontSize: 12.5 }}>
+                        <span style={{ minWidth: 0 }}>
+                          <b>{t('case.bed')} {c.bed || '—'}</b> · {c.patientName || '—'}{c.diagnosis ? ` · ${c.diagnosis}` : ''}
+                          <span className="muted"> — {c.students.map((s) => sname(s)).join(', ') || '—'}</span>
+                        </span>
+                        <button onClick={() => carryForward([c.id])} disabled={busy} className="glass hairline"
+                          style={{ padding: '4px 10px', fontSize: 12, borderRadius: 8, cursor: 'pointer', color: 'var(--text-0)', flexShrink: 0 }}>{t('case.carryOne')}</button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
 
               {editing && (
                 <div className="glass hairline" style={{ padding: 14, borderRadius: 12, marginBottom: 12 }}>
@@ -221,17 +291,44 @@ export default function CasesPage() {
               {day.cases.length === 0 && !editing && <div className="muted" style={{ fontSize: 13 }}>{t('case.none')}</div>}
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                 {day.cases.map((c) => (
-                  <div key={c.id} className="glass hairline" style={{ padding: 12, borderRadius: 12, outline: editing === c.id ? '1.5px solid var(--brand)' : undefined }}>
+                  <div key={c.id} className="glass hairline" style={{ padding: 12, borderRadius: 12, outline: editing === c.id ? '1.5px solid var(--brand)' : undefined, opacity: c.dischargedAt ? 0.6 : 1 }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, alignItems: 'flex-start' }}>
                       <div style={{ minWidth: 0 }}>
+                        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 4 }}>
+                          {c.continuedFromDate && <span className="chip" style={{ fontSize: 11 }}>↪ {t('case.continued').replace('{date}', fmtDay(c.continuedFromDate))}</span>}
+                          {c.dischargedAt && <span className="chip chip-success" style={{ fontSize: 11 }}>🏠 {t('case.discharged')}</span>}
+                        </div>
+                        {movingBed?.id === c.id ? (
+                          <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                            <span style={{ fontWeight: 700, fontSize: 13.5 }}>{t('case.newBed')}</span>
+                            <input autoFocus onFocus={(e) => e.target.select()} value={movingBed.bed} onChange={(e) => setMovingBed({ id: c.id, bed: e.target.value })}
+                              onKeyDown={(e) => { if (e.key === 'Enter') void saveBed(); if (e.key === 'Escape') setMovingBed(null); }}
+                              style={{ ...input, width: 90, padding: '5px 8px' }} />
+                            <button className="btn-primary" onClick={saveBed} disabled={busy} style={{ padding: '5px 10px', fontSize: 12 }}>{t('case.save')}</button>
+                            <button onClick={() => setMovingBed(null)} className="glass hairline" style={{ padding: '5px 10px', fontSize: 12, borderRadius: 8, cursor: 'pointer', color: 'var(--text-1)' }}>{t('case.cancel')}</button>
+                          </div>
+                        ) : (
                         <div style={{ fontWeight: 700, fontSize: 14.5 }}>
                           {t('case.bed')} {c.bed || '—'} <span className="muted" style={{ fontWeight: 500, fontSize: 12.5 }}>· HN {c.hn || '—'}</span>
                         </div>
+                        )}
                         <div style={{ fontSize: 13.5, marginTop: 2 }}>{c.patientName || '—'}{c.patientAge ? ` · ${c.patientAge}` : ''}</div>
                         {c.diagnosis && <div className="muted" style={{ fontSize: 12.5, marginTop: 2 }}>Dx: {c.diagnosis}</div>}
                         {c.note && <div className="muted" style={{ fontSize: 12.5, marginTop: 4, whiteSpace: 'pre-wrap' }}>{c.note}</div>}
                       </div>
-                      <div style={{ display: 'flex', gap: 6, flexShrink: 0 }}>
+                      <div style={{ display: 'flex', gap: 6, flexShrink: 0, flexWrap: 'wrap', justifyContent: 'flex-end', maxWidth: 210 }}>
+                        {!c.dischargedAt && (
+                          <button onClick={() => setMovingBed({ id: c.id, bed: c.bed ?? '' })} className="glass hairline" style={{ padding: '5px 10px', fontSize: 12, borderRadius: 8, cursor: 'pointer', color: 'var(--text-1)' }}>{t('case.moveBed')}</button>
+                        )}
+                        {c.dischargedAt ? (
+                          <button onClick={() => dischargeCase(c, false)} disabled={busy} className="glass hairline" style={{ padding: '5px 10px', fontSize: 12, borderRadius: 8, cursor: 'pointer', color: 'var(--text-1)' }}>{t('case.undoDischarge')}</button>
+                        ) : (
+                          <button onClick={() => dischargeCase(c, true)} disabled={busy}
+                            style={{ padding: '5px 10px', fontSize: 12, borderRadius: 8, cursor: 'pointer', border: '1px solid var(--success)',
+                              background: confirmHome === c.id ? 'var(--success)' : 'transparent', color: confirmHome === c.id ? '#fff' : 'var(--success)' }}>
+                            {confirmHome === c.id ? t('case.confirmDischarge') : `🏠 ${t('case.discharge')}`}
+                          </button>
+                        )}
                         <button onClick={() => startEdit(c)} className="glass hairline" style={{ padding: '5px 10px', fontSize: 12, borderRadius: 8, cursor: 'pointer', color: 'var(--text-1)' }}>{t('case.edit')}</button>
                         <button onClick={() => deleteCase(c.id)} disabled={busy}
                           style={{ padding: '5px 10px', fontSize: 12, borderRadius: 8, cursor: 'pointer', border: '1px solid var(--danger)',

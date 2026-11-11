@@ -1712,12 +1712,22 @@ model PatientCase {
   patientAge     String?
   diagnosis      String?
   note           String?
+  /// The same patient carried on from an earlier practice day.
+  continuedFromId String?
+  /// Set when the patient went home (or was otherwise no longer the
+  /// students' case) — the case stays on that day's record but is not
+  /// offered for carrying forward, and its students can take a new case.
+  dischargedAt   DateTime?
   createdById    String?
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
 
-  classSession ClassSession         @relation(fields: [classSessionId], references: [id])
-  students     PatientCaseStudent[]
+  classSession  ClassSession         @relation(fields: [classSessionId], references: [id])
+  students      PatientCaseStudent[]
+  continuedFrom PatientCase?         @relation("CaseContinuation", fields: [continuedFromId], references: [id], onDelete: SetNull)
+  continuedBy   PatientCase[]        @relation("CaseContinuation")
+
+  @@index([continuedFromId])
 
   @@index([classSessionId])
   @@index([universityId])

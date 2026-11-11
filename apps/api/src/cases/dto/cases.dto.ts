@@ -1,5 +1,5 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { ArrayMaxSize, ArrayMinSize, IsArray, IsOptional, IsString, MaxLength, MinLength } from 'class-validator';
+import { ArrayMaxSize, ArrayMinSize, IsArray, IsBoolean, IsOptional, IsString, MaxLength, MinLength } from 'class-validator';
 
 class CaseFieldsDto {
   @ApiPropertyOptional({ example: '12' }) @IsOptional() @IsString() @MaxLength(30) bed?: string;
@@ -32,4 +32,15 @@ export class CreateDailyNoteDto {
   @ApiProperty({ example: 'เตรียมข้อมูลผู้ป่วยมาครบ ตอบคำถามเรื่องยาได้ดี' })
   @IsString() @MinLength(1) @MaxLength(4000)
   content!: string;
+}
+
+export class CarryForwardDto {
+  @ApiProperty({ description: 'Practice day to carry the cases into' }) @IsString() classSessionId!: string;
+  @ApiProperty({ type: [String], description: 'Cases from an earlier practice day of the same section' })
+  @IsArray() @ArrayMinSize(1) @ArrayMaxSize(60) @IsString({ each: true })
+  caseIds!: string[];
+}
+
+export class DischargeCaseDto {
+  @ApiProperty({ description: 'true = the patient went home; false = undo' }) @IsBoolean() discharged!: boolean;
 }

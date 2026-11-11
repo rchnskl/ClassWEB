@@ -102,4 +102,49 @@ describe('Daily patient cases & notes', () => {
     const all = await http.get(`/api/v1/students/${enrolled[0]}/notes`).set(auth(admin)).expect(200);
     expect(all.body.items.some((n: { content: string }) => n.content === 'ตอบคำถามเรื่องยาได้ดี')).toBe(true);
   });
+
+  it("offers yesterday's cases for today, carries them forward, and leaves out a patient who went home", async () => {
+    const section = await prisma.classSession.findUniqueOrThrow({ where: { id: sessionId } });
+    const next = (await prisma.classSession.create({
+      data: { sectionId: section.sectionId, sessionDate: new Date('2026-11-26T00:00:00Z'), startTime: '07:00', endTime: '16:00' },
+    })).id;
+    const auth2 = auth(admin);
+    const stay = (await http.post('/api/v1/cases').set(auth2).send({
+      classSessionId: sessionId, studentIds: enrolled.slice(0, 2), bed: '3', hn: 'HN-STAY', patientName: 'ด.ช. คงอยู่', diagnosis: 'Asthma',
+    }).expect(201)).body;
+    const home = (await http.post('/api/v1/cases').set(auth2).send({
+      classSessionId: sessionId, studentIds: [enrolled[0]], bed: '4', hn: 'HN-HOME',
+    }).expect(201)).body;
+    // The patient in bed 4 goes home: the case stays on that day, marked.
+    const discharged = await http.patch(`/api/v1/cases/${home.id}/discharge`).set(auth2).send({ discharged: true }).expect(200);
+    expect(discharged.body.dischargedAt).toBeTruthy();
+
+    const day2 = await http.get('/api/v1/cases').query({ classSessionId: next }).set(auth2).expect(200);
+    expect(day2.body.previous.session.id).toBe(sessionId);
+    const offered = day2.body.previous.cases.map((c: { id: string }) => c.id);
+    expect(offered).toContain(stay.id);
+    expect(offered).not.toContain(home.id);
+
+    // A discharged case can't be carried forward.
+    await http.post('/api/v1/cases/carry-forward').set(auth2).send({ classSessionId: next, caseIds: [home.id] }).expect(400);
+
+    const carried = await http.post('/api/v1/cases/carry-forward').set(auth2).send({ classSessionId: next, caseIds: [stay.id] }).expect(201);
+    expect(carried.body.created).toBe(1);
+    const copy = carried.body.cases[0];
+    expect(copy).toMatchObject({ bed: '3', hn: 'HN-STAY', diagnosis: 'Asthma', continuedFromId: stay.id });
+    expect(copy.continuedFromDate.slice(0, 10)).toBe('2026-11-25');
+    expect(copy.students.map((x: { id: string }) => x.id).sort()).toEqual(enrolled.slice(0, 2).sort());
+
+    // Carrying again is a no-op, and it is no longer offered.
+    expect((await http.post('/api/v1/cases/carry-forward').set(auth2).send({ classSessionId: next, caseIds: [stay.id] }).expect(201)).body.created).toBe(0);
+    const after = await http.get('/api/v1/cases').query({ classSessionId: next }).set(auth2).expect(200);
+    expect(after.body.previous.cases.map((c: { id: string }) => c.id)).not.toContain(stay.id);
+
+    // The patient moved bed today: an ordinary edit, yesterday's case untouched.
+    await http.patch(`/api/v1/cases/${copy.id}`).set(auth2).send({ bed: '7' }).expect(200);
+    expect((await prisma.patientCase.findUniqueOrThrow({ where: { id: stay.id } })).bed).toBe('3');
+
+    // Only earlier days of the same section can be carried from.
+    await http.post('/api/v1/cases/carry-forward').set(auth2).send({ classSessionId: sessionId, caseIds: [copy.id] }).expect(400);
+  });
 });

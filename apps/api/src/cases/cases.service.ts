@@ -3,10 +3,12 @@ import { AuditAction } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuthenticatedUser } from '../common/authenticated-user';
 import { LecturerScopeService } from '../common/lecturer-scope.service';
-import { CreateCaseDto, CreateDailyNoteDto, UpdateCaseDto } from './dto/cases.dto';
+import { CarryForwardDto, CreateCaseDto, CreateDailyNoteDto, DischargeCaseDto, UpdateCaseDto } from './dto/cases.dto';
 
 const caseSelect = {
   id: true, bed: true, hn: true, patientName: true, patientAge: true, diagnosis: true, note: true,
+  dischargedAt: true, continuedFromId: true,
+  continuedFrom: { select: { classSession: { select: { sessionDate: true } } } },
   createdAt: true, updatedAt: true,
   students: { select: { student: { select: { id: true, studentCode: true, nameEn: true, nameTh: true } } } },
 } as const;
@@ -58,6 +60,31 @@ export class CasesService {
     return this.prisma.auditLog.create({ data: { universityId: user.universityId, userId: user.id, action, entityType, entityId, metadata } });
   }
 
+  private shape<T extends { students: { student: unknown }[]; continuedFrom: { classSession: { sessionDate: Date } } | null }>(c: T) {
+    const { students, continuedFrom, ...rest } = c;
+    return { ...rest, continuedFromDate: continuedFrom?.classSession.sessionDate ?? null, students: students.map((s) => s.student) };
+  }
+
+  /**
+   * The most recent earlier practice day of the section that has cases, and
+   * those of its cases that could carry on into `session`: the patient did
+   * not go home, and the case hasn't been carried into this day already.
+   */
+  private async previousDay(sectionId: string, session: { id: string; sessionDate: Date }) {
+    const prev = await this.prisma.classSession.findFirst({
+      where: { sectionId, sessionDate: { lt: session.sessionDate }, patientCases: { some: {} } },
+      select: { id: true, sessionDate: true },
+      orderBy: { sessionDate: 'desc' },
+    });
+    if (!prev) return null;
+    const [cases, carried] = await Promise.all([
+      this.prisma.patientCase.findMany({ where: { classSessionId: prev.id, dischargedAt: null }, select: caseSelect, orderBy: [{ bed: 'asc' }, { createdAt: 'asc' }] }),
+      this.prisma.patientCase.findMany({ where: { classSessionId: session.id, continuedFromId: { not: null } }, select: { continuedFromId: true } }),
+    ]);
+    const already = new Set(carried.map((c) => c.continuedFromId));
+    return { session: prev, cases: cases.filter((c) => !already.has(c.id)).map((c) => this.shape(c)) };
+  }
+
   /** The day's cases, and the section roster with each student's notes for that day. */
   async day(user: AuthenticatedUser, classSessionId: string) {
     const session = await this.session(user, classSessionId);
@@ -76,8 +103,10 @@ export class CasesService {
     ]);
     return {
       session,
-      cases: cases.map(({ students, ...c }) => ({ ...c, students: students.map((s) => s.student) })),
+      cases: cases.map((c) => this.shape(c)),
       roster: enrollments.map((e) => ({ ...e.student, notes: notes.filter((n) => n.studentId === e.student.id) })),
+      // Cases from the previous practice day that can carry on into this one.
+      previous: await this.previousDay(session.sectionId, session),
     };
   }
 
@@ -94,7 +123,7 @@ export class CasesService {
       select: caseSelect,
     });
     await this.audit(user, AuditAction.CREATE, 'PatientCase', created.id, { classSessionId, studentIds });
-    return { ...created, students: created.students.map((s) => s.student) };
+    return this.shape(created);
   }
 
   async update(user: AuthenticatedUser, id: string, dto: UpdateCaseDto) {
@@ -112,7 +141,7 @@ export class CasesService {
       return tx.patientCase.update({ where: { id }, data: fields, select: caseSelect });
     });
     await this.audit(user, AuditAction.UPDATE, 'PatientCase', id, { fields: Object.keys(fields), ...(studentIds && { studentIds }) });
-    return { ...updated, students: updated.students.map((s) => s.student) };
+    return this.shape(updated);
   }
 
   async remove(user: AuthenticatedUser, id: string) {
@@ -136,5 +165,54 @@ export class CasesService {
     });
     await this.audit(user, AuditAction.CREATE, 'StudentNote', note.id, { studentId: dto.studentId, classSessionId: dto.classSessionId });
     return note;
+  }
+
+  /**
+   * Carry cases from an earlier practice day into this one — the same
+   * patient and the same students (those still enrolled), linked back so the
+   * patient's course can be followed day to day.
+   */
+  async carryForward(user: AuthenticatedUser, dto: CarryForwardDto) {
+    const session = await this.session(user, dto.classSessionId);
+    const sources = await this.prisma.patientCase.findMany({
+      where: { id: { in: dto.caseIds }, universityId: user.universityId, classSession: { sectionId: session.sectionId, sessionDate: { lt: session.sessionDate } } },
+      select: { id: true, bed: true, hn: true, patientName: true, patientAge: true, diagnosis: true, note: true, dischargedAt: true, students: { select: { studentId: true } } },
+    });
+    if (sources.length !== new Set(dto.caseIds).size) throw new BadRequestException('Only cases from an earlier practice day of this section can be carried forward');
+    if (sources.some((c) => c.dischargedAt)) throw new BadRequestException('A patient who went home cannot be carried forward');
+    const already = new Set((await this.prisma.patientCase.findMany({
+      where: { classSessionId: session.id, continuedFromId: { in: dto.caseIds } }, select: { continuedFromId: true },
+    })).map((c) => c.continuedFromId));
+    const enrolled = new Set((await this.prisma.enrollment.findMany({
+      where: { sectionId: session.sectionId, status: 'ENROLLED' }, select: { studentId: true },
+    })).map((e) => e.studentId));
+
+    const created = [];
+    for (const src of sources.filter((c) => !already.has(c.id))) {
+      const studentIds = src.students.map((m) => m.studentId).filter((id) => enrolled.has(id));
+      const c = await this.prisma.patientCase.create({
+        data: {
+          universityId: user.universityId, classSessionId: session.id, createdById: user.id, continuedFromId: src.id,
+          bed: src.bed, hn: src.hn, patientName: src.patientName, patientAge: src.patientAge, diagnosis: src.diagnosis, note: src.note,
+          students: { create: studentIds.map((studentId) => ({ studentId })) },
+        },
+        select: caseSelect,
+      });
+      await this.audit(user, AuditAction.CREATE, 'PatientCase', c.id, { classSessionId: session.id, continuedFromId: src.id, studentIds });
+      created.push(this.shape(c));
+    }
+    return { created: created.length, cases: created };
+  }
+
+  /** The patient went home (or back): mark or clear the case's discharge. */
+  async discharge(user: AuthenticatedUser, id: string, dto: DischargeCaseDto) {
+    const existing = await this.prisma.patientCase.findFirst({ where: { id, universityId: user.universityId }, select: { classSessionId: true } });
+    if (!existing) throw new NotFoundException('Case not found');
+    await this.session(user, existing.classSessionId);
+    const updated = await this.prisma.patientCase.update({
+      where: { id }, data: { dischargedAt: dto.discharged ? new Date() : null }, select: caseSelect,
+    });
+    await this.audit(user, AuditAction.UPDATE, 'PatientCase', id, { discharged: dto.discharged });
+    return this.shape(updated);
   }
 }

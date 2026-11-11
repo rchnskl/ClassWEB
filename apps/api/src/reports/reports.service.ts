@@ -955,7 +955,7 @@ export class ReportsService {
       this.prisma.patientCase.findMany({
         where: { classSessionId: { in: ids }, students: { some: { studentId } } },
         select: {
-          classSessionId: true, bed: true, hn: true, patientName: true, patientAge: true, diagnosis: true,
+          classSessionId: true, bed: true, hn: true, patientName: true, patientAge: true, diagnosis: true, dischargedAt: true,
           students: { select: { student: { select: { id: true, nameEn: true, nameTh: true } } } },
         },
         orderBy: { createdAt: 'asc' },
@@ -975,7 +975,7 @@ export class ReportsService {
       attendance: attendance.find((a) => a.classSessionId === x.id) ?? null,
       cases: cases.filter((c) => c.classSessionId === x.id).map((c) => ({
         bed: c.bed, hnMasked: this.maskHn(c.hn), patientMasked: this.maskPatientName(c.patientName),
-        patientAge: c.patientAge, diagnosis: c.diagnosis,
+        patientAge: c.patientAge, diagnosis: c.diagnosis, discharged: c.dischargedAt != null,
         partners: c.students.map((m) => m.student).filter((m) => m.id !== studentId),
       })),
       scores: evaluations.filter((e) => e.classSessionId === x.id)
@@ -993,13 +993,14 @@ export class ReportsService {
     return a.status === 'LATE' && a.minutesLate ? `${base} ${a.minutesLate} ${L(lang, 'นาที', 'min')}` : base;
   }
 
-  private caseText(c: { bed: string | null; hnMasked: string | null; patientMasked: string | null; patientAge: string | null; diagnosis: string | null }, lang: ReportLang): string {
+  private caseText(c: { bed: string | null; hnMasked: string | null; patientMasked: string | null; patientAge: string | null; diagnosis: string | null; discharged?: boolean }, lang: ReportLang): string {
     return [
       c.bed ? `${L(lang, 'เตียง', 'Bed')} ${c.bed}` : null,
       c.hnMasked ? `HN ${c.hnMasked}` : null,
       c.patientMasked,
       c.patientAge ? `${L(lang, 'อายุ', 'age')} ${c.patientAge}` : null,
       c.diagnosis ? `Dx ${c.diagnosis}` : null,
+      c.discharged ? L(lang, '(ผู้ป่วยกลับบ้าน)', '(discharged)') : null,
     ].filter(Boolean).join(' · ') || '—';
   }
 

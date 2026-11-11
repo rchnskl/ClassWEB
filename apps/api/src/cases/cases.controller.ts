@@ -1,7 +1,7 @@
 import { Body, Controller, Delete, Get, Param, Patch, Post, Query } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { CasesService } from './cases.service';
-import { CreateCaseDto, CreateDailyNoteDto, UpdateCaseDto } from './dto/cases.dto';
+import { CarryForwardDto, CreateCaseDto, CreateDailyNoteDto, DischargeCaseDto, UpdateCaseDto } from './dto/cases.dto';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { Permissions } from '../common/decorators/permissions.decorator';
 import { AuthenticatedUser } from '../common/authenticated-user';
@@ -24,6 +24,20 @@ export class CasesController {
   @ApiOperation({ summary: 'Assign a patient case (bed, HN, name, age) to students for a practice day' })
   create(@CurrentUser() user: AuthenticatedUser, @Body() dto: CreateCaseDto) {
     return this.cases.create(user, dto);
+  }
+
+  @Post('carry-forward')
+  @Permissions('note:create')
+  @ApiOperation({ summary: "Carry cases from an earlier practice day into this one (same patient, same students)" })
+  carryForward(@CurrentUser() user: AuthenticatedUser, @Body() dto: CarryForwardDto) {
+    return this.cases.carryForward(user, dto);
+  }
+
+  @Patch(':id/discharge')
+  @Permissions('note:update')
+  @ApiOperation({ summary: 'Mark that the patient went home (or undo)' })
+  discharge(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string, @Body() dto: DischargeCaseDto) {
+    return this.cases.discharge(user, id, dto);
   }
 
   @Patch(':id')
