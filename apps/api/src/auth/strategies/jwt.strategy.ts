@@ -7,6 +7,19 @@ import { AuthenticatedUser } from '../../common/authenticated-user';
 import { AccessTokenPayload } from '../token.service';
 
 /**
+ * Resolved principals, briefly cached per user. Resolving one loads the user,
+ * their roles and every permission of those roles (~125 rows for an admin) —
+ * on every request, which on a small instance was a large share of each
+ * request's time. A role or status change clears the entry at once
+ * (invalidatePrincipal); otherwise an entry lives PRINCIPAL_TTL_MS.
+ */
+const PRINCIPAL_TTL_MS = 30_000;
+const principals = new Map<string, { value: AuthenticatedUser; at: number }>();
+export function invalidatePrincipal(userId?: string) {
+  if (userId) principals.delete(userId); else principals.clear();
+}
+
+/**
  * Validates the access token and materialises the request principal, including
  * the flattened RBAC permission set resolved from the user's roles.
  */
@@ -24,6 +37,9 @@ export class JwtStrategy extends PassportStrategy(Strategy, 'jwt') {
   }
 
   async validate(payload: AccessTokenPayload): Promise<AuthenticatedUser> {
+    const hit = principals.get(payload.sub);
+    if (hit && Date.now() - hit.at < PRINCIPAL_TTL_MS) return hit.value;
+
     const user = await this.prisma.user.findFirst({
       where: { id: payload.sub, deletedAt: null, status: 'ACTIVE' },
       include: {
@@ -45,12 +61,14 @@ export class JwtStrategy extends PassportStrategy(Strategy, 'jwt') {
       }
     }
 
-    return {
+    const principal: AuthenticatedUser = {
       id: user.id,
       universityId: user.universityId,
       email: user.email,
       roleCodes,
       permissions: [...permissions],
     };
+    principals.set(user.id, { value: principal, at: Date.now() });
+    return principal;
   }
 }

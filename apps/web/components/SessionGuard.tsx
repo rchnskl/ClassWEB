@@ -74,14 +74,16 @@ export default function SessionGuard({ children }: { children: React.ReactNode }
     return () => window.clearInterval(id);
   }, [hasSession, forceLogout]);
 
-  if (!hasSession) return <>{children}</>;
-
+  // The same wrapper whether or not there is a session: switching from a bare
+  // fragment to a <div> once the session was detected changed the tree's
+  // shape, so React threw the whole page away and mounted it again — every
+  // page loaded all of its data twice.
   return (
     <>
-      <div style={locked ? { filter: 'blur(8px)', pointerEvents: 'none', userSelect: 'none' } : undefined} aria-hidden={locked}>
+      <div style={hasSession && locked ? { filter: 'blur(8px)', pointerEvents: 'none', userSelect: 'none' } : undefined} aria-hidden={hasSession && locked}>
         {children}
       </div>
-      {locked && <LockModal onUnlock={() => { setLocked(false); lastActivity.current = Date.now(); }} onForceLogout={forceLogout} />}
+      {hasSession && locked && <LockModal onUnlock={() => { setLocked(false); lastActivity.current = Date.now(); }} onForceLogout={forceLogout} />}
     </>
   );
 

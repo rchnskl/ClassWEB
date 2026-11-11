@@ -5,6 +5,7 @@ import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
 import { TokenService } from '../auth/token.service';
 import { generateTempPassword } from '../common/temp-password';
+import { invalidatePrincipal } from '../auth/strategies/jwt.strategy';
 
 @Injectable()
 export class UsersService {
@@ -146,6 +147,8 @@ export class UsersService {
     if (dto.status) {
       await this.prisma.user.update({ where: { id: userId }, data: { status: dto.status } });
     }
+    // Their new role / status applies from the next request, not after the cache expires.
+    if (dto.roleCode || dto.status) invalidatePrincipal(userId);
     return this.findProfile(userId);
   }
 
