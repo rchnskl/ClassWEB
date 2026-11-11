@@ -271,8 +271,16 @@ export default function CasesPage() {
                           <b>{t('case.bed')} {c.bed || '—'}</b> · {c.patientName || '—'}{c.diagnosis ? ` · ${c.diagnosis}` : ''}
                           <span className="muted"> — {c.students.map((s) => sname(s)).join(', ') || '—'}</span>
                         </span>
-                        <button onClick={() => carryForward([c.id])} disabled={busy} className="glass hairline"
-                          style={{ padding: '4px 10px', fontSize: 12, borderRadius: 8, cursor: 'pointer', color: 'var(--text-0)', flexShrink: 0 }}>{t('case.carryOne')}</button>
+                        <span style={{ display: 'flex', gap: 6, flexShrink: 0 }}>
+                          <button onClick={() => carryForward([c.id])} disabled={busy} className="glass hairline"
+                            style={{ padding: '4px 10px', fontSize: 12, borderRadius: 8, cursor: 'pointer', color: 'var(--text-0)' }}>{t('case.carryOne')}</button>
+                          {/* Went home since that day: mark it there (it stops being offered) and give the students a new case today. */}
+                          <button onClick={() => dischargeCase(c, true)} disabled={busy}
+                            style={{ padding: '4px 10px', fontSize: 12, borderRadius: 8, cursor: 'pointer', border: '1px solid var(--success)',
+                              background: confirmHome === c.id ? 'var(--success)' : 'transparent', color: confirmHome === c.id ? '#fff' : 'var(--success)' }}>
+                            {confirmHome === c.id ? t('case.confirmDischarge') : `🏠 ${t('case.discharge')}`}
+                          </button>
+                        </span>
                       </div>
                     ))}
                   </div>
