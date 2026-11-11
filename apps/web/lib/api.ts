@@ -103,6 +103,16 @@ function token(): string | null {
   return typeof window !== 'undefined' ? localStorage.getItem('accessToken') : null;
 }
 
+/** Seconds until the access token expires (from its `exp` claim), or null if unreadable. */
+function secondsLeft(jwt: string): number | null {
+  try {
+    const payload = JSON.parse(atob(jwt.split('.')[1].replace(/-/g, '+').replace(/_/g, '/'))) as { exp?: number };
+    return typeof payload.exp === 'number' ? payload.exp - Date.now() / 1000 : null;
+  } catch {
+    return null;
+  }
+}
+
 /** Single in-flight refresh so concurrent 401s don't stampede /auth/refresh. */
 let refreshInFlight: Promise<string | null> | null = null;
 
@@ -169,6 +179,13 @@ export async function apiFetch<T>(path: string, init: RequestInit & FeedbackOpti
   const announce = !silent && MUTATING.has(method) && !path.startsWith('/auth/');
   beginRequest();
   try {
+    // Renew a token that is about to expire before sending, rather than
+    // letting every request on the page fail with 401 and be sent again.
+    const current = token();
+    if (current && !path.startsWith('/auth/')) {
+      const left = secondsLeft(current);
+      if (left != null && left < 30) await refreshAccessToken();
+    }
     const accessToken = token();
     const res = await fetch(`${API_BASE}${path}`, {
       ...request,
