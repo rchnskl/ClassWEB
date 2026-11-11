@@ -1,15 +1,15 @@
 // classweb-keepalive — Cloudflare Worker
-// Cron trigger: */10 0-11 * * 1-6  (every 10 min, Mon–Sat 07:00–18:59 Bangkok)
+// Cron trigger: */10 * * * *  (every 10 min, around the clock)
 //
 // Render's free instance sleeps after 15 minutes without traffic, and the next
-// visitor then waits ~50 s for it to boot. During teaching hours this pings the
-// API's liveness endpoint every 10 minutes so it stays up; outside them it
-// lets the instance sleep.
+// visitor then waits ~50 s for it to boot. This pings the API's liveness
+// endpoint every 10 minutes so it stays up — lecturers grade in the evening
+// and at weekends too.
 //
 // Quota: /health/live does NOT query the database, so these pings never wake
 // Neon — its compute still auto-suspends whenever nobody is using the system,
-// and only real use spends Neon compute-hours. Limiting the pings to teaching
-// hours also keeps Render's free instance-hours well under the monthly cap.
+// and only real use spends Neon compute-hours. Render's free tier gives 750
+// instance-hours a month; one always-on service uses about 744.
 //
 // Deployed with `npx wrangler deploy --config infra/keepalive/wrangler.toml`
 // to the rachanonskl Cloudflare account — the same one as the web app

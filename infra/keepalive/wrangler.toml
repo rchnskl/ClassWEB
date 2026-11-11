@@ -4,5 +4,7 @@ main = "worker.js"
 compatibility_date = "2026-08-01"
 
 [triggers]
-# Every 10 min, Mon–Sat 00:00–11:59 UTC = 07:00–18:59 Bangkok (teaching hours).
-crons = ["*/10 0-11 * * 1-6"]
+# Every 10 min, around the clock: lecturers also grade in the evening and at
+# weekends, and a sleeping Render instance makes the first visitor wait ~50 s.
+# One always-on free service uses ~744 of Render's 750 free hours a month.
+crons = ["*/10 * * * *"]

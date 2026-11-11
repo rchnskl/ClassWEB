@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import Logo from './Logo';
-import { apiFetch } from '@/lib/api';
+import { cachedGet } from '@/lib/api';
 import { useI18n } from '@/lib/i18n';
 import { useUI } from '@/lib/ui';
 import { useBranding } from '@/lib/branding';
@@ -48,8 +48,8 @@ export default function Sidebar({ active = 'Dashboard' }: { active?: string }) {
   const isAdmin = (useStoredUser()?.roleCodes ?? []).includes('ADMIN');
   useEffect(() => {
     if (!localStorage.getItem('accessToken')) return;
-    apiFetch<YearRef[]>('/academic-years').then((years) => setCurrentYear(years.find((y) => y.isCurrent) ?? null)).catch(() => {});
-    apiFetch<SemesterRef[]>('/semesters').then((sems) => setCurrentSemester(sems.find((s) => s.isCurrent) ?? null)).catch(() => {});
+    cachedGet<YearRef[]>('/academic-years', 5 * 60_000).then((years) => setCurrentYear(years.find((y) => y.isCurrent) ?? null)).catch(() => {});
+    cachedGet<SemesterRef[]>('/semesters', 5 * 60_000).then((sems) => setCurrentSemester(sems.find((s) => s.isCurrent) ?? null)).catch(() => {});
   }, []);
 
   const nav = NAV.filter((item) => item.id !== 'Settings' || isAdmin);

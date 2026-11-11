@@ -32,10 +32,15 @@ export default function NotificationBell() {
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- fetches from the API on mount / when its inputs change; state is set as the request starts and settles
     void load();
-    const id = setInterval(() => {
+    // Once a minute, and only while the tab is in view: a page left open in
+    // a background tab shouldn't keep the server (and its database) busy.
+    const poll = () => {
+      if (document.visibilityState !== 'visible') return;
       apiFetch<{ unread: number }>('/notifications/unread-count').then((d) => setUnread(d.unread)).catch(() => {});
-    }, 20000);
-    return () => clearInterval(id);
+    };
+    const id = setInterval(poll, 60_000);
+    document.addEventListener('visibilitychange', poll);
+    return () => { clearInterval(id); document.removeEventListener('visibilitychange', poll); };
   }, [load]);
 
   const place = useCallback(() => {

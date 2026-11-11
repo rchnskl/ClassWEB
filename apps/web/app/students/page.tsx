@@ -8,7 +8,7 @@ import { IconSearch, IconStudents } from '@/components/icons';
 import StudentNotesDrawer from '@/components/StudentNotesDrawer';
 import PdfPreviewModal from '@/components/PdfPreviewModal';
 import StudentImportModal from '@/components/StudentImportModal';
-import { apiFetch, downloadFile, fetchPreviewUrl, type MeResponse, type Paginated } from '@/lib/api';
+import { apiFetch, downloadFile, fetchPreviewUrl, type MeResponse, type Paginated, cachedGet } from '@/lib/api';
 import { useI18n } from '@/lib/i18n';
 import { useStoredUser } from '@/lib/local-store';
 
@@ -110,7 +110,7 @@ function StudentsPageInner() {
       router.replace('/login');
       return;
     }
-    apiFetch<MeResponse>('/users/me')
+    cachedGet<MeResponse>('/users/me')
       .then((me) => setIsAdmin(me.roles.some((r) => r.role.code === 'ADMIN')))
       .catch(() => {});
     apiFetch<ProgramRef[]>('/programs').then(setPrograms).catch(() => {});

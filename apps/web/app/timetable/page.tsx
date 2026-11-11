@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation';
 import Sidebar from '@/components/Sidebar';
 import Topbar from '@/components/Topbar';
 import { todayBangkok } from '@/lib/dates';
-import { apiFetch, type MeResponse } from '@/lib/api';
+import { apiFetch, type MeResponse, cachedGet } from '@/lib/api';
 import { useI18n } from '@/lib/i18n';
 
 interface Slot {
@@ -126,7 +126,7 @@ export default function TimetablePage() {
       .then((d) => setSlots(d.slots))
       .catch((e) => setError(e instanceof Error ? e.message : 'Failed to load timetable'))
       .finally(() => setLoading(false));
-    apiFetch<MeResponse>('/users/me').then((me) => setIsAdmin(me.roles.some((r) => r.role.code === 'ADMIN'))).catch(() => {});
+    cachedGet<MeResponse>('/users/me').then((me) => setIsAdmin(me.roles.some((r) => r.role.code === 'ADMIN'))).catch(() => {});
     void loadEvents();
   }, [router, loadEvents]);
 

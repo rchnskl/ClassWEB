@@ -8,7 +8,7 @@ import NotificationBell from './NotificationBell';
 import ChangePasswordModal from './ChangePasswordModal';
 import GlobalSearch from './GlobalSearch';
 import { IconLogout, IconMenu } from './icons';
-import { apiFetch, clearSession, type MeResponse } from '@/lib/api';
+import { clearSession, type MeResponse, cachedGet } from '@/lib/api';
 import { useI18n } from '@/lib/i18n';
 import { useUI } from '@/lib/ui';
 
@@ -28,7 +28,7 @@ export default function Topbar({ email }: { email: string }) {
     // Previously a hardcoded "Administrator" label shown to every user
     // regardless of their actual role — a lecturer's own topbar claimed
     // they were an admin. Resolve the real role once per mount instead.
-    apiFetch<MeResponse>('/users/me')
+    cachedGet<MeResponse>('/users/me')
       .then((me) => {
         const codes = me.roles.map((r) => r.role.code);
         const top = ROLE_RANK.find((r) => codes.includes(r)) ?? codes[0] ?? null;

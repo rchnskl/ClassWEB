@@ -11,6 +11,8 @@ import { Injectable, Logger } from '@nestjs/common';
 // Assumption University — Suvarnabhumi Campus, Samut Prakan.
 const CAMPUS = { name: 'Suvarnabhumi Campus, Samut Prakan', lat: 13.6116, lng: 100.8425 };
 const CACHE_MS = 10 * 60 * 1000;
+const RETRY_MS = 60_000; // after a partial failure
+const STALE_MS = 3 * 60 * 60_000; // how old a last-good reading may be
 
 export interface EnvironmentPayload {
   location: { name: string; lat: number; lng: number };
@@ -57,32 +59,47 @@ function aqiCategory(usAqi: number | null): string {
 export class WidgetsService {
   private readonly logger = new Logger('Widgets');
   private cache: { data: EnvironmentPayload; expires: number } | null = null;
+  // Last good reading of each part: Open-Meteo's two endpoints fail
+  // independently, and an hour-old temperature beats an endless spinner.
+  private lastWeather: { value: NonNullable<EnvironmentPayload['weather']>; at: number } | null = null;
+  private lastAir: { value: NonNullable<EnvironmentPayload['air']>; at: number } | null = null;
+  private inFlight: Promise<EnvironmentPayload> | null = null;
 
   async environment(): Promise<EnvironmentPayload> {
     if (this.cache && this.cache.expires > Date.now()) return this.cache.data;
+    // Many dashboards opening at once share one upstream fetch.
+    this.inFlight ??= this.refresh().finally(() => { this.inFlight = null; });
+    return this.inFlight;
+  }
 
+  private async refresh(): Promise<EnvironmentPayload> {
     const errors: string[] = [];
     const [weather, air] = await Promise.all([
       this.fetchWeather().catch((e) => { errors.push(`weather: ${e.message}`); return null; }),
       this.fetchAir().catch((e) => { errors.push(`air: ${e.message}`); return null; }),
     ]);
+    const now = Date.now();
+    if (weather) this.lastWeather = { value: weather, at: now };
+    if (air) this.lastAir = { value: air, at: now };
+    const fresh = (x: { at: number } | null) => x && now - x.at < STALE_MS;
 
     const data: EnvironmentPayload = {
       location: CAMPUS,
-      weather,
-      air,
+      weather: weather ?? (fresh(this.lastWeather) ? this.lastWeather!.value : null),
+      air: air ?? (fresh(this.lastAir) ? this.lastAir!.value : null),
       source: 'Open-Meteo (open-meteo.com)',
       fetchedAt: new Date().toISOString(),
       errors,
     };
-    // Cache only a fully successful fetch, so transient failures self-heal.
-    if (weather && air) this.cache = { data, expires: Date.now() + CACHE_MS };
+    // A full success is cached for the usual period; a partial one briefly,
+    // so the failed half is retried soon without every page load waiting on it.
+    this.cache = { data, expires: now + (weather && air ? CACHE_MS : RETRY_MS) };
     return data;
   }
 
   private async getJson(url: string): Promise<any> {
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 8000);
+    const timer = setTimeout(() => controller.abort(), 5000);
     try {
       const res = await fetch(url, { signal: controller.signal });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);

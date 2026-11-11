@@ -8,7 +8,7 @@ import StatCard from '@/components/StatCard';
 import { IconStudents, IconBook, IconCheck, IconCalendar, IconReport } from '@/components/icons';
 import { ClockWidget, EnvironmentWidgets } from '@/components/DashboardWidgets';
 import { todayBangkok } from '@/lib/dates';
-import { apiFetch, type DashboardSummary, type MeResponse } from '@/lib/api';
+import { apiFetch, type DashboardSummary, type MeResponse, cachedGet } from '@/lib/api';
 import { useI18n } from '@/lib/i18n';
 
 interface AgendaItem { key: string; time: string; end: string; title: string; sub: string; kind: string; }
@@ -41,7 +41,7 @@ export default function DashboardPage() {
     (async () => {
       try {
         const [m, s, sessions, events] = await Promise.all([
-          apiFetch<MeResponse>('/users/me'),
+          cachedGet<MeResponse>('/users/me'),
           apiFetch<DashboardSummary>('/dashboard/summary'),
           apiFetch<{ items: { id: string; startTime: string; endTime: string; section: { sectionNo: string; subject: { code: string; nameEn: string } }; room: { roomNumber: string } | null }[] }>(`/timetable/sessions?date=${today}`).catch(() => ({ items: [] })),
           apiFetch<{ items: { id: string; type: string; title: string; startAt: string; endAt: string; location: string | null; room: { roomNumber: string } | null }[] }>(`/calendar/entries?from=${encodeURIComponent(dayStart)}&to=${encodeURIComponent(dayEnd)}`).catch(() => ({ items: [] })),

@@ -139,9 +139,31 @@ export async function refreshAccessToken(): Promise<string | null> {
   return refreshInFlight;
 }
 
+/**
+ * Short-lived cache for GETs of data that rarely changes (the signed-in
+ * user, academic year, branding, weather). Every page mounts the sidebar,
+ * top bar and its own copy of these, so without it each navigation re-sent
+ * the same half-dozen requests to a small server. Concurrent callers share
+ * one request; any change made through apiFetch, sign-in and sign-out clear
+ * the cache.
+ */
+const getCache = new Map<string, { at: number; p: Promise<unknown> }>();
+export function cachedGet<T>(path: string, ttlMs = 60_000): Promise<T> {
+  const who = typeof window === 'undefined' ? '' : (localStorage.getItem('user') ?? '');
+  const key = `${who}|${path}`;
+  const hit = getCache.get(key);
+  if (hit && Date.now() - hit.at < ttlMs) return hit.p as Promise<T>;
+  const p = apiFetch<T>(path);
+  getCache.set(key, { at: Date.now(), p });
+  p.catch(() => getCache.delete(key));
+  return p;
+}
+export function clearCachedGets() { getCache.clear(); }
+
 export async function apiFetch<T>(path: string, init: RequestInit & FeedbackOptions = {}, _retried = false): Promise<T> {
   const { silent, silentSuccess, successMessage, ...request } = init;
   const method = (request.method ?? 'GET').toUpperCase();
+  if (method !== 'GET') getCache.clear();
   // Auth calls own their own messaging (the login form, the lock screen), and
   // a GET has nothing to report — only mutations speak up.
   const announce = !silent && MUTATING.has(method) && !path.startsWith('/auth/');
@@ -320,6 +342,7 @@ export interface StudentNote {
 }
 
 export function saveSession(res: LoginResponse) {
+  getCache.clear();
   localStorage.setItem('refreshToken', res.refreshToken);
   // Through the store, so components subscribed to the session (branding,
   // sidebar, signed-in user) update immediately rather than on next reload.
@@ -337,6 +360,7 @@ export function getSessionStartAt(): number | null {
 }
 
 export function clearSession() {
+  getCache.clear();
   writeLocalStorage('accessToken', null);
   localStorage.removeItem('refreshToken');
   writeLocalStorage('user', null);

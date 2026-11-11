@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState, useSyncExternalStore } from 'react';
-import { apiFetch, type Environment } from '@/lib/api';
+import { type Environment, cachedGet } from '@/lib/api';
 import { useI18n } from '@/lib/i18n';
 
 /* ----------------------------- Realtime clock ---------------------------- */
@@ -89,7 +89,7 @@ export function EnvironmentWidgets() {
   const [failed, setFailed] = useState(false);
 
   useEffect(() => {
-    apiFetch<Environment>('/widgets/environment').then(setEnv).catch(() => setFailed(true));
+    cachedGet<Environment>('/widgets/environment', 5 * 60_000).then(setEnv).catch(() => setFailed(true));
   }, []);
 
   const w = env?.weather;
@@ -118,7 +118,7 @@ export function EnvironmentWidgets() {
             </div>
           </>
         ) : (
-          <div className="muted" style={{ fontSize: 13, marginTop: 12 }}>{failed ? t('widget.unavailable') : t('common.loading')}</div>
+          <div className="muted" style={{ fontSize: 13, marginTop: 12 }}>{failed || env ? t('widget.unavailable') : t('common.loading')}</div>
         )}
       </div>
 
@@ -143,7 +143,7 @@ export function EnvironmentWidgets() {
             <div className="muted" style={{ fontSize: 10.5, marginTop: 8 }}>{env?.source}</div>
           </>
         ) : (
-          <div className="muted" style={{ fontSize: 13, marginTop: 12 }}>{failed ? t('widget.unavailable') : t('common.loading')}</div>
+          <div className="muted" style={{ fontSize: 13, marginTop: 12 }}>{failed || env ? t('widget.unavailable') : t('common.loading')}</div>
         )}
       </div>
     </>

@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation';
 import Sidebar from '@/components/Sidebar';
 import Topbar from '@/components/Topbar';
 import { IconSearch, IconTeacher } from '@/components/icons';
-import { apiFetch, type MeResponse, type Paginated } from '@/lib/api';
+import { apiFetch, type MeResponse, type Paginated, cachedGet } from '@/lib/api';
 import { useI18n } from '@/lib/i18n';
 import { useStoredUser } from '@/lib/local-store';
 
@@ -70,7 +70,7 @@ export default function LecturersPage() {
 
   useEffect(() => {
     if (!localStorage.getItem('accessToken')) { router.replace('/login'); return; }
-    apiFetch<MeResponse>('/users/me').then((me) => setIsAdmin(me.roles.some((r) => r.role.code === 'ADMIN'))).catch(() => {});
+    cachedGet<MeResponse>('/users/me').then((me) => setIsAdmin(me.roles.some((r) => r.role.code === 'ADMIN'))).catch(() => {});
     apiFetch<DepartmentRef[]>('/departments').then(setDepartments).catch(() => {});
     // eslint-disable-next-line react-hooks/set-state-in-effect -- fetches from the API on mount / when its inputs change; state is set as the request starts and settles
     void load(0, '');

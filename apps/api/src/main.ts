@@ -22,7 +22,9 @@ async function bootstrap(): Promise<void> {
   app.use(helmet());
 
   // CORS — explicit allow-list from config.
-  app.enableCors({ origin: config.get<string[]>('cors.origins'), credentials: true });
+  // maxAge lets the browser cache each preflight: every API call carries an
+  // Authorization header, so without it every request cost an extra round trip.
+  app.enableCors({ origin: config.get<string[]>('cors.origins'), credentials: true, maxAge: 7200 });
 
   // Versioned API surface: /api/v1/...
   app.setGlobalPrefix('api');

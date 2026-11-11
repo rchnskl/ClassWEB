@@ -1,7 +1,7 @@
 'use client';
 
 import { createContext, useContext, useEffect, useState } from 'react';
-import { apiFetch } from './api';
+import { cachedGet } from './api';
 import { useLocalStorage } from './local-store';
 
 interface Branding {
@@ -38,7 +38,7 @@ export function BrandingProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     if (!token) return;
-    apiFetch<BrandingResponse>('/settings/branding')
+    cachedGet<BrandingResponse>('/settings/branding', 5 * 60_000)
       .then((b) => {
         if (b['system.name']) {
           setSystemName(b['system.name']);
