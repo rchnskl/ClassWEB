@@ -147,4 +147,30 @@ describe('Daily patient cases & notes', () => {
     // Only earlier days of the same section can be carried from.
     await http.post('/api/v1/cases/carry-forward').set(auth2).send({ classSessionId: sessionId, caseIds: [copy.id] }).expect(400);
   });
+
+  it('lets the author correct or remove a daily note, keeping the earlier wording', async () => {
+    const note = (await http.post('/api/v1/cases/notes').set(auth(admin))
+      .send({ classSessionId: sessionId, studentId: enrolled[1], content: 'ตอบคำถามได้ดี' }).expect(201)).body;
+    expect(note.editedAt).toBeNull();
+
+    // Not their note, not their section: refused.
+    await http.patch(`/api/v1/cases/notes/${note.id}`).set(auth(outsider)).send({ content: 'x' }).expect(403);
+
+    const edited = await http.patch(`/api/v1/cases/notes/${note.id}`).set(auth(admin)).send({ content: 'ตอบคำถามเรื่องยาได้ดีมาก' }).expect(200);
+    expect(edited.body).toMatchObject({ content: 'ตอบคำถามเรื่องยาได้ดีมาก', editCount: 1 });
+    expect(edited.body.editedAt).toBeTruthy();
+    const stored = await prisma.studentNote.findUniqueOrThrow({ where: { id: note.id } });
+    expect(JSON.stringify(stored.metadata)).toContain('ตอบคำถามได้ดี'); // history kept
+
+    const day = await http.get('/api/v1/cases').query({ classSessionId: sessionId }).set(auth(admin)).expect(200);
+    const row = day.body.roster.find((r: { id: string }) => r.id === enrolled[1]);
+    expect(row.notes.find((n: { id: string }) => n.id === note.id).content).toBe('ตอบคำถามเรื่องยาได้ดีมาก');
+
+    await http.delete(`/api/v1/cases/notes/${note.id}`).set(auth(admin)).expect(200);
+    const after = await http.get('/api/v1/cases').query({ classSessionId: sessionId }).set(auth(admin)).expect(200);
+    const row2 = after.body.roster.find((r: { id: string }) => r.id === enrolled[1]);
+    expect(row2.notes.some((n: { id: string }) => n.id === note.id)).toBe(false);
+    const audit = await prisma.auditLog.findFirstOrThrow({ where: { entityType: 'StudentNote', entityId: note.id, action: 'DELETE' } });
+    expect(JSON.stringify(audit.metadata)).toContain('ตอบคำถามเรื่องยาได้ดีมาก');
+  });
 });

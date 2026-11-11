@@ -1,7 +1,7 @@
 import { Body, Controller, Delete, Get, Param, Patch, Post, Query } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { CasesService } from './cases.service';
-import { CarryForwardDto, CreateCaseDto, CreateDailyNoteDto, DischargeCaseDto, UpdateCaseDto } from './dto/cases.dto';
+import { CarryForwardDto, CreateCaseDto, CreateDailyNoteDto, DischargeCaseDto, UpdateCaseDto, UpdateDailyNoteDto } from './dto/cases.dto';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { Permissions } from '../common/decorators/permissions.decorator';
 import { AuthenticatedUser } from '../common/authenticated-user';
@@ -24,6 +24,20 @@ export class CasesController {
   @ApiOperation({ summary: 'Assign a patient case (bed, HN, name, age) to students for a practice day' })
   create(@CurrentUser() user: AuthenticatedUser, @Body() dto: CreateCaseDto) {
     return this.cases.create(user, dto);
+  }
+
+  @Patch('notes/:id')
+  @Permissions('note:update')
+  @ApiOperation({ summary: 'Correct a daily note (its author or an admin); the earlier wording is kept in its history' })
+  updateNote(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string, @Body() dto: UpdateDailyNoteDto) {
+    return this.cases.updateNote(user, id, dto);
+  }
+
+  @Delete('notes/:id')
+  @Permissions('note:delete')
+  @ApiOperation({ summary: 'Remove a daily note (its author or an admin); kept in the audit log' })
+  deleteNote(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string) {
+    return this.cases.deleteNote(user, id);
   }
 
   @Post('carry-forward')

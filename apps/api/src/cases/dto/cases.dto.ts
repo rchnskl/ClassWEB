@@ -44,3 +44,7 @@ export class CarryForwardDto {
 export class DischargeCaseDto {
   @ApiProperty({ description: 'true = the patient went home; false = undo' }) @IsBoolean() discharged!: boolean;
 }
+
+export class UpdateDailyNoteDto {
+  @ApiProperty() @IsString() @MinLength(1) @MaxLength(4000) content!: string;
+}

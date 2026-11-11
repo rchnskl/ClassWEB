@@ -1,9 +1,11 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
-import { AuditAction } from '@prisma/client';
+import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import { AuditAction, Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuthenticatedUser } from '../common/authenticated-user';
 import { LecturerScopeService } from '../common/lecturer-scope.service';
-import { CarryForwardDto, CreateCaseDto, CreateDailyNoteDto, DischargeCaseDto, UpdateCaseDto } from './dto/cases.dto';
+import { CarryForwardDto, CreateCaseDto, CreateDailyNoteDto, DischargeCaseDto, UpdateCaseDto, UpdateDailyNoteDto } from './dto/cases.dto';
+
+const noteSelect = { id: true, studentId: true, content: true, authorName: true, authorUserId: true, createdAt: true, metadata: true } as const;
 
 const caseSelect = {
   id: true, bed: true, hn: true, patientName: true, patientAge: true, diagnosis: true, note: true,
@@ -20,8 +22,10 @@ const caseSelect = {
  * Patient details (bed, HN, name, age) are sensitive. Only lecturers who
  * teach or manage the section can see or change them, and every change is
  * written to the audit log — without the patient details themselves.
- * Daily notes are ordinary student notes tied to the day: append-only and
- * stamped with the recorder's name, like every other student note.
+ * Daily notes are ordinary student notes tied to the day, stamped with the
+ * recorder's name. The recorder (or an admin) can correct or remove one; the
+ * earlier wording is kept in the note's history and the audit log, so the
+ * record stays evidence.
  */
 @Injectable()
 export class CasesService {
@@ -97,14 +101,14 @@ export class CasesService {
       }),
       this.prisma.studentNote.findMany({
         where: { classSessionId, deletedAt: null },
-        select: { id: true, studentId: true, content: true, authorName: true, createdAt: true },
+        select: noteSelect,
         orderBy: { createdAt: 'asc' },
       }),
     ]);
     return {
       session,
       cases: cases.map((c) => this.shape(c)),
-      roster: enrollments.map((e) => ({ ...e.student, notes: notes.filter((n) => n.studentId === e.student.id) })),
+      roster: enrollments.map((e) => ({ ...e.student, notes: notes.filter((n) => n.studentId === e.student.id).map((n) => this.shapeNote(n)) })),
       // Cases from the previous practice day that can carry on into this one.
       previous: await this.previousDay(session.sectionId, session),
     };
@@ -161,10 +165,54 @@ export class CasesService {
         universityId: user.universityId, studentId: dto.studentId, classSessionId: dto.classSessionId,
         category: 'GENERAL', content: dto.content.trim(), authorUserId: user.id, authorName: await this.authorName(user.id),
       },
-      select: { id: true, studentId: true, content: true, authorName: true, createdAt: true },
+      select: noteSelect,
     });
     await this.audit(user, AuditAction.CREATE, 'StudentNote', note.id, { studentId: dto.studentId, classSessionId: dto.classSessionId });
+    return this.shapeNote(note);
+  }
+
+  private shapeNote(n: { metadata: Prisma.JsonValue } & Record<string, unknown>) {
+    const { metadata, ...rest } = n;
+    const edits = (metadata as { edits?: { at: string }[] } | null)?.edits ?? [];
+    return { ...rest, editedAt: edits.length ? edits[edits.length - 1].at : null, editCount: edits.length };
+  }
+
+  /** A daily note the caller may change: their own (or any, for an admin), in a section they teach. */
+  private async ownNote(user: AuthenticatedUser, id: string) {
+    const note = await this.prisma.studentNote.findFirst({
+      where: { id, universityId: user.universityId, deletedAt: null, classSessionId: { not: null } },
+      select: { id: true, content: true, authorUserId: true, classSessionId: true, studentId: true, metadata: true },
+    });
+    if (!note) throw new NotFoundException('Note not found');
+    await this.session(user, note.classSessionId!);
+    if (note.authorUserId !== user.id && !this.lecturerScope.isAdmin(user)) {
+      throw new ForbiddenException('Only the person who wrote this note can change it');
+    }
     return note;
+  }
+
+  /** Correct a daily note; the previous wording is kept in its history. */
+  async updateNote(user: AuthenticatedUser, id: string, dto: UpdateDailyNoteDto) {
+    const note = await this.ownNote(user, id);
+    const content = dto.content.trim();
+    if (content === note.content) {
+      return this.shapeNote(await this.prisma.studentNote.findUniqueOrThrow({ where: { id }, select: noteSelect }));
+    }
+    const meta = (note.metadata as { edits?: unknown[] } | null) ?? {};
+    const edits = [...(meta.edits ?? []), { at: new Date().toISOString(), by: user.id, previous: note.content }];
+    const updated = await this.prisma.studentNote.update({
+      where: { id }, data: { content, metadata: { ...meta, edits } as Prisma.InputJsonValue }, select: noteSelect,
+    });
+    await this.audit(user, AuditAction.UPDATE, 'StudentNote', id, { studentId: note.studentId, classSessionId: note.classSessionId, previous: note.content });
+    return this.shapeNote(updated);
+  }
+
+  /** Remove a daily note (soft delete — the text stays in the record and audit log). */
+  async deleteNote(user: AuthenticatedUser, id: string) {
+    const note = await this.ownNote(user, id);
+    await this.prisma.studentNote.update({ where: { id }, data: { deletedAt: new Date() } });
+    await this.audit(user, AuditAction.DELETE, 'StudentNote', id, { studentId: note.studentId, classSessionId: note.classSessionId, content: note.content });
+    return { deleted: true };
   }
 
   /**

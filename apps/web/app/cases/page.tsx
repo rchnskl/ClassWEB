@@ -12,7 +12,7 @@ import { todayBangkok } from '@/lib/dates';
 interface SectionRef { id: string; sectionNo: string; subject: { id: string; code: string; nameEn: string } }
 interface SessionRef { id: string; sessionDate: string; startTime: string; endTime: string; topic: string | null }
 interface StudentRef { id: string; studentCode: string; nameEn: string; nameTh: string | null }
-interface Note { id: string; studentId: string; content: string; authorName: string; createdAt: string }
+interface Note { id: string; studentId: string; content: string; authorName: string; authorUserId: string | null; createdAt: string; editedAt: string | null }
 interface PatientCase {
   id: string; bed: string | null; hn: string | null; patientName: string | null; patientAge: string | null;
   diagnosis: string | null; note: string | null; students: StudentRef[];
@@ -40,7 +40,13 @@ const input: React.CSSProperties = {
 export default function CasesPage() {
   const router = useRouter();
   const { t, lang } = useI18n();
-  const email = useStoredUser()?.email ?? '';
+  const me = useStoredUser();
+  const email = me?.email ?? '';
+  // The recorder (or an admin) can correct or remove a note; the server enforces it.
+  const canChangeNote = (n: Note) => n.authorUserId === me?.id || !!me?.roleCodes?.includes('ADMIN');
+  const [editingNote, setEditingNote] = useState<{ id: string; content: string } | null>(null);
+  const [confirmDeleteNote, setConfirmDeleteNote] = useState<string | null>(null);
+  const timeOf = (iso: string) => new Date(iso).toLocaleTimeString(lang === 'th' ? 'th-TH' : 'en-GB', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Bangkok' });
   const sname = (s: StudentRef) => (lang === 'th' && s.nameTh ? s.nameTh : s.nameEn);
   const fmtDay = (iso: string) => new Date(iso).toLocaleDateString(lang === 'th' ? 'th-TH' : 'en-GB', { weekday: 'short', day: 'numeric', month: 'short', timeZone: 'UTC' });
 
@@ -176,6 +182,25 @@ export default function CasesPage() {
   }
 
   // A student's current case is one whose patient hasn't gone home.
+  async function saveNoteEdit() {
+    if (!editingNote || !editingNote.content.trim()) return;
+    setSavingNote(editingNote.id); setError(null);
+    try {
+      await apiFetch(`/cases/notes/${editingNote.id}`, { method: 'PATCH', body: JSON.stringify({ content: editingNote.content }) });
+      setEditingNote(null);
+      await loadDay(sessionId);
+    } catch (err) { setError(err instanceof Error ? err.message : String(err)); }
+    finally { setSavingNote(null); }
+  }
+
+  async function deleteNote(id: string) {
+    if (confirmDeleteNote !== id) { setConfirmDeleteNote(id); return; }
+    setSavingNote(id); setError(null);
+    try { await apiFetch(`/cases/notes/${id}`, { method: 'DELETE' }); await loadDay(sessionId); }
+    catch (err) { setError(err instanceof Error ? err.message : String(err)); }
+    finally { setSavingNote(null); setConfirmDeleteNote(null); }
+  }
+
   const caseOf = (studentId: string) => day?.cases.find((c) => !c.dischargedAt && c.students.some((s) => s.id === studentId));
   const unassigned = day ? day.roster.filter((r) => !caseOf(r.id)) : [];
 
@@ -365,9 +390,31 @@ export default function CasesPage() {
                       </div>
                       {r.notes.map((n) => (
                         <div key={n.id} style={{ fontSize: 13, marginTop: 6, paddingLeft: 10, borderLeft: '2px solid var(--glass-hairline)' }}>
-                          <div style={{ whiteSpace: 'pre-wrap' }}>{n.content}</div>
-                          <div className="muted" style={{ fontSize: 11 }}>
-                            {n.authorName} · {new Date(n.createdAt).toLocaleTimeString(lang === 'th' ? 'th-TH' : 'en-GB', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Bangkok' })}
+                          {editingNote?.id === n.id ? (
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                              <textarea autoFocus value={editingNote.content} rows={2}
+                                onChange={(e) => setEditingNote({ id: n.id, content: e.target.value })}
+                                style={{ ...input, resize: 'vertical', fontSize: 13 }} />
+                              <div style={{ display: 'flex', gap: 6 }}>
+                                <button className="btn-primary" onClick={saveNoteEdit} disabled={savingNote === n.id || !editingNote.content.trim()} style={{ padding: '5px 12px', fontSize: 12 }}>{savingNote === n.id ? '…' : t('case.addNote')}</button>
+                                <button onClick={() => setEditingNote(null)} className="glass hairline" style={{ padding: '5px 10px', fontSize: 12, borderRadius: 8, cursor: 'pointer', color: 'var(--text-1)' }}>{t('case.cancel')}</button>
+                              </div>
+                            </div>
+                          ) : (
+                            <div style={{ whiteSpace: 'pre-wrap' }}>{n.content}</div>
+                          )}
+                          <div className="muted" style={{ fontSize: 11, display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                            <span>{n.authorName} · {timeOf(n.createdAt)}{n.editedAt ? ` · ${t('case.noteEdited').replace('{time}', timeOf(n.editedAt))}` : ''}</span>
+                            {canChangeNote(n) && editingNote?.id !== n.id && (
+                              <>
+                                <button onClick={() => { setEditingNote({ id: n.id, content: n.content }); setConfirmDeleteNote(null); }}
+                                  style={{ background: 'none', border: 'none', padding: '2px 4px', fontSize: 11.5, cursor: 'pointer', color: 'var(--brand)', textDecoration: 'underline' }}>{t('case.edit')}</button>
+                                <button onClick={() => deleteNote(n.id)} disabled={savingNote === n.id}
+                                  style={{ background: 'none', border: 'none', padding: '2px 4px', fontSize: 11.5, cursor: 'pointer', color: 'var(--danger)', textDecoration: 'underline', fontWeight: confirmDeleteNote === n.id ? 700 : 400 }}>
+                                  {confirmDeleteNote === n.id ? t('case.confirmDelete') : t('case.delete')}
+                                </button>
+                              </>
+                            )}
                           </div>
                         </div>
                       ))}
