@@ -9,7 +9,15 @@ import { useI18n } from '@/lib/i18n';
 import { useStoredUser } from '@/lib/local-store';
 import { todayBangkok } from '@/lib/dates';
 
-interface SectionRef { id: string; sectionNo: string; subject: { id: string; code: string; nameEn: string } }
+interface SectionRef {
+  id: string; sectionNo: string; subject: { id: string; code: string; nameEn: string };
+  room: { building?: { campus?: { locationType: string } | null } | null } | null;
+}
+/** Daily cases are for clinical practice: sections taught at a hospital or other clinical site. */
+const isClinicalSection = (s: SectionRef) => {
+  const type = s.room?.building?.campus?.locationType;
+  return !!type && type !== 'UNIVERSITY' && type !== 'CAMPUS';
+};
 interface SessionRef { id: string; sessionDate: string; startTime: string; endTime: string; topic: string | null }
 interface StudentRef { id: string; studentCode: string; nameEn: string; nameTh: string | null }
 interface Note { id: string; studentId: string; content: string; authorName: string; authorUserId: string | null; createdAt: string; editedAt: string | null }
@@ -85,7 +93,9 @@ export default function CasesPage() {
 
   useEffect(() => {
     if (!localStorage.getItem('accessToken')) { router.replace('/login'); return; }
-    apiFetch<{ items: SectionRef[] }>('/sections').then((d) => {
+    apiFetch<{ items: SectionRef[] }>('/sections').then((r) => {
+      // Lecture subjects (taught on campus) have no patient cases — leave them out.
+      const d = { items: r.items.filter(isClinicalSection) };
       setSections(d.items);
       if (d.items[0]) { setSectionId(d.items[0].id); void loadSessions(d.items[0].id); } else setSessions([]);
     }).catch(() => setSessions([]));

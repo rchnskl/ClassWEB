@@ -18,7 +18,9 @@ export class SectionsService {
     subject: { select: { id: true, code: true, nameEn: true, credits: true } },
     semester: { select: { id: true, nameEn: true, academicYear: { select: { code: true } } } },
     lecturer: { select: { id: true, nameEn: true, employeeCode: true, userId: true } },
-    room: { select: { id: true, roomNumber: true } },
+    // The campus type says whether a section is taught at a hospital /
+    // clinical site (clinical practice) or on campus.
+    room: { select: { id: true, roomNumber: true, building: { select: { campus: { select: { locationType: true } } } } } },
     _count: { select: { enrollments: true } },
   } satisfies Prisma.SectionSelect;
 
