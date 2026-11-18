@@ -58,4 +58,31 @@ describe('Attendance check-in window', () => {
     const cs = await session(bangkokDay(2), '07:00');
     expect((await state(cs.id)).body.open).toBeNull();
   });
+
+  it("opens check-in a set time before class when the section's rule says so, and judges lateness by it", async () => {
+    // A start one hour from now (Bangkok), skipped if that crosses midnight.
+    const t = new Date(Date.now() + 60 * 60_000);
+    const hhmm = new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Bangkok', hour: '2-digit', minute: '2-digit', hour12: false }).format(t);
+    if (hhmm < '01:30') return;
+    const sec = await prisma.section.create({
+      data: { universityId: (await prisma.section.findUniqueOrThrow({ where: { id: sectionId } })).universityId,
+        subjectId: (await prisma.section.findUniqueOrThrow({ where: { id: sectionId } })).subjectId,
+        semesterId: (await prisma.section.findUniqueOrThrow({ where: { id: sectionId } })).semesterId, sectionNo: `R${Date.now() % 10000}` },
+    });
+    const cs = await prisma.classSession.create({ data: { sectionId: sec.id, sessionDate: new Date(`${bangkokDay()}T00:00:00Z`), startTime: hhmm, endTime: '23:59' } });
+    const put = (body: object) => http.put(`/api/v1/attendance/rules/section/${sec.id}`).set('Authorization', `Bearer ${token}`).send(body);
+
+    // Opens 15 min before a start an hour away: not open yet.
+    const set = await put({ lateAfterMinutes: 30, autoAbsentAfterMinutes: 240, opensBeforeMinutes: 15 }).expect(200);
+    expect(set.body).toMatchObject({ own: true, lateAfterMinutes: 30, autoAbsentAfterMinutes: 240, opensBeforeMinutes: 15 });
+    expect((await state(cs.id)).body.open).toBeNull();
+
+    // Opens 90 min before: open now.
+    await put({ lateAfterMinutes: 30, autoAbsentAfterMinutes: 240, opensBeforeMinutes: 90 }).expect(200);
+    expect((await state(cs.id)).body.open).not.toBeNull();
+
+    await put({ lateAfterMinutes: 60, autoAbsentAfterMinutes: 30 }).expect(400); // absent before late
+    const got = await http.get(`/api/v1/attendance/rules/section/${sec.id}`).set('Authorization', `Bearer ${token}`).expect(200);
+    expect(got.body.opensBeforeMinutes).toBe(90);
+  });
 });

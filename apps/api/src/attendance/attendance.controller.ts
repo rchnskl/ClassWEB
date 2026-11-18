@@ -1,8 +1,8 @@
-import { Body, Controller, Get, Param, Post, Req } from '@nestjs/common';
+import { Body, Controller, Get, Param, Post, Put, Req } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import type { Request } from 'express';
 import { AttendanceService } from './attendance.service';
-import { CheckInDto, ManualMarkDto, ResolveCheckInDto } from './dto/attendance.dto';
+import { CheckInDto, ManualMarkDto, ResolveCheckInDto, SectionRuleDto } from './dto/attendance.dto';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { Permissions } from '../common/decorators/permissions.decorator';
 import { Public } from '../common/decorators/public.decorator';
@@ -14,6 +14,22 @@ export class AttendanceController {
   constructor(private readonly attendance: AttendanceService) {}
 
   // ---- lecturer / admin ------------------------------------------------
+
+  @Get('rules/section/:sectionId')
+  @ApiBearerAuth()
+  @Permissions('attendance:read')
+  @ApiOperation({ summary: "The attendance rule that applies to a section (its own, else the university's)" })
+  sectionRule(@CurrentUser() user: AuthenticatedUser, @Param('sectionId') sectionId: string) {
+    return this.attendance.sectionRule(user, sectionId);
+  }
+
+  @Put('rules/section/:sectionId')
+  @ApiBearerAuth()
+  @Permissions('attendance:update')
+  @ApiOperation({ summary: "Set a section's own attendance rule: when check-in opens, and when a check-in is late / absent" })
+  setSectionRule(@CurrentUser() user: AuthenticatedUser, @Param('sectionId') sectionId: string, @Body() dto: SectionRuleDto) {
+    return this.attendance.setSectionRule(user, sectionId, dto);
+  }
 
   @Post('sessions/:classSessionId/open')
   @ApiBearerAuth()

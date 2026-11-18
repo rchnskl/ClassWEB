@@ -1,5 +1,5 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { IsBoolean, IsEnum, IsIn, IsOptional, IsString, MinLength } from 'class-validator';
+import { IsBoolean, IsEnum, IsIn, IsInt, IsOptional, IsString, Max, Min, MinLength } from 'class-validator';
 import { AttendanceResolutionReason, AttendanceStatus } from '@prisma/client';
 
 /** Student self check-in via the QR token (public endpoint). */
@@ -53,4 +53,19 @@ export class ResolveCheckInDto {
   @IsOptional()
   @IsString()
   reasonNote?: string;
+}
+
+/** A section's own attendance rule. */
+export class SectionRuleDto {
+  @ApiProperty({ example: 30, description: 'A check-in this many minutes after the start or later is LATE' })
+  @IsInt() @Min(0) @Max(600)
+  lateAfterMinutes!: number;
+
+  @ApiProperty({ example: 240, description: 'A check-in this many minutes after the start or later is ABSENT' })
+  @IsInt() @Min(0) @Max(1440)
+  autoAbsentAfterMinutes!: number;
+
+  @ApiPropertyOptional({ example: 15, nullable: true, description: 'Check-in opens this many minutes before the start; omit/null = from the start of the day' })
+  @IsOptional() @IsInt() @Min(0) @Max(720)
+  opensBeforeMinutes?: number | null;
 }

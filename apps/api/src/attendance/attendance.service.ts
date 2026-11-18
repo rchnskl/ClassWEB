@@ -4,14 +4,17 @@ import { AttendanceStatus, AuditAction } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { AssessmentService } from '../assessment/assessment.service';
 import { NotificationsService } from '../notifications/notifications.service';
-import { ManualMarkDto, ResolveCheckInDto } from './dto/attendance.dto';
+import { ManualMarkDto, ResolveCheckInDto, SectionRuleDto } from './dto/attendance.dto';
 import { AuthenticatedUser } from '../common/authenticated-user';
 import { LecturerScopeService } from '../common/lecturer-scope.service';
 
 interface RuleConfig {
   lateAfterMinutes: number;
   autoAbsentAfterMinutes: number;
+  opensBeforeMinutes?: number | null;
 }
+
+const ruleSelect = { lateAfterMinutes: true, autoAbsentAfterMinutes: true, opensBeforeMinutes: true } as const;
 
 @Injectable()
 export class AttendanceService {
@@ -43,9 +46,14 @@ export class AttendanceService {
    * still judged against the scheduled start by the attendance rule.
    * Computed at request time; no scheduler needed.
    */
-  private autoWindowBounds(sessionDate: Date): { opensAt: Date; closesAt: Date } {
+  private autoWindowBounds(sessionDate: Date, startTime?: string, opensBeforeMinutes?: number | null): { opensAt: Date; closesAt: Date } {
     const day = this.sessionStart(sessionDate, '00:00');
-    return { opensAt: day, closesAt: new Date(day.getTime() + 24 * 60 * 60_000) };
+    // A section can open check-in a set time before class instead (a lecture
+    // that opens at 14:00 for a 14:15 start).
+    const opensAt = opensBeforeMinutes != null && startTime
+      ? new Date(this.sessionStart(sessionDate, startTime).getTime() - opensBeforeMinutes * 60_000)
+      : day;
+    return { opensAt, closesAt: new Date(day.getTime() + 24 * 60 * 60_000) };
   }
 
   /**
@@ -54,14 +62,14 @@ export class AttendanceService {
    * has `openedById: null`. Once the lecturer has closed check-in it stays
    * closed: the auto-window never reopens it (they can still reopen it).
    */
-  private async ensureOpenWindow(classSessionId: string, sessionDate: Date) {
+  private async ensureOpenWindow(classSessionId: string, sessionDate: Date, startTime: string, opensBeforeMinutes?: number | null) {
     const existing = await this.prisma.attendanceSession.findFirst({
       where: { classSessionId, isOpen: true, expiresAt: { gt: new Date() } },
     });
     if (existing) return existing;
 
     const now = new Date();
-    const { opensAt, closesAt } = this.autoWindowBounds(sessionDate);
+    const { opensAt, closesAt } = this.autoWindowBounds(sessionDate, startTime, opensBeforeMinutes);
     if (now < opensAt || now > closesAt) return null;
     const closedByLecturer = await this.prisma.attendanceSession.count({ where: { classSessionId, closedAt: { not: null } } });
     if (closedByLecturer > 0) return null;
@@ -75,12 +83,12 @@ export class AttendanceService {
   private async rule(universityId: string, sectionId: string): Promise<RuleConfig> {
     const sectionRule = await this.prisma.attendanceRule.findFirst({
       where: { universityId, scope: 'SECTION', sectionId, isActive: true },
-      select: { lateAfterMinutes: true, autoAbsentAfterMinutes: true },
+      select: ruleSelect,
     });
     if (sectionRule) return sectionRule;
     const uniRule = await this.prisma.attendanceRule.findFirst({
       where: { universityId, scope: 'UNIVERSITY', sectionId: null, isActive: true },
-      select: { lateAfterMinutes: true, autoAbsentAfterMinutes: true },
+      select: ruleSelect,
     });
     return uniRule ?? { lateAfterMinutes: 15, autoAbsentAfterMinutes: 60 };
   }
@@ -148,7 +156,8 @@ export class AttendanceService {
     const universityId = user.universityId;
     const session = await this.loadSession(universityId, classSessionId);
     await this.lecturerScope.assertTeachesOrManages(user, session.section.id);
-    const openWindow = await this.ensureOpenWindow(classSessionId, session.sessionDate);
+    const sectionRule = await this.rule(universityId, session.section.id);
+    const openWindow = await this.ensureOpenWindow(classSessionId, session.sessionDate, session.startTime, sectionRule.opensBeforeMinutes);
 
     const enrollments = await this.prisma.enrollment.findMany({
       where: { sectionId: session.section.id, status: 'ENROLLED' },
@@ -402,5 +411,42 @@ export class AttendanceService {
       body: `${name} ขาดเรียนวิชา ${subjectCode}`,
       refType: 'Student', refId: studentId,
     }).catch(() => undefined);
+  }
+
+  // --- per-section attendance rule ------------------------------------
+
+  /** The rule that applies to a section: its own, else the university-wide one. */
+  async sectionRule(user: AuthenticatedUser, sectionId: string) {
+    const section = await this.prisma.section.findFirst({ where: { id: sectionId, universityId: user.universityId, deletedAt: null }, select: { id: true } });
+    if (!section) throw new NotFoundException('Section not found');
+    await this.lecturerScope.assertTeachesOrManages(user, sectionId);
+    const own = await this.prisma.attendanceRule.findFirst({
+      where: { universityId: user.universityId, scope: 'SECTION', sectionId, isActive: true }, select: ruleSelect,
+    });
+    return { sectionId, own: !!own, ...(own ?? (await this.rule(user.universityId, sectionId))) };
+  }
+
+  /**
+   * Set a section's own rule: when check-in opens (minutes before the start,
+   * or null for all day), and after how many minutes past the start a
+   * check-in is late / counted absent.
+   */
+  async setSectionRule(user: AuthenticatedUser, sectionId: string, dto: SectionRuleDto) {
+    await this.sectionRule(user, sectionId); // existence + scope
+    if (dto.autoAbsentAfterMinutes < dto.lateAfterMinutes) {
+      throw new BadRequestException('autoAbsentAfterMinutes must be at least lateAfterMinutes');
+    }
+    const data = {
+      lateAfterMinutes: dto.lateAfterMinutes,
+      autoAbsentAfterMinutes: dto.autoAbsentAfterMinutes,
+      opensBeforeMinutes: dto.opensBeforeMinutes ?? null,
+    };
+    const existing = await this.prisma.attendanceRule.findFirst({ where: { universityId: user.universityId, scope: 'SECTION', sectionId }, select: { id: true } });
+    if (existing) await this.prisma.attendanceRule.update({ where: { id: existing.id }, data: { ...data, isActive: true } });
+    else await this.prisma.attendanceRule.create({ data: { universityId: user.universityId, scope: 'SECTION', sectionId, name: 'Section attendance policy', ...data } });
+    await this.prisma.auditLog.create({
+      data: { universityId: user.universityId, userId: user.id, action: AuditAction.UPDATE, entityType: 'AttendanceRule', entityId: sectionId, metadata: data },
+    });
+    return this.sectionRule(user, sectionId);
   }
 }

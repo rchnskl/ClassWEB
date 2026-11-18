@@ -992,6 +992,9 @@ model AttendanceRule {
 
   lateAfterMinutes       Int     @default(15)
   autoAbsentAfterMinutes Int     @default(60)
+  /// When check-in opens on its own: this many minutes before the session
+  /// starts. Null = from the start of the session's day (clinical practice).
+  opensBeforeMinutes     Int?
   /// Minutes after session start when capture locks.
   lockAfterMinutes       Int?    @default(120)
   /// Weight of attendance in overall assessment (0..100).
