@@ -827,6 +827,46 @@ export class AssessmentService implements OnApplicationBootstrap {
 
   // ---- reports ----------------------------------------------------------
 
+  /**
+   * How far each student is through a section's daily (per-session) rubrics:
+   * days assessed vs. days that count — every practice day of the section,
+   * past or upcoming, less any the student missed (absent/leave) and wasn't
+   * assessed on anyway. Same rule as refreshDailyComponent. A daily
+   * component is only finished once assessed >= counted; until then its
+   * stored score is a running total and the term grade must stay withheld.
+   * Keyed `${studentId}|${rubricId}`.
+   */
+  private async dailyProgress(universityId: string, sectionId: string, rubricIds: string[], studentId?: string) {
+    const out = new Map<string, { assessed: number; counted: number }>();
+    if (rubricIds.length === 0) return out;
+    const sessions = await this.prisma.classSession.findMany({
+      where: { sectionId, status: { not: 'CANCELLED' }, dailyAssessment: true },
+      select: { id: true },
+    });
+    const ids = sessions.map((x) => x.id);
+    const [dayEvals, absences, enrolled] = await Promise.all([
+      this.prisma.evaluation.findMany({
+        where: { universityId, sectionId, rubricId: { in: rubricIds }, classSessionId: { in: ids }, scorePercent: { not: null }, ...(studentId && { studentId }) },
+        select: { studentId: true, rubricId: true, classSessionId: true },
+      }),
+      this.prisma.attendanceRecord.findMany({
+        where: { classSessionId: { in: ids }, status: { in: ['ABSENT', 'LEAVE', 'EXCUSED'] }, ...(studentId && { studentId }) },
+        select: { studentId: true, classSessionId: true },
+      }),
+      studentId ? Promise.resolve([{ studentId }]) : this.prisma.enrollment.findMany({ where: { sectionId, status: 'ENROLLED' }, select: { studentId: true } }),
+    ]);
+    const assessed = new Set(dayEvals.map((e) => `${e.studentId}|${e.rubricId}|${e.classSessionId}`));
+    for (const { studentId: st } of enrolled) {
+      const missed = new Set(absences.filter((a) => a.studentId === st).map((a) => a.classSessionId));
+      for (const rb of rubricIds) {
+        const done = ids.filter((id) => assessed.has(`${st}|${rb}|${id}`)).length;
+        const counted = ids.filter((id) => !missed.has(id) || assessed.has(`${st}|${rb}|${id}`)).length;
+        out.set(`${st}|${rb}`, { assessed: done, counted });
+      }
+    }
+    return out;
+  }
+
   /** Per-student breakdown across the rubrics that apply to this section's subject + weighted total + grade. */
   async studentSummary(user: AuthenticatedUser, studentId: string, sectionId?: string) {
     const universityId = user.universityId;
@@ -847,25 +887,30 @@ export class AssessmentService implements OnApplicationBootstrap {
       resolved = (await this.listRubrics(universityId)).map((r) => ({ rubric: r, weightPercent: r.weightPercent }));
     }
 
-    const [evaluations, scheme] = await Promise.all([
+    const dailyIds = resolved.filter((r) => r.rubric.perSession).map((r) => r.rubric.id);
+    const [evaluations, scheme, progress] = await Promise.all([
       this.prisma.evaluation.findMany({ where: { universityId, studentId, sectionId: sectionId ?? null, classSessionId: null }, select: { rubricId: true, scorePercent: true, criticalFailed: true } }),
       this.gradeScheme(universityId, subjectId),
+      sectionId ? this.dailyProgress(universityId, sectionId, dailyIds, studentId) : Promise.resolve(new Map<string, { assessed: number; counted: number }>()),
     ]);
     const evalByRubric = new Map(evaluations.map((e) => [e.rubricId, e]));
 
     const rows = resolved.map(({ rubric: r, weightPercent }) => {
       const ev = evalByRubric.get(r.id);
       const scorePercent = ev?.scorePercent ?? null;
+      const days = r.perSession ? progress.get(`${studentId}|${r.id}`) ?? null : null;
       return {
         rubricId: r.id, nameEn: r.nameEn, nameTh: r.nameTh, weightPercent,
         scorePercent, graded: scorePercent != null, criticalFailed: ev?.criticalFailed ?? false,
         contribution: scorePercent != null ? Math.round((weightPercent / 100) * scorePercent * 100) / 100 : 0,
+        // A daily component is finished only once every practice day that counts is assessed.
+        days, complete: scorePercent != null && (!days || days.assessed >= days.counted),
       };
     });
     const total = Math.round(rows.reduce((a, r) => a + r.contribution, 0) * 100) / 100;
     const gradedWeight = rows.filter((r) => r.graded).reduce((a, r) => a + r.weightPercent, 0);
-    // Only assign a letter grade once every applicable rubric is graded — see sectionSummary.
-    const isComplete = rows.length > 0 && rows.every((r) => r.graded);
+    // Only assign a letter grade once every applicable rubric is finished — see sectionSummary.
+    const isComplete = rows.length > 0 && rows.every((r) => r.complete);
     const band = isComplete ? this.gradeFor(total, scheme.bands) : null;
 
     return {
@@ -888,11 +933,13 @@ export class AssessmentService implements OnApplicationBootstrap {
     const resolved = await this.resolveSubjectRubrics(universityId, section.subjectId);
     const weightByRubric = new Map(resolved.map(({ rubric, weightPercent }) => [rubric.id, weightPercent]));
 
-    const [enrollments, evaluations, scheme, estimates] = await Promise.all([
+    const dailyIds = resolved.filter((r) => r.rubric.perSession).map((r) => r.rubric.id);
+    const [enrollments, evaluations, scheme, estimates, progress] = await Promise.all([
       this.prisma.enrollment.findMany({ where: { sectionId, status: 'ENROLLED' }, select: { studentId: true, student: { select: { studentCode: true, nameEn: true, nameTh: true } } }, orderBy: { student: { studentCode: 'asc' } } }),
       this.prisma.evaluation.findMany({ where: { universityId, sectionId, classSessionId: null }, select: { studentId: true, rubricId: true, scorePercent: true, criticalFailed: true } }),
       this.gradeScheme(universityId, section.subjectId),
       this.estimateGrades(universityId, sectionId, section.subjectId),
+      this.dailyProgress(universityId, sectionId, dailyIds),
     ]);
 
     const students = enrollments.map((en) => {
@@ -907,11 +954,22 @@ export class AssessmentService implements OnApplicationBootstrap {
       // subject has been evaluated. Until then, `total` is a running score (ungraded
       // rubrics count as 0), so mapping it to a band would show a misleadingly low
       // grade (e.g. a strong 2/5-graded student as "F"). Withhold the grade until complete.
-      const isComplete = resolved.length > 0 && evs.length >= resolved.length;
+      // A daily component has a score from its first day on, but it is a running
+      // total until every practice day that counts is assessed — it isn't finished
+      // (and doesn't count towards gradedCount) before then.
+      const days = dailyIds.map((rb) => progress.get(`${en.studentId}|${rb}`)).filter((p): p is { assessed: number; counted: number } => !!p);
+      const dayDone = (rubricId: string) => {
+        const p = progress.get(`${en.studentId}|${rubricId}`);
+        return !p || p.assessed >= p.counted;
+      };
+      const finished = evs.filter((e) => e.scorePercent != null && dayDone(e.rubricId)).length;
+      const isComplete = resolved.length > 0 && finished >= resolved.length;
       const band = isComplete ? this.gradeFor(total, scheme.bands) : null;
       return {
         studentId: en.studentId, studentCode: en.student.studentCode, nameEn: en.student.nameEn, nameTh: en.student.nameTh,
-        total, gradedWeight, gradedCount: evs.length, hasCriticalFail: evs.some((e) => e.criticalFailed),
+        total, gradedWeight, gradedCount: finished, hasCriticalFail: evs.some((e) => e.criticalFailed),
+        // Practice days assessed / counted, summed over the daily components — what "in progress" is waiting on.
+        days: days.length ? { assessed: days.reduce((a, p) => a + p.assessed, 0), counted: days.reduce((a, p) => a + p.counted, 0) } : null,
         isComplete, grade: band?.grade ?? null, gpa: band?.gpa ?? null,
         // Only while the grade is still withheld — an estimate, labelled as such.
         estimate: isComplete ? null : estimates.get(en.studentId) ?? null,

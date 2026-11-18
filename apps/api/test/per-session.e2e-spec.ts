@@ -78,7 +78,10 @@ describe('Per-session (daily) assessment', () => {
     const summary = await http.get(`/api/v1/assessment/sections/${sectionId}/summary`).set('Authorization', `Bearer ${token}`).expect(200);
     const row = summary.body.students.find((s: { studentId: string }) => s.studentId === studentId);
     expect(row.total).toBe(60);
-    expect(row.gradedCount).toBe(1);
+    // 2 of 3 practice days assessed: the daily component is still a running total,
+    // so it isn't finished and no grade is given yet — only an estimate.
+    expect(row).toMatchObject({ gradedCount: 0, isComplete: false, grade: null, days: { assessed: 2, counted: 3 } });
+    expect(row.estimate).toMatchObject({ estimate: 90 });
 
     const form = await http.get('/api/v1/assessment/evaluation')
       .query({ rubricId, studentId, sectionId, classSessionId: sessionIds[1] })
@@ -158,5 +161,28 @@ describe('Per-session (daily) assessment', () => {
     const pdf = await http.get(`/api/v1/reports/assessment/section/${sectionId}/daily/pdf`).set(auth)
       .buffer(true).parse((r, cb) => { const b: Buffer[] = []; r.on('data', (c: Buffer) => b.push(c)); r.on('end', () => cb(null, Buffer.concat(b))); }).expect(200);
     expect((pdf.body as Buffer).subarray(0, 5).toString()).toBe('%PDF-');
+  });
+  it('gives the grade only once every practice day that counts is assessed', async () => {
+    const auth = { Authorization: `Bearer ${token}` };
+    const summary = async () => (await http.get(`/api/v1/assessment/sections/${sectionId}/summary`).set(auth).expect(200))
+      .body.students.find((s: { studentId: string }) => s.studentId === studentId);
+    const student = async () => (await http.get(`/api/v1/assessment/students/${studentId}/summary`).query({ sectionId }).set(auth).expect(200)).body;
+
+    expect(await summary()).toMatchObject({ isComplete: false, grade: null, days: { assessed: 2, counted: 3 } });
+    expect((await student()).rubrics[0]).toMatchObject({ graded: true, complete: false, days: { assessed: 2, counted: 3 } });
+
+    // Assess the last practice day (the one added later, which the student attended).
+    const daily = await http.get(`/api/v1/assessment/sections/${sectionId}/daily`).set(auth).expect(200);
+    const lastIdx = daily.body.students.find((s: { studentId: string }) => s.studentId === studentId).cells
+      .findIndex((c: { status: string }) => c.status !== 'SCORED');
+    await day(daily.body.days[lastIdx].sessionId, 5, 5).expect(201);
+
+    const done = await summary();
+    expect(done).toMatchObject({ isComplete: true, gradedCount: 1, total: 93.33, days: { assessed: 3, counted: 3 }, estimate: null });
+    expect(done.grade).not.toBeNull();
+    const one = await student();
+    expect(one.isComplete).toBe(true);
+    expect(one.rubrics[0]).toMatchObject({ complete: true });
+    expect(one.grade).not.toBeNull();
   });
 });

@@ -15,7 +15,9 @@ import { useStoredUser } from '@/lib/local-store';
 interface SectionRef { id: string; sectionNo: string; subject: { id: string; code: string; nameEn: string } }
 interface Row { studentId: string; studentCode: string; nameEn: string; nameTh: string | null; total: number; gradedWeight: number; gradedCount: number; isComplete?: boolean; grade: string | null; gpa: number | null; hasCriticalFail?: boolean;
   /** Provisional grade while still in progress — an estimate, never the grade itself. */
-  estimate?: { estimate: number; grade: string | null; basisWeight: number; totalWeight: number } | null }
+  estimate?: { estimate: number; grade: string | null; basisWeight: number; totalWeight: number } | null;
+  /** Practice days assessed / counted for the daily component(s). */
+  days?: { assessed: number; counted: number } | null }
 interface SectionSummary { section: { sectionNo: string; subject: { code: string; nameEn: string } }; rubricCount: number; students: Row[] }
 interface Band { id: string; grade: string; gpa: number; label: string; minScore: number; isActive: boolean }
 interface RubricConfigRow { rubricId: string; code: string; nameEn: string; nameTh: string | null; weightPercent: number; isActive: boolean }
@@ -230,7 +232,7 @@ export default function AssessmentPage() {
                       {s.isComplete ? (
                         <span className="chip" style={{ background: `${GRADE_COLOR(s.grade)}22`, color: GRADE_COLOR(s.grade), fontWeight: 700 }}>{s.grade ?? '—'}{s.gpa != null ? ` · ${s.gpa.toFixed(2)}` : ''}</span>
                       ) : (
-                        <span className="chip muted" title={t('as.inProgressHint')} style={{ fontWeight: 600 }}>{t('as.inProgress')} · {s.gradedCount}/{summary.rubricCount}</span>
+                        <span className="chip muted" title={t('as.inProgressHint')} style={{ fontWeight: 600 }}>{t('as.inProgress')} · {s.gradedCount}/{summary.rubricCount}{s.days && s.days.assessed < s.days.counted ? ` · ${t('as.days')} ${s.days.assessed}/${s.days.counted}` : ''}</span>
                       )}
                       {!s.isComplete && s.estimate && (
                         <span className="chip" title={`${t('asd.estimateHint')} · ${s.estimate.basisWeight}/${s.estimate.totalWeight}%`}

@@ -1599,7 +1599,10 @@ export class ReportsService {
       doc.text(this.marksText(detail), cols[1] + 4, y, { width: cols[2] - cols[1] - 6 });
       doc.text(`${r.weightPercent}%`, cols[2] + 4, y, { width: cols[3] - cols[2] - 6 });
       doc.text(r.scorePercent != null ? `${r.scorePercent}` : '—', cols[3] + 4, y, { width: cols[4] - cols[3] - 6 });
-      doc.text(L(lang, r.graded ? 'ให้คะแนนแล้ว' : 'ยังไม่ให้คะแนน', r.graded ? 'Graded' : 'Not graded'), cols[4] + 4, y, { width: cols[5] - cols[4] - 6 });
+      const status = r.graded && !r.complete && r.days
+        ? L(lang, `สะสม ${r.days.assessed}/${r.days.counted} วัน`, `${r.days.assessed}/${r.days.counted} days`)
+        : L(lang, r.graded ? 'ให้คะแนนแล้ว' : 'ยังไม่ให้คะแนน', r.graded ? 'Graded' : 'Not graded');
+      doc.text(status, cols[4] + 4, y, { width: cols[5] - cols[4] - 6 });
       doc.text(`${r.contribution}`, cols[5] + 4, y, { width: right - cols[5] - 6 });
       if (procs.length > 0) {
         doc.font(F).fontSize(9).fillColor('#7c8798')
