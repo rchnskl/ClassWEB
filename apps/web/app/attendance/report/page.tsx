@@ -63,12 +63,17 @@ export default function AttendanceReportPage() {
     if (!localStorage.getItem('accessToken')) { router.replace('/login'); return; }
     apiFetch<{ items: SectionRef[] }>('/sections').then((d) => {
       setSections(d.items);
-      const first = d.items[0];
+      let last: string | null = null;
+      try { last = localStorage.getItem('attendanceReport.section'); } catch { /* ignore */ }
+      const first = d.items.find((x) => x.id === last) ?? d.items[0];
       if (first) { setSectionId(first.id); void load(first.id); } else setLoading(false);
     }).catch(() => setLoading(false));
   }, [router, load]);
 
-  function pick(id: string) { setSectionId(id); void load(id); }
+  function pick(id: string) {
+    setSectionId(id); void load(id);
+    try { localStorage.setItem('attendanceReport.section', id); } catch { /* ignore */ }
+  }
 
   async function exportXlsx() {
     if (!sectionId) return;
@@ -95,11 +100,26 @@ export default function AttendanceReportPage() {
           </div>
         </div>
 
-        <div className="glass rise" style={{ padding: 14, marginBottom: 16 }}>
-          <select value={sectionId} onChange={(e) => pick(e.target.value)} aria-label={t('case.section')} className="input" style={{ maxWidth: 480 }}>
-            {sections.map((s) => <option key={s.id} value={s.id}>{s.subject.code} · {t('case.group')} {s.sectionNo} — {s.subject.nameEn}</option>)}
-          </select>
+        {/* One button per subject/section: each subject's report is separate. */}
+        <div className="glass rise" style={{ padding: 12, marginBottom: 16, display: 'flex', gap: 8, flexWrap: 'wrap' }} role="tablist" aria-label={t('case.section')}>
+          {sections.map((s) => {
+            const on = s.id === sectionId;
+            return (
+              <button key={s.id} role="tab" aria-selected={on} onClick={() => pick(s.id)}
+                style={{ padding: '8px 14px', borderRadius: 12, cursor: 'pointer', textAlign: 'left', color: on ? '#fff' : 'var(--text-0)',
+                  border: on ? '1px solid var(--brand)' : '1px solid var(--glass-hairline)', background: on ? 'var(--brand)' : 'transparent' }}>
+                <div style={{ fontWeight: 750, fontSize: 14 }}>{s.subject.code} · {t('case.group')} {s.sectionNo}</div>
+                <div style={{ fontSize: 11.5, opacity: 0.85 }}>{s.subject.nameEn}</div>
+              </button>
+            );
+          })}
         </div>
+        {report && (
+          <h2 style={{ fontSize: 19, fontWeight: 750, margin: '0 0 12px' }}>
+            {report.section.subject.code} {lang === 'th' && report.section.subject.nameTh ? report.section.subject.nameTh : report.section.subject.nameEn}
+            <span className="muted" style={{ fontWeight: 500, fontSize: 14 }}> · {t('case.group')} {report.section.sectionNo}{report.section.lecturer ? ` · ${report.section.lecturer.nameEn}` : ''}{report.section.room ? ` · ${report.section.room.roomNumber}` : ''}</span>
+          </h2>
+        )}
 
         {error && <div className="chip chip-danger" style={{ display: 'block', marginBottom: 12 }}>{error}</div>}
         {loading && <div className="muted" style={{ padding: 20 }}>{t('common.loading')}</div>}
