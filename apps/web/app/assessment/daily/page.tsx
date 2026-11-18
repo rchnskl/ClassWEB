@@ -16,7 +16,7 @@ interface Evaluator { key: string; email: string | null; nameEn: string | null; 
 type Status = 'SCORED' | 'ABSENT' | 'LEAVE' | 'PENDING' | 'UPCOMING';
 interface Cell {
   status: Status; scorePercent: number | null; criticalFailed: boolean; note: string | null;
-  rawScore: number | null; rawMax: number | null;
+  rawScore: number | null; rawMax: number | null; itemized: boolean;
   sectionScores: Array<number | null> | null; ratings: Record<string, number> | null; failedCritical: string[];
   evaluator: Evaluator | null; at: string | null; attendance: string | null;
 }
@@ -25,7 +25,7 @@ export interface Estimate { estimate: number; grade: string | null; gpa: number 
 interface StudentRow extends Named {
   studentId: string; studentCode: string; cells: Cell[];
   assessedDays: number; countedDays: number; pendingDays: number; missedDays: number;
-  dayAverage: number | null; sectionAverages: Array<number | null>; component: number | null; points: number | null; criticalFailed: boolean;
+  dayAverage: number | null; itemizedDays: number; sectionAverages: Array<number | null>; component: number | null; points: number | null; criticalFailed: boolean;
   estimate: Estimate | null;
 }
 interface Day {
@@ -40,11 +40,13 @@ interface Report {
   rubrics: Array<Named & { id: string; weightPercent: number }>;
   rubric: (Named & { id: string; weightPercent: number; sections: RubricSection[] }) | null;
   days: Day[]; students: StudentRow[];
-  totals: { practiceDays: number; daysAssessed: number; assessments: number; pending: number; average: number | null; threshold: number; studentsBelow: number } | null;
+  totals: { practiceDays: number; daysAssessed: number; assessments: number; itemizedAssessments: number; pending: number; average: number | null; threshold: number; studentsBelow: number } | null;
 }
 
 const th: React.CSSProperties = { padding: '8px 10px', fontSize: 12, fontWeight: 700, textAlign: 'left', color: 'var(--text-1)', borderBottom: '1px solid var(--glass-hairline)', whiteSpace: 'nowrap' };
 const td: React.CSSProperties = { padding: '7px 10px', fontSize: 13, borderBottom: '1px solid var(--glass-hairline)', whiteSpace: 'nowrap' };
+/** "1. Knowledge" — but a name that already carries its own number ("II. ความรู้", "2) …") is left as it is. */
+const catLabel = (name: string, i: number) => (/^\s*([IVXLC]+|\d+)[.)]\s/i.test(name) ? name : `${i + 1}. ${name}`);
 const sticky: React.CSSProperties = { position: 'sticky', left: 0, background: 'var(--popover-bg)', zIndex: 1 };
 
 /**
@@ -273,6 +275,9 @@ export default function DailyAssessmentReportPage() {
                       )}
                       <button onClick={() => setPicked(null)} aria-label={t('common.close')} style={{ marginLeft: 'auto', background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-1)', fontSize: 16 }}>×</button>
                     </div>
+                    {c.status === 'SCORED' && !c.itemized && (
+                      <div className="muted" style={{ marginTop: 8, fontSize: 12.5 }}>ⓘ {t('asd.overallOnly')}</div>
+                    )}
                     {c.sectionScores && (
                       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: '6px 16px', marginTop: 10 }}>
                         {rb.sections.map((sec, si) => {
@@ -280,7 +285,7 @@ export default function DailyAssessmentReportPage() {
                           return (
                             <div key={sec.id}>
                               <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, fontSize: 12 }}>
-                                <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={nm(sec)}>{si + 1}. {nm(sec)}</span>
+                                <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={nm(sec)}>{catLabel(nm(sec), si)}</span>
                                 <b style={{ color: scoreColor(v) }}>{v != null ? `${v}%` : '—'}</b>
                               </div>
                               <div style={{ height: 5, borderRadius: 3, background: 'var(--glass-hairline)', overflow: 'hidden', marginTop: 3 }}>
@@ -360,16 +365,18 @@ export default function DailyAssessmentReportPage() {
 
             {rb.sections.length > 0 && (
               <div className="glass rise" style={{ padding: 16, minWidth: 0 }}>
-                <h2 style={{ fontSize: 16, fontWeight: 700, margin: '0 0 10px' }}>{t('asd.byCategory')}</h2>
+                <h2 style={{ fontSize: 16, fontWeight: 700, margin: '0 0 4px' }}>{t('asd.byCategory')}</h2>
+                <p className="muted" style={{ fontSize: 11.5, margin: '0 0 10px', whiteSpace: 'normal' }}>{t('asd.categoryHint')}</p>
                 <div style={{ overflowX: 'auto' }}>
                 <table style={{ borderCollapse: 'collapse', minWidth: '100%' }}>
                   <thead><tr>
                     <th style={{ ...th, ...sticky }}>{t('asd.student')}</th>
                     {rb.sections.map((sec, i) => (
                       <th key={sec.id} title={nm(sec)} style={{ ...th, textAlign: 'center', whiteSpace: 'normal', minWidth: 90, maxWidth: 150, fontSize: 11.5 }}>
-                        {i + 1}. {nm(sec)}{sec.weightPercent ? <span className="muted" style={{ fontWeight: 500 }}> ({Math.round(sec.weightPercent * 100) / 100}%)</span> : null}
+                        {catLabel(nm(sec), i)}{sec.weightPercent ? <span className="muted" style={{ fontWeight: 500 }}> ({Math.round(sec.weightPercent * 100) / 100}%)</span> : null}
                       </th>
                     ))}
+                    <th style={{ ...th, textAlign: 'center' }} title={t('asd.fromDaysHint')}>{t('asd.fromDays')}</th>
                     <th style={{ ...th, textAlign: 'right' }}>{t('asd.dayAvg')}</th>
                   </tr></thead>
                   <tbody>
@@ -377,6 +384,7 @@ export default function DailyAssessmentReportPage() {
                       <tr key={s.studentId}>
                         <td style={{ ...td, ...sticky }}><span style={{ fontFamily: 'ui-monospace, monospace', fontSize: 12 }}>{s.studentCode}</span> {nm(s)}</td>
                         {s.sectionAverages.map((v, i) => <td key={rb.sections[i].id} style={{ ...td, textAlign: 'center', fontWeight: 650, color: scoreColor(v) }}>{v ?? '—'}</td>)}
+                        <td className="muted" style={{ ...td, textAlign: 'center', fontSize: 12 }} title={t('asd.fromDaysHint')}>{s.itemizedDays}/{s.assessedDays}</td>
                         <td style={{ ...td, textAlign: 'right', fontWeight: 750, color: scoreColor(s.dayAverage) }}>{s.dayAverage ?? '—'}</td>
                       </tr>
                     ))}
@@ -387,6 +395,7 @@ export default function DailyAssessmentReportPage() {
                         const v = xs.length ? Math.round((xs.reduce((a, b) => a + b, 0) / xs.length) * 10) / 10 : null;
                         return <td key={sec.id} style={{ ...td, textAlign: 'center', fontWeight: 750, color: scoreColor(v) }}>{v ?? '—'}</td>;
                       })}
+                      <td className="muted" style={{ ...td, textAlign: 'center', fontSize: 12 }}>{totals.itemizedAssessments}/{totals.assessments}</td>
                       <td style={{ ...td, textAlign: 'right', fontWeight: 750, color: scoreColor(totals.average) }}>{totals.average ?? '—'}</td>
                     </tr>
                   </tbody>

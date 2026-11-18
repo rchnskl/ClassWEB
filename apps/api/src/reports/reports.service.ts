@@ -1207,16 +1207,16 @@ export class ReportsService {
     // ---- Table 3: average per rubric category
     if (rb.sections.length > 0) {
       sectionTitle(L(lang, 'คะแนนเฉลี่ยรายหมวด (ร้อยละ)', 'Average by category (%)'));
-      const catW = Math.min(90, (right - left - 22 - 62 - 150 - 60) / rb.sections.length);
+      const catW = Math.min(90, (right - left - 22 - 62 - 150 - 60 - 60) / rb.sections.length);
       const cols = [
         { w: 22, align: 'left' as const }, { w: 62, align: 'left' as const }, { w: 150, align: 'left' as const },
-        ...rb.sections.map(() => ({ w: catW, align: 'center' as const })), { w: 60, align: 'right' as const },
+        ...rb.sections.map(() => ({ w: catW, align: 'center' as const })), { w: 60, align: 'center' as const }, { w: 60, align: 'right' as const },
       ];
-      const labels = ['#', L(lang, 'รหัส', 'Code'), L(lang, 'ชื่อ-สกุล', 'Name'), ...rb.sections.map((_, i) => `${L(lang, 'หมวด', 'Cat.')} ${i + 1}`), L(lang, 'เฉลี่ย', 'Avg')];
+      const labels = ['#', L(lang, 'รหัส', 'Code'), L(lang, 'ชื่อ-สกุล', 'Name'), ...rb.sections.map((_, i) => `${L(lang, 'หมวด', 'Cat.')} ${i + 1}`), L(lang, 'จากวัน', 'From days'), L(lang, 'เฉลี่ย', 'Avg')];
       y = header(cols, labels, y, 9);
       const rows = [
-        ...d.students.map((s, i) => ({ cells: [String(i + 1), s.studentCode, this.personName(s.nameEn, s.nameTh)], vals: s.sectionAverages, avg: s.dayAverage, bold: false })),
-        { cells: ['', '', L(lang, 'เฉลี่ยทั้งกลุ่ม', 'Group average')], vals: rb.sections.map((_, si) => {
+        ...d.students.map((s, i) => ({ cells: [String(i + 1), s.studentCode, this.personName(s.nameEn, s.nameTh)], vals: s.sectionAverages, from: `${s.itemizedDays}/${s.assessedDays}`, avg: s.dayAverage, bold: false })),
+        { cells: ['', '', L(lang, 'เฉลี่ยทั้งกลุ่ม', 'Group average')], from: `${totals.itemizedAssessments}/${totals.assessments}`, vals: rb.sections.map((_, si) => {
           const xs = d.students.map((s) => s.sectionAverages[si]).filter((v): v is number => v != null);
           return xs.length ? Math.round((xs.reduce((a, b) => a + b, 0) / xs.length) * 10) / 10 : null;
         }), avg: totals.average, bold: true },
@@ -1227,11 +1227,18 @@ export class ReportsService {
         drawRow(cols, [
           ...row.cells.map((text) => ({ text, bold: row.bold })),
           ...row.vals.map((v) => ({ text: v != null ? String(v) : '—', color: scoreHex(v), bold: true })),
+          { text: row.from, color: '#4a5666' },
           { text: row.avg != null ? String(row.avg) : '—', color: scoreHex(row.avg), bold: true },
         ], y, 9.5);
         y += 16;
       });
       y += 6;
+      if (y > bottom - 14) { doc.addPage(); y = 40; }
+      doc.font(F).fontSize(9).fillColor('#6b4fa0').text(L(lang,
+        'คะแนนรายหมวดคิดเฉพาะวันที่ให้คะแนนรายข้อ ("จากวัน" = วันที่แยกรายหมวด / วันที่ประเมินทั้งหมด) — วันที่บันทึกเป็นคะแนนรวมไม่มีคะแนนรายหมวด ส่วน "เฉลี่ย" คิดจากทุกวันที่ประเมิน',
+        'Category averages use only the days scored item by item ("From days" = itemised / all days assessed); a day entered as one overall score has no category breakdown. "Avg" uses every day assessed.'),
+      left, y, { width: right - left });
+      y = doc.y + 6;
       for (const [i, sec] of rb.sections.entries()) {
         if (y > bottom - 14) { doc.addPage(); y = 40; }
         doc.font(F).fontSize(9).fillColor('#4a5666')

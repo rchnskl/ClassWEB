@@ -270,7 +270,7 @@ describe('ReportsService.sectionDailyAssessmentPdf', () => {
     });
     return {
       studentId: `s${k}`, studentCode: `65${k}1234`, nameEn: `Student ${k}`, nameTh: k === 2 ? null : `นักศึกษา ทดสอบ${k}`,
-      cells, assessedDays: 4, countedDays: 6, dayAverage: 70 + k * 3, sectionAverages: cats.map((_, c) => 68 + c + k), component: 50 + k, points: 35 + k, criticalFailed: k === 6,
+      cells, assessedDays: 4, countedDays: 6, itemizedDays: k % 3, dayAverage: 70 + k * 3, sectionAverages: cats.map((_, c) => 68 + c + k), component: 50 + k, points: 35 + k, criticalFailed: k === 6,
       estimate: { estimate: 74 + k * 2.5, grade: ['B', 'B', 'B+', 'B+', 'A', 'A', 'A'][k], gpa: 3, basisWeight: 85, totalWeight: 100 },
     };
   });
@@ -285,7 +285,7 @@ describe('ReportsService.sectionDailyAssessmentPdf', () => {
       criticalFails: i === 1 ? 1 : 0, sectionAverages: cats.map(() => 75), evaluators: i >= 5 ? [] : [{ ...evaluator, count: 6 }],
     })),
     students,
-    totals: { practiceDays: 6, daysAssessed: 5, assessments: 31, pending: 2, average: 77.4, threshold: 70, studentsBelow: 0 },
+    totals: { practiceDays: 6, daysAssessed: 5, assessments: 31, itemizedAssessments: 6, pending: 2, average: 77.4, threshold: 70, studentsBelow: 0 },
   };
   const prisma = {
     university: { findUnique: jest.fn().mockResolvedValue({ nameEn: 'Assumption University', nameTh: 'มหาวิทยาลัยอัสสัมชัญ' }) },

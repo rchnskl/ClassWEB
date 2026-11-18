@@ -332,8 +332,9 @@ describe('AssessmentService.dailyReport', () => {
           scores: [{ rubricItemId: 'i1', rating: 5, passed: null }, { rubricItemId: 'i2', rating: 3, passed: true }] },
         { studentId: 'st1', classSessionId: 'd2', scorePercent: 60, criticalFailed: false, note: null, rawScore: null, rawMax: null, evaluatorId: 'u1', evaluatorName: 'x@au.edu', updatedAt: d('2026-11-11'),
           scores: [{ rubricItemId: 'i1', rating: 3, passed: null }, { rubricItemId: 'i2', rating: 3, passed: true }] },
-        { studentId: 'st2', classSessionId: 'd1', scorePercent: 90, criticalFailed: false, note: null, rawScore: null, rawMax: null, evaluatorId: 'u1', evaluatorName: 'x@au.edu', updatedAt: d('2026-11-10'),
-          scores: [{ rubricItemId: 'i1', rating: 4, passed: null }, { rubricItemId: 'i2', rating: 5, passed: true }] },
+        // Entered as one overall score (no item marks): nothing to break down by category.
+        { studentId: 'st2', classSessionId: 'd1', scorePercent: 90, criticalFailed: false, note: null, rawScore: 45, rawMax: 50, evaluatorId: 'u1', evaluatorName: 'x@au.edu', updatedAt: d('2026-11-10'),
+          scores: [] },
       ];
       if (where.classSessionId === null && select.rubricId) return Promise.resolve([{ studentId: 'st1', rubricId: 'r2', scorePercent: 90 }, { studentId: 'st1', rubricId: 'r1', scorePercent: 46.67 }]);
       if (where.classSessionId === null) return Promise.resolve([{ studentId: 'st1', scorePercent: 46.67 }, { studentId: 'st2', scorePercent: 45 }]);
@@ -361,13 +362,18 @@ describe('AssessmentService.dailyReport', () => {
     expect(st1.cells[0].evaluator).toMatchObject({ nameTh: 'รชานนท์', email: 'x@au.edu' });
     expect(st1.points).toBe(32.67); // 46.67% of 70
     expect(st2.countedDays).toBe(2); // the absent day doesn't count
+    expect(st1.cells[0]).toMatchObject({ itemized: true });
+    expect(st1.itemizedDays).toBe(2);
+    expect(st2.cells[0]).toMatchObject({ itemized: false, sectionScores: null, scorePercent: 90, rawScore: 45 });
+    expect(st2.itemizedDays).toBe(0);
+    expect(st2.sectionAverages).toEqual([null, null]);
 
     const [d1, d2, d3] = r.days;
-    expect(d1).toMatchObject({ assessed: 2, average: 85, min: 80, max: 90, pending: 0 });
+    expect(d1).toMatchObject({ assessed: 2, itemized: 1, average: 85, min: 80, max: 90, pending: 0, sectionAverages: [100, 60] });
     expect(d1.evaluators).toEqual([expect.objectContaining({ nameEn: 'Rachanon', count: 2 })]);
     expect(d2).toMatchObject({ assessed: 1, absent: 1, average: 60 });
     expect(d3).toMatchObject({ upcoming: true, assessed: 0, pending: 0 });
-    expect(r.totals).toMatchObject({ practiceDays: 3, daysAssessed: 2, assessments: 3, average: 76.7, studentsBelow: 0 });
+    expect(r.totals).toMatchObject({ practiceDays: 3, daysAssessed: 2, assessments: 3, itemizedAssessments: 2, average: 76.7, studentsBelow: 0 });
 
     // Estimate: daily at its day average (70 for st1), term components as scored, over what's assessed.
     expect(st1.estimate).toMatchObject({ estimate: 76, grade: 'B', basisWeight: 100, totalWeight: 100 }); // (70×70 + 90×30) / 100

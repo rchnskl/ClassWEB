@@ -1078,17 +1078,20 @@ export class AssessmentService implements OnApplicationBootstrap {
         const att = attBy.get(k(student.id, s.id));
         if (e && e.scorePercent != null) {
           const ratings = new Map(e.scores.map((x) => [x.rubricItemId, x.rating]));
+          // A day marked item by item breaks down by category; one entered as a single
+          // overall score (a raw mark or a percentage) has nothing to break down.
+          const itemized = ratings.size > 0;
           return {
             status: 'SCORED' as CellStatus, scorePercent: e.scorePercent, criticalFailed: e.criticalFailed, note: e.note,
-            rawScore: e.rawScore, rawMax: e.rawMax,
-            sectionScores: r.sections.map((sec) => { const p = AssessmentService.sectionPercent(sec, ratings); return p == null ? null : r1(p); }),
+            rawScore: e.rawScore, rawMax: e.rawMax, itemized,
+            sectionScores: itemized ? r.sections.map((sec) => { const p = AssessmentService.sectionPercent(sec, ratings); return p == null ? null : r1(p); }) : null,
             ratings: Object.fromEntries(ratings),
             failedCritical: e.scores.filter((x) => x.passed === false).map((x) => x.rubricItemId),
             evaluator: evaluatorOf(e), at: e.updatedAt.toISOString(), attendance: att ?? null,
           };
         }
         const status: CellStatus = att === 'ABSENT' ? 'ABSENT' : att === 'LEAVE' || att === 'EXCUSED' ? 'LEAVE' : date > today ? 'UPCOMING' : 'PENDING';
-        return { status, scorePercent: null, criticalFailed: false, note: null, rawScore: null, rawMax: null, sectionScores: null, ratings: null, failedCritical: [], evaluator: null, at: null, attendance: att ?? null };
+        return { status, scorePercent: null, criticalFailed: false, note: null, rawScore: null, rawMax: null, itemized: false, sectionScores: null, ratings: null, failedCritical: [], evaluator: null, at: null, attendance: att ?? null };
       });
       const scored = cells.filter((c) => c.status === 'SCORED').map((c) => c.scorePercent!);
       // Same rule as refreshDailyComponent: a day missed (absent/leave) and not assessed doesn't count.
@@ -1100,6 +1103,8 @@ export class AssessmentService implements OnApplicationBootstrap {
         pendingDays: cells.filter((c) => c.status === 'PENDING').length,
         missedDays: cells.filter((c) => c.status === 'ABSENT' || c.status === 'LEAVE').length,
         dayAverage: mean(scored),
+        // The category averages rest only on the itemised days — say how many.
+        itemizedDays: cells.filter((c) => c.itemized).length,
         sectionAverages: r.sections.map((_, si) => mean(cells.map((c) => c.sectionScores?.[si]).filter((x): x is number => x != null))),
         component, points: component != null ? r2((component * weightPercent) / 100) : null,
         criticalFailed: cells.some((c) => c.criticalFailed),
@@ -1126,6 +1131,7 @@ export class AssessmentService implements OnApplicationBootstrap {
         min: scores.length ? r1(Math.min(...scores)) : null,
         max: scores.length ? r1(Math.max(...scores)) : null,
         criticalFails: col.filter((c) => c.criticalFailed).length,
+        itemized: col.filter((c) => c.itemized).length,
         sectionAverages: r.sections.map((_, si) => mean(col.map((c) => c.sectionScores?.[si]).filter((x): x is number => x != null))),
         evaluators: [...tally.values()].sort((a, b) => b.count - a.count),
       };
@@ -1136,6 +1142,7 @@ export class AssessmentService implements OnApplicationBootstrap {
       practiceDays: days.length,
       daysAssessed: days.filter((d) => d.assessed > 0).length,
       assessments: allScores.length,
+      itemizedAssessments: students.reduce((a, st) => a + st.itemizedDays, 0),
       pending: days.reduce((a, d) => a + d.pending, 0),
       average: mean(allScores),
       threshold: 70,
@@ -1203,22 +1210,26 @@ export class AssessmentService implements OnApplicationBootstrap {
     grid.views = [{ state: 'frozen', xSplit: 3, ySplit: 1 }];
 
     const cat = wb.addWorksheet('Category averages');
-    head(cat.addRow(['No.', 'Student ID', 'Name', ...rb.sections.map((s) => `${nm(s)} (${Math.round(s.weightPercent * 100) / 100}%)`), 'Daily average %']));
-    d.students.forEach((s, i) => cat.addRow([i + 1, s.studentCode, sname(s), ...s.sectionAverages.map((v) => v ?? ''), s.dayAverage ?? '']));
+    head(cat.addRow(['No.', 'Student ID', 'Name', ...rb.sections.map((s) => `${nm(s)} (${Math.round(s.weightPercent * 100) / 100}%)`), 'Based on itemised days', 'Daily average % (all days)']));
+    d.students.forEach((s, i) => cat.addRow([i + 1, s.studentCode, sname(s), ...s.sectionAverages.map((v) => v ?? ''), `${s.itemizedDays}/${s.assessedDays}`, s.dayAverage ?? '']));
+    cat.addRow([]);
+    cat.addRow(['', '', 'Category averages use only the days scored item by item; a day entered as one overall score has no category breakdown.']);
     cat.getColumn(1).width = 5; cat.getColumn(2).width = 11; cat.getColumn(3).width = 36;
     rb.sections.forEach((_, i) => { cat.getColumn(4 + i).width = 18; });
+    cat.getColumn(4 + rb.sections.length).width = 14;
 
     const detail = wb.addWorksheet('Daily detail');
-    head(detail.addRow(['Date', 'Student ID', 'Name', 'Attendance', 'Score %', ...rb.sections.map((s) => `${nm(s)} %`), 'Critical fail', 'Assessed by', 'Login email', 'Saved at', 'Note']));
+    head(detail.addRow(['Date', 'Student ID', 'Name', 'Attendance', 'Score %', 'Entered as', ...rb.sections.map((s) => `${nm(s)} %`), 'Critical fail', 'Assessed by', 'Login email', 'Saved at', 'Note']));
     d.days.forEach((x, di) => {
       for (const s of d.students) {
         const c = s.cells[di];
         if (c.status === 'PENDING' || c.status === 'UPCOMING') continue;
         detail.addRow([x.date, s.studentCode, s.nameTh ?? s.nameEn, c.attendance ?? '', c.scorePercent ?? (c.status === 'ABSENT' ? 'Absent' : 'Leave'),
+          c.status !== 'SCORED' ? '' : c.itemized ? 'Item by item' : c.rawScore != null ? `Overall score ${c.rawScore}/${c.rawMax}` : 'Overall score',
           ...rb.sections.map((_, si) => c.sectionScores?.[si] ?? ''), c.criticalFailed ? 'YES' : '', who(c.evaluator), c.evaluator?.email ?? '', at(c.at), c.note ?? '']);
       }
     });
-    [12, 11, 30, 11, 9, ...rb.sections.map(() => 14), 10, 26, 28, 16, 40].forEach((w, i) => { detail.getColumn(i + 1).width = w; });
+    [12, 11, 30, 11, 9, 20, ...rb.sections.map(() => 14), 10, 26, 28, 16, 40].forEach((w, i) => { detail.getColumn(i + 1).width = w; });
     detail.views = [{ state: 'frozen', ySplit: 1 }];
 
     const items = wb.addWorksheet('Item marks');
