@@ -1,5 +1,7 @@
 import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import * as bcrypt from 'bcryptjs';
+import { Prisma } from '@prisma/client';
+import { displayNameOf } from './display-name';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
@@ -52,7 +54,7 @@ export class UsersService {
       this.prisma.user.findMany({
         where: { universityId, deletedAt: null },
         select: {
-          id: true, email: true, status: true, lastLoginAt: true, createdAt: true,
+          id: true, email: true, status: true, lastLoginAt: true, createdAt: true, metadata: true,
           roles: { select: { role: { select: { code: true, nameEn: true, nameTh: true } } } },
           lecturer: { select: { nameEn: true, nameTh: true, employeeCode: true } },
           student: { select: { nameEn: true, nameTh: true, studentCode: true } },
@@ -63,7 +65,8 @@ export class UsersService {
       }),
       this.prisma.user.count({ where: { universityId, deletedAt: null } }),
     ]);
-    return { total, take, skip, items };
+    // Only the display name leaves metadata — the rest of it stays server-side.
+    return { total, take, skip, items: items.map(({ metadata, ...u }) => ({ ...u, displayName: displayNameOf(metadata) })) };
   }
 
   /** Available roles for the tenant, for a role picker. */
@@ -146,6 +149,12 @@ export class UsersService {
     }
     if (dto.status) {
       await this.prisma.user.update({ where: { id: userId }, data: { status: dto.status } });
+    }
+    if (dto.displayName !== undefined) {
+      const meta = user.metadata && typeof user.metadata === 'object' && !Array.isArray(user.metadata) ? { ...(user.metadata as Record<string, unknown>) } : {};
+      const name = dto.displayName.trim();
+      if (name) meta.displayName = name; else delete meta.displayName;
+      await this.prisma.user.update({ where: { id: userId }, data: { metadata: meta as Prisma.InputJsonValue } });
     }
     // Their new role / status applies from the next request, not after the cache expires.
     if (dto.roleCode || dto.status) invalidatePrincipal(userId);

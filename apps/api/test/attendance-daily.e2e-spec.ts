@@ -58,6 +58,17 @@ describe('Daily attendance overview', () => {
       expect.objectContaining({ kind: 'SELF', count: 2 }),
       expect.objectContaining({ kind: 'USER', userId: admin.id, email: ADMIN.email, count: 1 }),
     ]);
+    // An admin login with no lecturer profile shows the display name set for it.
+    await http.patch(`/api/v1/users/${admin.id}`).set('Authorization', `Bearer ${token}`).send({ displayName: 'เจ้าหน้าที่คณะฯ' }).expect(200);
+    const users = await http.get('/api/v1/users').set('Authorization', `Bearer ${token}`).expect(200);
+    expect(users.body.items.find((u: { id: string }) => u.id === admin.id)).toMatchObject({ displayName: 'เจ้าหน้าที่คณะฯ' });
+    expect(users.body.items[0]).not.toHaveProperty('metadata');
+    const r2 = await http.get(`/api/v1/attendance/sections/${sec.id}/daily`).set('Authorization', `Bearer ${token}`).expect(200);
+    expect(r2.body.days[0].recordedBy[1]).toMatchObject({ kind: 'USER', nameTh: 'เจ้าหน้าที่คณะฯ', email: ADMIN.email });
+    await http.patch(`/api/v1/users/${admin.id}`).set('Authorization', `Bearer ${token}`).send({ displayName: '' }).expect(200);
+    const r3 = await http.get(`/api/v1/attendance/sections/${sec.id}/daily`).set('Authorization', `Bearer ${token}`).expect(200);
+    expect(r3.body.days[0].recordedBy[1]).toMatchObject({ nameTh: null, nameEn: null });
+
     const third = r.body.students.find((s: { studentId: string }) => s.studentId === students[2].id);
     expect(third).toMatchObject({ marks: ['ABSENT', null, null], absent: 1, rate: 0 });
     expect(third.marksBy[0]).toMatchObject({ kind: 'USER', email: ADMIN.email, method: 'MANUAL' });

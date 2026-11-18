@@ -9,6 +9,7 @@ import { AnalyticsService } from '../analytics/analytics.service';
 import { AssessmentService } from '../assessment/assessment.service';
 import { SettingsService } from '../settings/settings.service';
 import { AttendanceService } from '../attendance/attendance.service';
+import { displayNameOf } from '../users/display-name';
 import { FONT_TH, FONT_TH_BOLD, LOGO_FACULTY, LOGO_UNIVERSITY } from './report-assets';
 import { AuthenticatedUser } from '../common/authenticated-user';
 
@@ -83,6 +84,9 @@ export class ReportsService {
       where: { userId }, select: { nameEn: true, nameTh: true },
     });
     if (lecturer) return this.personName(lecturer.nameEn, lecturer.nameTh);
+    const u = await this.prisma.user.findUnique({ where: { id: userId }, select: { metadata: true } });
+    const dn = displayNameOf(u?.metadata);
+    if (dn) return dn;
     return isAdmin ? 'System Administrator' : undefined;
   }
 

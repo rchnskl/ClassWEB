@@ -1,5 +1,5 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
-import { IsIn, IsOptional } from 'class-validator';
+import { IsIn, IsOptional, IsString, MaxLength } from 'class-validator';
 
 export class UpdateUserDto {
   @ApiPropertyOptional({ enum: ['ACTIVE', 'INACTIVE', 'SUSPENDED'] })
@@ -11,4 +11,10 @@ export class UpdateUserDto {
   @IsOptional()
   @IsIn(['ADMIN', 'LECTURER', 'STUDENT'])
   roleCode?: string;
+
+  @ApiPropertyOptional({ description: 'Name shown for this login in reports when it has no lecturer/student profile (e.g. a shared admin account). Empty clears it.' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(120)
+  displayName?: string;
 }

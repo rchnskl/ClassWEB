@@ -500,6 +500,8 @@ interface UserRow {
   roles: { role: { code: string; nameEn: string; nameTh: string | null } }[];
   lecturer: { nameEn: string; nameTh: string | null; employeeCode: string } | null;
   student: { nameEn: string; nameTh: string | null; studentCode: string } | null;
+  /** Shown in reports for a login without a lecturer/student profile (e.g. a shared admin account). */
+  displayName?: string | null;
 }
 interface RoleRef { code: string; nameEn: string; nameTh: string | null }
 interface LinkableRef { id: string; nameEn: string; nameTh: string | null; employeeCode?: string; studentCode?: string }
@@ -584,6 +586,19 @@ function UsersTab() {
     } finally { setBusyId(null); }
   }
 
+  async function editDisplayName(u: UserRow) {
+    const next = window.prompt(t('users.displayNamePrompt'), u.displayName ?? '');
+    if (next === null) return;
+    setBusyId(u.id);
+    setActionError(null);
+    try {
+      await apiFetch(`/users/${u.id}`, { method: 'PATCH', body: JSON.stringify({ displayName: next.trim() }) });
+      await load();
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : 'Failed to update user');
+    } finally { setBusyId(null); }
+  }
+
   async function toggleSuspend(u: UserRow) {
     const suspending = u.status !== 'SUSPENDED';
     if (suspending && !window.confirm(t('users.confirmSuspend'))) return;
@@ -635,7 +650,15 @@ function UsersTab() {
                   <Td>
                     {u.lecturer ? <span>{name(u.lecturer.nameEn, u.lecturer.nameTh)} <span className="muted" style={{ fontSize: 12 }}>({u.lecturer.employeeCode})</span></span>
                       : u.student ? <span>{name(u.student.nameEn, u.student.nameTh)} <span className="muted" style={{ fontSize: 12 }}>({u.student.studentCode})</span></span>
-                      : <span className="muted">{t('users.unlinked')}</span>}
+                      : (
+                        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                          {u.displayName ? <span>{u.displayName}</span> : <span className="muted">{t('users.unlinked')}</span>}
+                          <button onClick={() => editDisplayName(u)} disabled={busyId === u.id} className="glass hairline"
+                            title={t('users.displayNameHint')} style={{ padding: '3px 9px', borderRadius: 8, fontSize: 11.5, fontWeight: 600 }}>
+                            ✏️ {u.displayName ? t('users.displayNameEdit') : t('users.displayNameSet')}
+                          </button>
+                        </span>
+                      )}
                   </Td>
                   <Td>{u.roles.map((r) => name(r.role.nameEn, r.role.nameTh)).join(', ') || '—'}</Td>
                   <Td><span className={`chip ${u.status === 'ACTIVE' ? 'chip-success' : u.status === 'SUSPENDED' ? 'chip-danger' : 'chip-warning'}`}>{t(`users.status.${u.status}`)}</span></Td>

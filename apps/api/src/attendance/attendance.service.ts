@@ -8,6 +8,7 @@ import { NotificationsService } from '../notifications/notifications.service';
 import { ManualMarkDto, ResolveCheckInDto, SectionRuleDto } from './dto/attendance.dto';
 import { AuthenticatedUser } from '../common/authenticated-user';
 import { LecturerScopeService } from '../common/lecturer-scope.service';
+import { displayNameOf } from '../users/display-name';
 
 interface RuleConfig {
   lateAfterMinutes: number;
@@ -497,9 +498,14 @@ export class AttendanceService {
     const recorderIds = [...new Set(records.map((r) => r.recordedById).filter((x): x is string => !!x))];
     const recorderUsers = recorderIds.length === 0 ? [] : await this.prisma.user.findMany({
       where: { id: { in: recorderIds }, universityId: user.universityId },
-      select: { id: true, email: true, lecturer: { select: { nameEn: true, nameTh: true } } },
+      select: { id: true, email: true, metadata: true, lecturer: { select: { nameEn: true, nameTh: true } } },
     });
-    const recorders = new Map(recorderUsers.map((u) => [u.id, { userId: u.id, email: u.email, nameEn: u.lecturer?.nameEn ?? null, nameTh: u.lecturer?.nameTh ?? null }]));
+    // Lecturer name first; an account without one (a shared admin login) uses
+    // the display name set for it in Settings → Users; else just the email.
+    const recorders = new Map(recorderUsers.map((u) => {
+      const dn = displayNameOf(u.metadata);
+      return [u.id, { userId: u.id, email: u.email, nameEn: u.lecturer?.nameEn ?? dn, nameTh: u.lecturer?.nameTh ?? (u.lecturer ? null : dn) }];
+    }));
     type Recorder = { kind: 'SELF' | 'USER' | 'UNKNOWN'; userId: string | null; email: string | null; nameEn: string | null; nameTh: string | null };
     const recorderOf = (r: { method: string; recordedById: string | null }): Recorder => {
       if (r.recordedById) {
