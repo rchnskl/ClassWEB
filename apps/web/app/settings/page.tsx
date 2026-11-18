@@ -586,13 +586,17 @@ function UsersTab() {
     } finally { setBusyId(null); }
   }
 
-  async function editDisplayName(u: UserRow) {
-    const next = window.prompt(t('users.displayNamePrompt'), u.displayName ?? '');
-    if (next === null) return;
-    setBusyId(u.id);
+  // Edited in place in the table — window.prompt is blocked in some browsers
+  // and embedded web views, which left the button doing nothing.
+  const [nameEdit, setNameEdit] = useState<{ id: string; value: string } | null>(null);
+  async function saveDisplayName() {
+    if (!nameEdit) return;
+    const { id, value } = nameEdit;
+    setBusyId(id);
     setActionError(null);
     try {
-      await apiFetch(`/users/${u.id}`, { method: 'PATCH', body: JSON.stringify({ displayName: next.trim() }) });
+      await apiFetch(`/users/${id}`, { method: 'PATCH', body: JSON.stringify({ displayName: value.trim() }) });
+      setNameEdit(null);
       await load();
     } catch (err) {
       setActionError(err instanceof Error ? err.message : 'Failed to update user');
@@ -650,11 +654,25 @@ function UsersTab() {
                   <Td>
                     {u.lecturer ? <span>{name(u.lecturer.nameEn, u.lecturer.nameTh)} <span className="muted" style={{ fontSize: 12 }}>({u.lecturer.employeeCode})</span></span>
                       : u.student ? <span>{name(u.student.nameEn, u.student.nameTh)} <span className="muted" style={{ fontSize: 12 }}>({u.student.studentCode})</span></span>
-                      : (
+                      : nameEdit?.id === u.id ? (
+                        <form onSubmit={(e) => { e.preventDefault(); void saveDisplayName(); }} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                          <input className="input" autoFocus value={nameEdit.value} maxLength={120}
+                            placeholder={t('users.displayNamePlaceholder')} aria-label={t('users.displayNameHint')}
+                            onChange={(e) => setNameEdit({ id: u.id, value: e.target.value })}
+                            onKeyDown={(e) => { if (e.key === 'Escape') setNameEdit(null); }}
+                            style={{ padding: '6px 10px', fontSize: 13, minWidth: 160 }} />
+                          <button type="submit" disabled={busyId === u.id} className="btn-primary" style={{ padding: '6px 12px', borderRadius: 8, fontSize: 12, fontWeight: 600 }}>
+                            {busyId === u.id ? '…' : t('users.displayNameSave')}
+                          </button>
+                          <button type="button" onClick={() => setNameEdit(null)} className="glass hairline" style={{ padding: '6px 10px', borderRadius: 8, fontSize: 12, fontWeight: 600 }}>
+                            {t('users.displayNameCancel')}
+                          </button>
+                        </form>
+                      ) : (
                         <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
                           {u.displayName ? <span>{u.displayName}</span> : <span className="muted">{t('users.unlinked')}</span>}
-                          <button onClick={() => editDisplayName(u)} disabled={busyId === u.id} className="glass hairline"
-                            title={t('users.displayNameHint')} style={{ padding: '3px 9px', borderRadius: 8, fontSize: 11.5, fontWeight: 600 }}>
+                          <button onClick={() => setNameEdit({ id: u.id, value: u.displayName ?? '' })} disabled={busyId === u.id} className="glass hairline"
+                            title={t('users.displayNameHint')} style={{ padding: '3px 9px', borderRadius: 8, fontSize: 11.5, fontWeight: 600, whiteSpace: 'nowrap' }}>
                             ✏️ {u.displayName ? t('users.displayNameEdit') : t('users.displayNameSet')}
                           </button>
                         </span>
