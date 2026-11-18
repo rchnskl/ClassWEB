@@ -199,7 +199,7 @@ export default function AttendanceReportPage() {
                         ) : '—'}
                       </td>
                       <td style={{ ...td, whiteSpace: 'normal', minWidth: 180, fontSize: 12 }}>
-                        {d.recordedBy.length === 0 ? <span className="muted">—</span> : d.recordedBy.map((r) => (
+                        {!d.recordedBy?.length ? <span className="muted">—</span> : d.recordedBy.map((r) => (
                           <span key={r.userId ?? r.kind} title={r.email ?? undefined}
                             className={r.kind === 'USER' ? 'chip chip-success' : 'chip'}
                             style={{ display: 'inline-block', margin: '1px 4px 1px 0', fontSize: 11.5, opacity: r.kind === 'UNKNOWN' ? 0.7 : 1 }}>
@@ -221,7 +221,7 @@ export default function AttendanceReportPage() {
                 const s = report.students.find((x) => x.studentId === picked.studentId);
                 const d = report.days[picked.dayIdx];
                 if (!s || !d) return null;
-                const m = s.marks[picked.dayIdx]; const by = s.marksBy[picked.dayIdx];
+                const m = s.marks[picked.dayIdx]; const by = s.marksBy?.[picked.dayIdx] ?? null;
                 return (
                   <div className="glass hairline" style={{ padding: '10px 12px', borderRadius: 10, marginBottom: 10, fontSize: 13, display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
                     <b>{s.studentCode} {sname(s)}</b>
@@ -253,7 +253,7 @@ export default function AttendanceReportPage() {
                       {held.map((d) => {
                         const di = report.days.indexOf(d);
                         const m = s.marks[di];
-                        const by = s.marksBy[di];
+                        const by = s.marksBy?.[di] ?? null;
                         const info = m ? MARK[m] : null;
                         const on = picked?.studentId === s.studentId && picked.dayIdx === di;
                         return (
