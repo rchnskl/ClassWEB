@@ -223,6 +223,8 @@ describe('ReportsService.sectionDailyPdf', () => {
   const days = Array.from({ length: 30 }, (_, i) => ({
     sessionId: `cs${i}`, date: `2026-0${8 + Math.floor(i / 28)}-${String((i % 28) + 1).padStart(2, '0')}`, startTime: '08:00', endTime: '12:00',
     topic: i === 0 ? 'ปฐมนิเทศ' : null, upcoming: i >= 28, enrolled: 3, present: 2, late: 0, absent: 1, leave: 0, unrecorded: 0, rate: 66.7,
+    recordedBy: i % 3 === 0 ? [{ kind: 'USER', userId: 'u1', email: 'somchai@nursing.au.edu', nameEn: 'Dr. Somchai', nameTh: 'อ.สมชาย', count: 3 }]
+      : [{ kind: 'SELF', userId: null, email: null, nameEn: null, nameTh: null, count: 2 }, { kind: 'USER', userId: 'u1', email: 'somchai@nursing.au.edu', nameEn: 'Dr. Somchai', nameTh: 'อ.สมชาย', count: 1 }],
   }));
   const students = ['สมชาย ใจดี', 'สุดา รักดี', null].map((nameTh, k) => ({
     studentId: `s${k}`, studentCode: `651234${k}`, nameEn: `Student ${k}`, nameTh,

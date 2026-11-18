@@ -487,10 +487,28 @@ export class AttendanceService {
     ]);
     const records = await this.prisma.attendanceRecord.findMany({
       where: { classSessionId: { in: sessions.map((x) => x.id) }, enrollmentId: { in: enrollments.map((e) => e.id) } },
-      select: { classSessionId: true, enrollmentId: true, status: true, minutesLate: true },
+      select: { classSessionId: true, enrollmentId: true, status: true, minutesLate: true, method: true, recordedById: true, checkInAt: true, updatedAt: true },
     });
     const key = (cs: string, en: string) => `${cs}|${en}`;
     const byKey = new Map(records.map((r) => [key(r.classSessionId, r.enrollmentId), r]));
+
+    // Who recorded each mark: a lecturer/admin login for a manual mark, or
+    // the student themself for a QR check-in (which needs no login).
+    const recorderIds = [...new Set(records.map((r) => r.recordedById).filter((x): x is string => !!x))];
+    const recorderUsers = recorderIds.length === 0 ? [] : await this.prisma.user.findMany({
+      where: { id: { in: recorderIds }, universityId: user.universityId },
+      select: { id: true, email: true, lecturer: { select: { nameEn: true, nameTh: true } } },
+    });
+    const recorders = new Map(recorderUsers.map((u) => [u.id, { userId: u.id, email: u.email, nameEn: u.lecturer?.nameEn ?? null, nameTh: u.lecturer?.nameTh ?? null }]));
+    type Recorder = { kind: 'SELF' | 'USER' | 'UNKNOWN'; userId: string | null; email: string | null; nameEn: string | null; nameTh: string | null };
+    const recorderOf = (r: { method: string; recordedById: string | null }): Recorder => {
+      if (r.recordedById) {
+        const u = recorders.get(r.recordedById);
+        return { kind: 'USER', userId: r.recordedById, email: u?.email ?? null, nameEn: u?.nameEn ?? null, nameTh: u?.nameTh ?? null };
+      }
+      if (r.method !== 'MANUAL') return { kind: 'SELF', userId: null, email: null, nameEn: null, nameTh: null };
+      return { kind: 'UNKNOWN', userId: null, email: null, nameEn: null, nameTh: null };
+    };
     const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Bangkok' }).format(new Date());
     const pct = (n: number, d: number) => (d > 0 ? Math.round((n / d) * 1000) / 10 : null);
 
@@ -506,10 +524,21 @@ export class AttendanceService {
       }
       const recorded = enrollments.length - c.unrecorded;
       const date = s.sessionDate.toISOString().slice(0, 10);
+      // Tally of who recorded this day's marks, most first.
+      const tally = new Map<string, Recorder & { count: number }>();
+      for (const e of enrollments) {
+        const r = byKey.get(key(s.id, e.id));
+        if (!r) continue;
+        const who = recorderOf(r);
+        const k = who.kind === 'USER' ? `U:${who.userId}` : who.kind;
+        const cur = tally.get(k);
+        if (cur) cur.count++; else tally.set(k, { ...who, count: 1 });
+      }
       return {
         sessionId: s.id, date, startTime: s.startTime, endTime: s.endTime, topic: s.topic,
         upcoming: date > today, enrolled: enrollments.length, ...c,
         rate: pct(c.present + c.late, recorded),
+        recordedBy: [...tally.values()].sort((a, b) => b.count - a.count),
       };
     });
 
@@ -518,11 +547,16 @@ export class AttendanceService {
         const r = byKey.get(key(s.id, e.id));
         return r ? r.status : null;
       });
+      const marksBy = sessions.map((s) => {
+        const r = byKey.get(key(s.id, e.id));
+        if (!r) return null;
+        return { ...recorderOf(r), method: r.method, at: (r.method === 'MANUAL' ? r.updatedAt : r.checkInAt ?? r.updatedAt).toISOString(), minutesLate: r.minutesLate };
+      });
       const recorded = marks.filter((m) => m != null).length;
       const attended = marks.filter((m) => m === 'PRESENT' || m === 'LATE').length;
       return {
         studentId: e.student.id, studentCode: e.student.studentCode, nameEn: e.student.nameEn, nameTh: e.student.nameTh,
-        marks, attended, absent: marks.filter((m) => m === 'ABSENT').length, late: marks.filter((m) => m === 'LATE').length,
+        marks, marksBy, attended, absent: marks.filter((m) => m === 'ABSENT').length, late: marks.filter((m) => m === 'LATE').length,
         rate: pct(attended, recorded),
       };
     });
@@ -550,11 +584,16 @@ export class AttendanceService {
     daysWs.addRow([title]); daysWs.getRow(1).font = { bold: true, size: 13 };
     daysWs.addRow([`Average attendance: ${d.totals.averageRate ?? '-'}% over ${d.totals.daysHeld} of ${d.totals.classDays} class days · ${d.totals.studentsBelow80} student(s) below 80%`]);
     daysWs.addRow([]);
-    head(daysWs.addRow(['Date', 'Time', 'Topic', 'Enrolled', 'Present', 'Late', 'Absent', 'Leave/Excused', 'Not recorded', 'Attendance %']));
+    const who = (r: { kind: string; email: string | null; nameEn: string | null; nameTh?: string | null }) =>
+      r.kind === 'SELF' ? 'Student self check-in (QR)'
+        : r.kind === 'UNKNOWN' ? 'Unknown'
+          : [r.nameTh ?? r.nameEn, r.email].filter(Boolean).join(' · ') || 'Unknown user';
+    head(daysWs.addRow(['Date', 'Time', 'Topic', 'Enrolled', 'Present', 'Late', 'Absent', 'Leave/Excused', 'Not recorded', 'Attendance %', 'Recorded by']));
     for (const x of d.days) {
-      daysWs.addRow([x.date, `${x.startTime}-${x.endTime}`, x.topic ?? '', x.enrolled, x.present, x.late, x.absent, x.leave, x.upcoming ? 'upcoming' : x.unrecorded, x.rate ?? '']);
+      daysWs.addRow([x.date, `${x.startTime}-${x.endTime}`, x.topic ?? '', x.enrolled, x.present, x.late, x.absent, x.leave, x.upcoming ? 'upcoming' : x.unrecorded, x.rate ?? '',
+        x.recordedBy.map((r) => `${who(r)} (${r.count})`).join('; ')]);
     }
-    [12, 12, 28, 10, 10, 8, 8, 14, 13, 13].forEach((w, i) => { daysWs.getColumn(i + 1).width = w; });
+    [12, 12, 28, 10, 10, 8, 8, 14, 13, 13, 50].forEach((w, i) => { daysWs.getColumn(i + 1).width = w; });
 
     const grid = wb.addWorksheet('Students x days');
     const sym: Record<string, string> = { PRESENT: '/', LATE: 'L', ABSENT: 'A', LEAVE: 'Le', EXCUSED: 'E' };
@@ -568,6 +607,21 @@ export class AttendanceService {
     grid.getColumn(1).width = 5; grid.getColumn(2).width = 11; grid.getColumn(3).width = 36;
     for (let i = 0; i < d.days.length; i++) grid.getColumn(4 + i).width = 7;
     grid.views = [{ state: 'frozen', xSplit: 3, ySplit: 1 }];
+
+    // Every recorded mark with who recorded it and when.
+    const log = wb.addWorksheet('Recorded by');
+    head(log.addRow(['Date', 'Student ID', 'Name', 'Status', 'Method', 'Recorded by', 'Login email', 'Recorded at']));
+    const at = (iso: string) => new Intl.DateTimeFormat('en-GB', { dateStyle: 'short', timeStyle: 'short', timeZone: 'Asia/Bangkok' }).format(new Date(iso));
+    d.days.forEach((x, di) => {
+      for (const s of d.students) {
+        const m = s.marksBy[di];
+        if (!m) continue;
+        log.addRow([x.date, s.studentCode, s.nameTh ?? s.nameEn, s.marks[di], m.method === 'MANUAL' ? 'Manual' : m.method === 'QR_CODE' ? 'QR code' : m.method,
+          m.kind === 'SELF' ? 'Student (self check-in)' : m.kind === 'UNKNOWN' ? 'Unknown' : (m.nameTh ?? m.nameEn ?? ''), m.email ?? '', at(m.at)]);
+      }
+    });
+    [12, 11, 30, 10, 10, 30, 30, 18].forEach((w, i) => { log.getColumn(i + 1).width = w; });
+    log.views = [{ state: 'frozen', ySplit: 1 }];
     return { buffer: Buffer.from(await wb.xlsx.writeBuffer()), filename: `attendance-${d.section.subject.code}-sec${d.section.sectionNo}.xlsx` };
   }
 }

@@ -12,11 +12,15 @@ import { useStoredUser } from '@/lib/local-store';
 
 interface SectionRef { id: string; sectionNo: string; subject: { id: string; code: string; nameEn: string } }
 type Mark = 'PRESENT' | 'LATE' | 'ABSENT' | 'LEAVE' | 'EXCUSED' | null;
+/** Who recorded a mark: a login (manual mark) or the student themself (QR check-in). */
+interface Recorder { kind: 'SELF' | 'USER' | 'UNKNOWN'; userId: string | null; email: string | null; nameEn: string | null; nameTh: string | null }
 interface Day {
   sessionId: string; date: string; startTime: string; endTime: string; topic: string | null; upcoming: boolean;
   enrolled: number; present: number; late: number; absent: number; leave: number; unrecorded: number; rate: number | null;
+  recordedBy: Array<Recorder & { count: number }>;
 }
-interface StudentRow { studentId: string; studentCode: string; nameEn: string; nameTh: string | null; marks: Mark[]; attended: number; absent: number; late: number; rate: number | null }
+interface MarkBy extends Recorder { method: string; at: string; minutesLate: number | null }
+interface StudentRow { studentId: string; studentCode: string; nameEn: string; nameTh: string | null; marks: Mark[]; marksBy: Array<MarkBy | null>; attended: number; absent: number; late: number; rate: number | null }
 interface Report {
   section: { sectionNo: string; subject: { code: string; nameEn: string; nameTh: string | null }; lecturer: { nameEn: string } | null; room: { roomNumber: string } | null };
   days: Day[]; students: StudentRow[];
@@ -30,6 +34,7 @@ const MARK: Record<string, { sym: string; color: string }> = {
   LEAVE: { sym: 'ล', color: 'var(--brand-blue)' },
   EXCUSED: { sym: 'ล', color: 'var(--brand-blue)' },
 };
+const ICON: Record<Recorder['kind'], string> = { SELF: '📱', USER: '👤', UNKNOWN: '❔' };
 const rateColor = (r: number | null) => (r == null ? 'var(--text-2)' : r >= 80 ? 'var(--success)' : r >= 70 ? 'var(--warning)' : 'var(--danger)');
 const th: React.CSSProperties = { padding: '8px 10px', fontSize: 12, fontWeight: 700, textAlign: 'left', color: 'var(--text-1)', borderBottom: '1px solid var(--glass-hairline)', whiteSpace: 'nowrap' };
 const td: React.CSSProperties = { padding: '7px 10px', fontSize: 13, borderBottom: '1px solid var(--glass-hairline)', whiteSpace: 'nowrap' };
@@ -50,10 +55,18 @@ export default function AttendanceReportPage() {
   const [exporting, setExporting] = useState<'xlsx' | 'pdf' | null>(null);
   const [previewing, setPreviewing] = useState(false);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [picked, setPicked] = useState<{ studentId: string; dayIdx: number } | null>(null);
 
   const fmtDay = (iso: string, long = false) => new Date(`${iso}T00:00:00Z`).toLocaleDateString(lang === 'th' ? 'th-TH' : 'en-GB',
     long ? { weekday: 'short', day: 'numeric', month: 'short', year: '2-digit', timeZone: 'UTC' } : { day: 'numeric', month: 'short', timeZone: 'UTC' });
   const sname = (s: { nameEn: string; nameTh: string | null }) => (lang === 'th' && s.nameTh ? s.nameTh : s.nameEn);
+  const whoName = (r: Recorder) => (r.kind === 'SELF' ? t('attr.self') : r.kind === 'UNKNOWN' ? t('attr.unknown')
+    : (lang === 'th' ? r.nameTh ?? r.nameEn : r.nameEn) ?? r.email ?? t('attr.unknown'));
+  const fmtAt = (iso: string) => new Date(iso).toLocaleString(lang === 'th' ? 'th-TH' : 'en-GB',
+    { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Bangkok' });
+  const markTitle = (m: Mark, by: MarkBy | null) => (by
+    ? `${m ? t(`attr.status.${m}`) : ''} · ${t('attr.recordedBy')}: ${whoName(by)}${by.kind === 'USER' && by.email && whoName(by) !== by.email ? ` (${by.email})` : ''} · ${fmtAt(by.at)}`
+    : t('attr.unrecorded'));
 
   const load = useCallback(async (id: string) => {
     setLoading(true); setError(null);
@@ -74,7 +87,7 @@ export default function AttendanceReportPage() {
   }, [router, load]);
 
   function pick(id: string) {
-    setSectionId(id); void load(id);
+    setSectionId(id); setPicked(null); void load(id);
     try { localStorage.setItem('attendanceReport.section', id); } catch { /* ignore */ }
   }
 
@@ -163,7 +176,7 @@ export default function AttendanceReportPage() {
               <h2 style={{ fontSize: 16, fontWeight: 700, margin: '0 0 10px' }}>{t('attr.byDay')}</h2>
               <table style={{ borderCollapse: 'collapse', width: '100%', minWidth: 640 }}>
                 <thead><tr>
-                  {[t('attr.date'), t('attr.time'), t('att.present'), t('att.late'), t('att.absent'), t('attr.leave'), t('attr.unrecorded'), t('attr.rate')].map((h) => <th key={h} style={th}>{h}</th>)}
+                  {[t('attr.date'), t('attr.time'), t('att.present'), t('att.late'), t('att.absent'), t('attr.leave'), t('attr.unrecorded'), t('attr.rate'), t('attr.recordedBy')].map((h) => <th key={h} style={th}>{h}</th>)}
                 </tr></thead>
                 <tbody>
                   {report.days.map((d) => (
@@ -185,6 +198,15 @@ export default function AttendanceReportPage() {
                           </span>
                         ) : '—'}
                       </td>
+                      <td style={{ ...td, whiteSpace: 'normal', minWidth: 180, fontSize: 12 }}>
+                        {d.recordedBy.length === 0 ? <span className="muted">—</span> : d.recordedBy.map((r) => (
+                          <span key={r.userId ?? r.kind} title={r.email ?? undefined}
+                            className={r.kind === 'USER' ? 'chip chip-success' : 'chip'}
+                            style={{ display: 'inline-block', margin: '1px 4px 1px 0', fontSize: 11.5, opacity: r.kind === 'UNKNOWN' ? 0.7 : 1 }}>
+                            {ICON[r.kind]} {whoName(r)} · {r.count}
+                          </span>
+                        ))}
+                      </td>
                     </tr>
                   ))}
                 </tbody>
@@ -193,7 +215,29 @@ export default function AttendanceReportPage() {
 
             <div className="glass rise" style={{ padding: 16, overflowX: 'auto' }}>
               <h2 style={{ fontSize: 16, fontWeight: 700, margin: '0 0 4px' }}>{t('attr.byStudent')}</h2>
-              <p className="muted" style={{ fontSize: 11.5, margin: '0 0 10px' }}>{t('attr.legend')}</p>
+              <p className="muted" style={{ fontSize: 11.5, margin: '0 0 10px' }}>{t('attr.legend')} · {t('attr.cellHint')}</p>
+              {(() => {
+                if (!picked) return null;
+                const s = report.students.find((x) => x.studentId === picked.studentId);
+                const d = report.days[picked.dayIdx];
+                if (!s || !d) return null;
+                const m = s.marks[picked.dayIdx]; const by = s.marksBy[picked.dayIdx];
+                return (
+                  <div className="glass hairline" style={{ padding: '10px 12px', borderRadius: 10, marginBottom: 10, fontSize: 13, display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
+                    <b>{s.studentCode} {sname(s)}</b>
+                    <span>{fmtDay(d.date, true)}</span>
+                    {m && <span style={{ fontWeight: 700, color: MARK[m]?.color }}>{t(`attr.status.${m}`)}{m === 'LATE' && by?.minutesLate ? ` ${by.minutesLate} ${t('attr.min')}` : ''}</span>}
+                    {by ? (
+                      <span>
+                        {t('attr.recordedBy')}: <b>{ICON[by.kind]} {whoName(by)}</b>
+                        {by.kind === 'USER' && by.email && whoName(by) !== by.email ? <span className="muted"> ({by.email})</span> : null}
+                        <span className="muted"> · {fmtAt(by.at)}</span>
+                      </span>
+                    ) : <span className="muted">{t('attr.unrecorded')}</span>}
+                    <button onClick={() => setPicked(null)} aria-label="close" style={{ marginLeft: 'auto', background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-1)', fontSize: 16 }}>×</button>
+                  </div>
+                );
+              })()}
               <table style={{ borderCollapse: 'collapse', minWidth: '100%' }}>
                 <thead><tr>
                   <th style={{ ...th, position: 'sticky', left: 0, background: 'var(--popover-bg)', zIndex: 1 }}>{t('attr.student')}</th>
@@ -207,9 +251,20 @@ export default function AttendanceReportPage() {
                         <span style={{ fontFamily: 'ui-monospace, monospace', fontSize: 12 }}>{s.studentCode}</span> {sname(s)}
                       </td>
                       {held.map((d) => {
-                        const m = s.marks[report.days.indexOf(d)];
+                        const di = report.days.indexOf(d);
+                        const m = s.marks[di];
+                        const by = s.marksBy[di];
                         const info = m ? MARK[m] : null;
-                        return <td key={d.sessionId} style={{ ...td, textAlign: 'center', fontWeight: 700, color: info?.color ?? 'var(--text-2)' }}>{info?.sym ?? '·'}</td>;
+                        const on = picked?.studentId === s.studentId && picked.dayIdx === di;
+                        return (
+                          <td key={d.sessionId} title={markTitle(m, by)} onClick={() => setPicked(on ? null : { studentId: s.studentId, dayIdx: di })}
+                            style={{ ...td, textAlign: 'center', fontWeight: 700, cursor: 'pointer', color: info?.color ?? 'var(--text-2)',
+                              background: on ? 'var(--glass-hairline)' : undefined,
+                              // A manual mark by a login is underlined so it stands apart from a student's own QR check-in.
+                              textDecoration: by?.kind === 'USER' ? 'underline' : undefined, textUnderlineOffset: 3 }}>
+                            {info?.sym ?? '·'}
+                          </td>
+                        );
                       })}
                       <td style={{ ...td, textAlign: 'right', fontWeight: 700, color: rateColor(s.rate) }}>{s.rate != null ? `${s.rate}%` : '—'}</td>
                     </tr>

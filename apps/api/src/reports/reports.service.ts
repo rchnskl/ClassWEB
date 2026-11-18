@@ -856,15 +856,22 @@ export class ReportsService {
     };
     sectionTitle(L(lang, 'สรุปรายวัน', 'By class day'));
     const dayCols = [
-      { label: L(lang, 'วันที่', 'Date'), w: 170, align: 'left' as const },
-      { label: L(lang, 'เวลา', 'Time'), w: 80, align: 'left' as const },
-      { label: L(lang, 'มา', 'Present'), w: 58, align: 'center' as const },
-      { label: L(lang, 'สาย', 'Late'), w: 58, align: 'center' as const },
-      { label: L(lang, 'ขาด', 'Absent'), w: 58, align: 'center' as const },
-      { label: L(lang, 'ลา', 'Leave'), w: 58, align: 'center' as const },
-      { label: L(lang, 'ยังไม่บันทึก', 'Not recorded'), w: 80, align: 'center' as const },
-      { label: L(lang, 'อัตราเข้าเรียน', 'Attendance'), w: 0, align: 'center' as const },
+      { label: L(lang, 'วันที่', 'Date'), w: 150, align: 'left' as const },
+      { label: L(lang, 'เวลา', 'Time'), w: 70, align: 'left' as const },
+      { label: L(lang, 'มา', 'Present'), w: 44, align: 'center' as const },
+      { label: L(lang, 'สาย', 'Late'), w: 44, align: 'center' as const },
+      { label: L(lang, 'ขาด', 'Absent'), w: 44, align: 'center' as const },
+      { label: L(lang, 'ลา', 'Leave'), w: 44, align: 'center' as const },
+      { label: L(lang, 'ยังไม่บันทึก', 'Not recorded'), w: 70, align: 'center' as const },
+      { label: L(lang, 'อัตราเข้าเรียน', 'Attendance'), w: 70, align: 'center' as const },
+      { label: L(lang, 'ผู้เช็คชื่อ', 'Recorded by'), w: 0, align: 'left' as const },
     ];
+    const recorderText = (r: { kind: string; email: string | null; nameEn: string | null; nameTh: string | null; count: number }) => {
+      const name = r.kind === 'SELF' ? L(lang, 'นศ.เช็คเอง (QR)', 'Self check-in (QR)')
+        : r.kind === 'UNKNOWN' ? L(lang, 'ไม่ทราบ', 'Unknown')
+          : ((lang === 'en' ? r.nameEn : r.nameTh ?? r.nameEn) ?? r.email ?? L(lang, 'ไม่ทราบ', 'Unknown'));
+      return `${name} ${r.count}`;
+    };
     dayCols[dayCols.length - 1].w = right - left - dayCols.slice(0, -1).reduce((a, c) => a + c.w, 0);
     const drawRow = (cols: { w: number; align: 'left' | 'center' | 'right' }[], cells: Array<{ text: string; color?: string; bold?: boolean }>, yy: number, size = 10) => {
       let x = left;
@@ -894,7 +901,8 @@ export class ReportsService {
         { text: x.upcoming ? '' : String(x.leave) },
         { text: x.upcoming ? L(lang, 'ยังไม่ถึง', 'Upcoming') : String(x.unrecorded), color: '#7c8798' },
         { text: x.rate != null ? `${x.rate}%` : '—', color: rateHex(x.rate), bold: true },
-      ], y);
+        { text: x.recordedBy.map(recorderText).join(' · '), color: '#4a5666' },
+      ], y, 10);
       y += 17;
     });
     y += 14;
