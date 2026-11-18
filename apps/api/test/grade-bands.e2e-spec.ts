@@ -2,6 +2,7 @@ import { INestApplication, ValidationPipe, VersioningType } from '@nestjs/common
 import { Test } from '@nestjs/testing';
 import request from 'supertest';
 import { AppModule } from '../src/app.module';
+import { PrismaService } from '../src/prisma/prisma.service';
 
 const ADMIN = { email: 'admin@nursing.au.edu', password: 'ChangeMe!2026' };
 
@@ -49,5 +50,29 @@ describe('Grade bands on/off', () => {
     const [lowest, second] = [...original].sort((a, b) => a.minScore - b.minScore);
     await patch([{ id: lowest.id, minScore: lowest.minScore, isActive: true }, { id: second.id, minScore: second.minScore }]).expect(200);
     await patch([{ id: lowest.id, minScore: lowest.minScore, isActive: false }]).expect(400);
+  });
+
+  it('gives a subject its own scheme on first edit, leaving the default and other subjects alone', async () => {
+    const auth = { Authorization: `Bearer ${token}` };
+    const section = await app.get(PrismaService).section.findFirstOrThrow({ where: { enrollments: { some: {} } } });
+    const subjectId = section.subjectId;
+    const before = await http.get(`/api/v1/assessment/grade-scheme?subjectId=${subjectId}`).set(auth).expect(200);
+    expect(before.body.own).toBe(false);
+    const a = before.body.bands.find((b: Band) => b.grade === 'A');
+
+    // Edit for this subject, sent against the default's band ids.
+    const edited = await http.patch(`/api/v1/assessment/grade-scheme?subjectId=${subjectId}`).set(auth)
+      .send({ bands: [{ id: a.id, minScore: 79, isActive: true }] }).expect(200);
+    expect(edited.body.own).toBe(true);
+    expect(edited.body.bands.find((b: Band) => b.grade === 'A').minScore).toBe(79);
+
+    // The default is untouched.
+    const def = await get();
+    expect(def.find((b) => b.grade === 'A')?.minScore).toBe(original.find((b) => b.grade === 'A')?.minScore);
+
+    // The subject's summary grades with its own scheme.
+    const own = await http.get(`/api/v1/assessment/grade-scheme?subjectId=${subjectId}`).set(auth).expect(200);
+    expect(own.body.own).toBe(true);
+    await app.get(PrismaService).gradeScheme.delete({ where: { subjectId } });
   });
 });

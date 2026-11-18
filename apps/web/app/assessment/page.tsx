@@ -32,6 +32,7 @@ export default function AssessmentPage() {
   const [summary, setSummary] = useState<SectionSummary | null>(null);
   const [grading, setGrading] = useState<Row | null>(null);
   const [scheme, setScheme] = useState<Band[] | null>(null);
+  const [schemeOwn, setSchemeOwn] = useState(false);
   const [showScheme, setShowScheme] = useState(false);
   const [savingScheme, setSavingScheme] = useState(false);
   const [rubricConfig, setRubricConfig] = useState<RubricConfigRow[] | null>(null);
@@ -67,6 +68,7 @@ export default function AssessmentPage() {
   }
 
   const currentSubjectId = sections.find((s) => s.id === sectionId)?.subject.id ?? '';
+  const currentSubjectCode = sections.find((s) => s.id === sectionId)?.subject.code ?? '';
 
   const loadSummary = useCallback(async (sid: string) => {
     if (!sid) return;
@@ -100,8 +102,11 @@ export default function AssessmentPage() {
   async function openScheme() {
     setActionError(null);
     try {
-      const s = await apiFetch<{ bands: Band[] }>('/assessment/grade-scheme');
+      // The scheme of the selected section's subject — its own if it has one,
+      // else the shared default (saving then gives the subject its own copy).
+      const s = await apiFetch<{ bands: Band[]; own: boolean }>(`/assessment/grade-scheme${currentSubjectId ? `?subjectId=${currentSubjectId}` : ''}`);
       setScheme(s.bands);
+      setSchemeOwn(s.own);
       setShowScheme(true);
     } catch (err) {
       setActionError(err instanceof Error ? err.message : 'Failed to load the grade scheme.');
@@ -112,7 +117,7 @@ export default function AssessmentPage() {
     setSavingScheme(true);
     setActionError(null);
     try {
-      await apiFetch('/assessment/grade-scheme', { method: 'PATCH', body: JSON.stringify({ bands: scheme.map((b) => ({ id: b.id, minScore: b.minScore, isActive: b.isActive })) }) });
+      await apiFetch(`/assessment/grade-scheme${currentSubjectId ? `?subjectId=${currentSubjectId}` : ''}`, { method: 'PATCH', body: JSON.stringify({ bands: scheme.map((b) => ({ id: b.id, minScore: b.minScore, isActive: b.isActive })) }) });
       setShowScheme(false);
       await loadSummary(sectionId);
     } catch (err) {
@@ -273,10 +278,13 @@ export default function AssessmentPage() {
         <div onClick={() => setShowScheme(false)} style={{ position: 'fixed', inset: 0, background: 'rgba(6,10,20,0.5)', backdropFilter: 'blur(3px)', zIndex: 1100, display: 'grid', placeItems: 'center', padding: 16 }}>
           <div onClick={(e) => e.stopPropagation()} className="rise" style={{ width: 'min(460px, 100%)', maxHeight: '86vh', overflowY: 'auto', background: 'var(--popover-bg)', border: '1px solid var(--glass-hairline)', borderRadius: 18, boxShadow: 'var(--shadow-lg)', padding: 22 }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
-              <h2 style={{ fontSize: 17, fontWeight: 700, margin: 0 }}>{t('as.gradeScheme')}</h2>
+              <h2 style={{ fontSize: 17, fontWeight: 700, margin: 0 }}>{t('as.gradeScheme')}{currentSubjectCode ? ` · ${currentSubjectCode}` : ''}</h2>
               <button onClick={() => setShowScheme(false)} className="glass hairline icon-btn" aria-label={t('common.close')} style={{ width: 32, height: 32, fontSize: 17 }}>×</button>
             </div>
-            <p className="muted" style={{ fontSize: 12, margin: '0 0 14px' }}>{t('as.schemeHint')}</p>
+            <p className="muted" style={{ fontSize: 12, margin: '0 0 6px' }}>{t('as.schemeHint')}</p>
+            <p style={{ fontSize: 12, margin: '0 0 14px', fontWeight: 600, color: schemeOwn ? 'var(--brand)' : 'var(--text-2)' }}>
+              {schemeOwn ? t('as.schemeOwn') : t('as.schemeShared')}
+            </p>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
               {scheme.map((b, i) => (
                 <div key={b.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 10px', borderRadius: 10, background: 'var(--popover-hover)', opacity: b.isActive ? 1 : 0.45 }}>

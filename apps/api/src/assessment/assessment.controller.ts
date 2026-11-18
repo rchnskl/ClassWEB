@@ -77,15 +77,15 @@ export class AssessmentController {
   @Get('grade-scheme')
   @Permissions('assessment:read')
   @ApiOperation({ summary: 'Get the editable grade scheme (score bands → A–F)' })
-  gradeScheme(@CurrentUser() user: AuthenticatedUser) {
-    return this.assessment.gradeScheme(user.universityId);
+  gradeScheme(@CurrentUser() user: AuthenticatedUser, @Query('subjectId') subjectId?: string) {
+    return this.assessment.gradeScheme(user.universityId, subjectId || undefined);
   }
 
   @Patch('grade-scheme')
   @Permissions('assessment:update')
   @ApiOperation({ summary: 'Edit grade band score ranges' })
-  updateBands(@CurrentUser() user: AuthenticatedUser, @Body() dto: UpdateGradeBandsDto) {
-    return this.assessment.updateBands(user.universityId, dto);
+  updateBands(@CurrentUser() user: AuthenticatedUser, @Body() dto: UpdateGradeBandsDto, @Query('subjectId') subjectId?: string) {
+    return this.assessment.updateBands(user.universityId, dto, subjectId || undefined);
   }
 
   @Get('evaluation')

@@ -407,19 +407,53 @@ export class AssessmentService implements OnApplicationBootstrap {
 
   // ---- grade scheme -----------------------------------------------------
 
-  async gradeScheme(universityId: string) {
+  /**
+   * The grade scheme for a subject: its own when it has one (grading criteria
+   * set in its course outline), else the university-wide default. `own` says
+   * which.
+   */
+  async gradeScheme(universityId: string, subjectId?: string) {
+    if (subjectId) {
+      const own = await this.prisma.gradeScheme.findFirst({
+        where: { universityId, subjectId },
+        include: { bands: { orderBy: { order: 'asc' } } },
+      });
+      if (own) return { ...own, own: true };
+    }
     const scheme = await this.prisma.gradeScheme.findFirst({
-      where: { universityId, isDefault: true },
+      where: { universityId, isDefault: true, subjectId: null },
       include: { bands: { orderBy: { order: 'asc' } } },
     });
     if (!scheme) throw new NotFoundException('Grade scheme not found');
-    return scheme;
+    return { ...scheme, own: false };
   }
 
-  async updateBands(universityId: string, dto: UpdateGradeBandsDto) {
-    const scheme = await this.gradeScheme(universityId);
+  /**
+   * Edit grade bands. With a subject, the edit applies to that subject only:
+   * the first edit gives it its own copy of the default scheme, so other
+   * subjects keep theirs.
+   */
+  async updateBands(universityId: string, dto: UpdateGradeBandsDto, subjectId?: string) {
+    let scheme = await this.gradeScheme(universityId, subjectId);
+    let sentBands = dto.bands;
+    if (subjectId && !scheme.own) {
+      const subject = await this.prisma.subject.findFirst({ where: { id: subjectId, program: { faculty: { universityId } } }, select: { id: true, code: true } });
+      if (!subject) throw new NotFoundException('Subject not found');
+      const gradeOf = new Map(scheme.bands.map((b) => [b.id, b.grade]));
+      const copy = await this.prisma.gradeScheme.create({
+        data: {
+          universityId, subjectId, isDefault: false, name: `${subject.code} grading`,
+          bands: { create: scheme.bands.map(({ grade, gpa, label, minScore, order, isActive }) => ({ grade, gpa, label, minScore, order, isActive })) },
+        },
+        include: { bands: { orderBy: { order: 'asc' } } },
+      });
+      // The edit was made against the default's band ids: carry it over by grade.
+      const idOfGrade = new Map(copy.bands.map((b) => [b.grade, b.id]));
+      sentBands = dto.bands.map((b) => ({ ...b, id: idOfGrade.get(gradeOf.get(b.id) ?? '') ?? b.id }));
+      scheme = { ...copy, own: true };
+    }
     const valid = new Set(scheme.bands.map((b) => b.id));
-    const sent = new Map(dto.bands.filter((b) => valid.has(b.id)).map((b) => [b.id, b]));
+    const sent = new Map(sentBands.filter((b) => valid.has(b.id)).map((b) => [b.id, b]));
     // A scheme must still award something, and something that every score
     // reaches — otherwise a low total would end up with no grade at all.
     const after = scheme.bands.map((b) => ({ minScore: sent.get(b.id)?.minScore ?? b.minScore, isActive: sent.get(b.id)?.isActive ?? b.isActive }));
@@ -436,7 +470,7 @@ export class AssessmentService implements OnApplicationBootstrap {
         }),
       ),
     );
-    return this.gradeScheme(universityId);
+    return this.gradeScheme(universityId, subjectId);
   }
 
   private gradeFor(total: number, bands: GradeBand[]): GradeBand | null {
@@ -755,8 +789,10 @@ export class AssessmentService implements OnApplicationBootstrap {
     if (!student) throw new NotFoundException('Student not found');
 
     let resolved: { rubric: Awaited<ReturnType<AssessmentService['listRubrics']>>[number]; weightPercent: number }[];
+    let subjectId: string | undefined;
     if (sectionId) {
       const section = await this.prisma.section.findFirst({ where: { id: sectionId, universityId, deletedAt: null }, select: { subjectId: true } });
+      subjectId = section?.subjectId;
       resolved = section ? await this.resolveSubjectRubrics(universityId, section.subjectId) : [];
     } else {
       resolved = (await this.listRubrics(universityId)).map((r) => ({ rubric: r, weightPercent: r.weightPercent }));
@@ -764,7 +800,7 @@ export class AssessmentService implements OnApplicationBootstrap {
 
     const [evaluations, scheme] = await Promise.all([
       this.prisma.evaluation.findMany({ where: { universityId, studentId, sectionId: sectionId ?? null, classSessionId: null }, select: { rubricId: true, scorePercent: true, criticalFailed: true } }),
-      this.gradeScheme(universityId),
+      this.gradeScheme(universityId, subjectId),
     ]);
     const evalByRubric = new Map(evaluations.map((e) => [e.rubricId, e]));
 
@@ -806,7 +842,7 @@ export class AssessmentService implements OnApplicationBootstrap {
     const [enrollments, evaluations, scheme] = await Promise.all([
       this.prisma.enrollment.findMany({ where: { sectionId, status: 'ENROLLED' }, select: { studentId: true, student: { select: { studentCode: true, nameEn: true, nameTh: true } } }, orderBy: { student: { studentCode: 'asc' } } }),
       this.prisma.evaluation.findMany({ where: { universityId, sectionId, classSessionId: null }, select: { studentId: true, rubricId: true, scorePercent: true, criticalFailed: true } }),
-      this.gradeScheme(universityId),
+      this.gradeScheme(universityId, section.subjectId),
     ]);
 
     const students = enrollments.map((en) => {
