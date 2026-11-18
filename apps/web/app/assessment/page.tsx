@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import Sidebar from '@/components/Sidebar';
 import Topbar from '@/components/Topbar';
@@ -12,7 +13,9 @@ import { useI18n } from '@/lib/i18n';
 import { useStoredUser } from '@/lib/local-store';
 
 interface SectionRef { id: string; sectionNo: string; subject: { id: string; code: string; nameEn: string } }
-interface Row { studentId: string; studentCode: string; nameEn: string; nameTh: string | null; total: number; gradedWeight: number; gradedCount: number; isComplete?: boolean; grade: string | null; gpa: number | null; hasCriticalFail?: boolean }
+interface Row { studentId: string; studentCode: string; nameEn: string; nameTh: string | null; total: number; gradedWeight: number; gradedCount: number; isComplete?: boolean; grade: string | null; gpa: number | null; hasCriticalFail?: boolean;
+  /** Provisional grade while still in progress — an estimate, never the grade itself. */
+  estimate?: { estimate: number; grade: string | null; basisWeight: number; totalWeight: number } | null }
 interface SectionSummary { section: { sectionNo: string; subject: { code: string; nameEn: string } }; rubricCount: number; students: Row[] }
 interface Band { id: string; grade: string; gpa: number; label: string; minScore: number; isActive: boolean }
 interface RubricConfigRow { rubricId: string; code: string; nameEn: string; nameTh: string | null; weightPercent: number; isActive: boolean }
@@ -197,12 +200,13 @@ export default function AssessmentPage() {
           </div>
         </div>
 
-        <div className="rise" style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 16 }}>
+        <div className="rise" style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', marginBottom: 16 }}>
           <span className="muted" style={{ fontSize: 12.5, fontWeight: 600 }}>{t('as.export')}:</span>
           <ExportBtn label={`👁 ${t('common.previewPdf')}`} busy={previewing === 'section'} onClick={previewSectionPdf} />
           <ExportBtn label="📄 PDF" busy={exporting === 'section-pdf'} onClick={() => exportSection('pdf')} primary />
           <ExportBtn label="📊 Excel" busy={exporting === 'section-xlsx'} onClick={() => exportSection('xlsx')} />
           <ExportBtn label="📁 CSV" busy={exporting === 'section-csv'} onClick={() => exportSection('csv')} />
+          <Link href="/assessment/daily" className="glass hairline" style={{ marginLeft: 'auto', padding: '7px 13px', borderRadius: 10, fontSize: 13, fontWeight: 650, color: 'var(--text-0)', textDecoration: 'none' }}>🩺 {t('asd.open')}</Link>
         </div>
 
         <div className="glass rise" style={{ padding: 8, overflow: 'hidden' }}>
@@ -227,6 +231,12 @@ export default function AssessmentPage() {
                         <span className="chip" style={{ background: `${GRADE_COLOR(s.grade)}22`, color: GRADE_COLOR(s.grade), fontWeight: 700 }}>{s.grade ?? '—'}{s.gpa != null ? ` · ${s.gpa.toFixed(2)}` : ''}</span>
                       ) : (
                         <span className="chip muted" title={t('as.inProgressHint')} style={{ fontWeight: 600 }}>{t('as.inProgress')} · {s.gradedCount}/{summary.rubricCount}</span>
+                      )}
+                      {!s.isComplete && s.estimate && (
+                        <span className="chip" title={`${t('asd.estimateHint')} · ${s.estimate.basisWeight}/${s.estimate.totalWeight}%`}
+                          style={{ marginLeft: 6, fontWeight: 700, color: 'var(--brand-blue)', border: '1px dashed var(--brand-blue)', background: 'transparent' }}>
+                          {t('as.estimate')} ~{s.estimate.grade ?? '—'} ({s.estimate.estimate})
+                        </span>
                       )}
                       {s.hasCriticalFail && (
                         <span className="chip" title={t('as.criticalFailHint')} style={{ marginLeft: 6, background: 'var(--danger)22', color: 'var(--danger)', fontWeight: 700 }}>⚠ {t('as.criticalFail')}</span>

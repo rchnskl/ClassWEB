@@ -298,3 +298,79 @@ describe('AssessmentService (pure scoring logic)', () => {
     });
   });
 });
+
+describe('AssessmentService.dailyReport', () => {
+  const user = { id: 'u1', universityId: 'uni', roleCodes: ['LECTURER'] } as any;
+  const rubric = {
+    id: 'r1', nameEn: 'Nursing performance', nameTh: 'การปฏิบัติการพยาบาล', weightPercent: 70, perSession: true,
+    sections: [
+      { id: 's1', nameEn: 'Assessment', nameTh: null, weightPercent: 50, items: [{ id: 'i1', textEn: 'a', textTh: null, weightPercent: 100, maxRating: 5, isCritical: false }] },
+      { id: 's2', nameEn: 'Safety', nameTh: null, weightPercent: 50, items: [{ id: 'i2', textEn: 'b', textTh: null, weightPercent: 100, maxRating: 5, isCritical: true }] },
+    ],
+  };
+  const d = (iso: string) => new Date(`${iso}T00:00:00Z`);
+  const prisma = {
+    section: { findFirst: jest.fn().mockResolvedValue({ id: 'sec1', sectionNo: '1', subjectId: 'sub1', subject: { code: 'NUS3303', nameEn: 'X', nameTh: null }, semester: null, lecturer: null, room: null }) },
+    rubric: { findMany: jest.fn().mockResolvedValue([rubric, { ...rubric, id: 'r2', weightPercent: 30, perSession: false }]) },
+    gradeScheme: { findFirst: jest.fn().mockResolvedValue({ id: 'g', bands: [
+      { grade: 'A', gpa: 4, label: 'A', minScore: 80, isActive: true }, { grade: 'B', gpa: 3, label: 'B', minScore: 70, isActive: true }, { grade: 'C', gpa: 2, label: 'C', minScore: 0, isActive: true },
+    ] }) },
+    subjectRubric: { findMany: jest.fn().mockResolvedValue([]) },
+    classSession: { findMany: jest.fn().mockResolvedValue([
+      { id: 'd1', sessionDate: d('2026-11-10'), startTime: '07:00', endTime: '16:00', topic: null },
+      { id: 'd2', sessionDate: d('2026-11-11'), startTime: '07:00', endTime: '16:00', topic: null },
+      { id: 'd3', sessionDate: d('2099-01-01'), startTime: '07:00', endTime: '16:00', topic: null },
+    ]) },
+    enrollment: { findMany: jest.fn().mockResolvedValue([
+      { student: { id: 'st1', studentCode: '001', nameEn: 'A', nameTh: null } },
+      { student: { id: 'st2', studentCode: '002', nameEn: 'B', nameTh: null } },
+    ]) },
+    // Answered by the shape of each query: the day marks, the component rows, and the two estimate queries.
+    evaluation: { findMany: jest.fn().mockImplementation(({ where, select }: any) => {
+      const days = [
+        { studentId: 'st1', classSessionId: 'd1', scorePercent: 80, criticalFailed: false, note: 'good', rawScore: null, rawMax: null, evaluatorId: 'u1', evaluatorName: 'x@au.edu', updatedAt: d('2026-11-10'),
+          scores: [{ rubricItemId: 'i1', rating: 5, passed: null }, { rubricItemId: 'i2', rating: 3, passed: true }] },
+        { studentId: 'st1', classSessionId: 'd2', scorePercent: 60, criticalFailed: false, note: null, rawScore: null, rawMax: null, evaluatorId: 'u1', evaluatorName: 'x@au.edu', updatedAt: d('2026-11-11'),
+          scores: [{ rubricItemId: 'i1', rating: 3, passed: null }, { rubricItemId: 'i2', rating: 3, passed: true }] },
+        { studentId: 'st2', classSessionId: 'd1', scorePercent: 90, criticalFailed: false, note: null, rawScore: null, rawMax: null, evaluatorId: 'u1', evaluatorName: 'x@au.edu', updatedAt: d('2026-11-10'),
+          scores: [{ rubricItemId: 'i1', rating: 4, passed: null }, { rubricItemId: 'i2', rating: 5, passed: true }] },
+      ];
+      if (where.classSessionId === null && select.rubricId) return Promise.resolve([{ studentId: 'st1', rubricId: 'r2', scorePercent: 90 }, { studentId: 'st1', rubricId: 'r1', scorePercent: 46.67 }]);
+      if (where.classSessionId === null) return Promise.resolve([{ studentId: 'st1', scorePercent: 46.67 }, { studentId: 'st2', scorePercent: 45 }]);
+      if (select.scores) return Promise.resolve(days);
+      return Promise.resolve(days.map((d) => ({ studentId: d.studentId, rubricId: 'r1', scorePercent: d.scorePercent })));
+    }) },
+    attendanceRecord: { findMany: jest.fn().mockResolvedValue([{ studentId: 'st2', classSessionId: 'd2', status: 'ABSENT' }]) },
+    user: { findMany: jest.fn().mockResolvedValue([{ id: 'u1', email: 'x@au.edu', metadata: null, lecturer: { nameEn: 'Rachanon', nameTh: 'รชานนท์' } }]) },
+  };
+  const scope = { assertTeachesOrManages: jest.fn().mockResolvedValue(undefined) };
+  const service = new AssessmentService(prisma as any, scope as any);
+
+  it('builds the day stats, the student × day grid and category breakdowns for the daily rubric', async () => {
+    const r = await service.dailyReport(user, 'sec1');
+    expect(scope.assertTeachesOrManages).toHaveBeenCalledWith(user, 'sec1');
+    expect(r.rubrics.map((x) => x.id)).toEqual(['r1']); // the once-a-term rubric is left out
+    expect(r.rubric?.weightPercent).toBe(70);
+
+    const [st1, st2] = r.students;
+    expect(st1.cells.map((c) => c.status)).toEqual(['SCORED', 'SCORED', 'UPCOMING']);
+    expect(st2.cells.map((c) => c.status)).toEqual(['SCORED', 'ABSENT', 'UPCOMING']);
+    expect(st1.dayAverage).toBe(70);
+    expect(st1.cells[0].sectionScores).toEqual([100, 60]);
+    expect(st1.sectionAverages).toEqual([80, 60]);
+    expect(st1.cells[0].evaluator).toMatchObject({ nameTh: 'รชานนท์', email: 'x@au.edu' });
+    expect(st1.points).toBe(32.67); // 46.67% of 70
+    expect(st2.countedDays).toBe(2); // the absent day doesn't count
+
+    const [d1, d2, d3] = r.days;
+    expect(d1).toMatchObject({ assessed: 2, average: 85, min: 80, max: 90, pending: 0 });
+    expect(d1.evaluators).toEqual([expect.objectContaining({ nameEn: 'Rachanon', count: 2 })]);
+    expect(d2).toMatchObject({ assessed: 1, absent: 1, average: 60 });
+    expect(d3).toMatchObject({ upcoming: true, assessed: 0, pending: 0 });
+    expect(r.totals).toMatchObject({ practiceDays: 3, daysAssessed: 2, assessments: 3, average: 76.7, studentsBelow: 0 });
+
+    // Estimate: daily at its day average (70 for st1), term components as scored, over what's assessed.
+    expect(st1.estimate).toMatchObject({ estimate: 76, grade: 'B', basisWeight: 100, totalWeight: 100 }); // (70×70 + 90×30) / 100
+    expect(st2.estimate).toMatchObject({ estimate: 90, grade: 'A', basisWeight: 70 }); // only the daily part so far
+  });
+});

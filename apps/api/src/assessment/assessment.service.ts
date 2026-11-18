@@ -1,6 +1,8 @@
 import { BadRequestException, ConflictException, ForbiddenException, Injectable, Logger, NotFoundException, OnApplicationBootstrap } from '@nestjs/common';
 import { AuditAction } from '@prisma/client';
+import ExcelJS from 'exceljs';
 import { PrismaService } from '../prisma/prisma.service';
+import { displayNameOf } from '../users/display-name';
 import { RubricItemInputDto, RubricSectionInputDto, SaveEvaluationDto, SaveRubricDto, UpdateGradeBandsDto, UpdateRubricWeightsDto, UpdateSubjectRubricsDto } from './dto/assessment.dto';
 import { AuthenticatedUser } from '../common/authenticated-user';
 import { LecturerScopeService } from '../common/lecturer-scope.service';
@@ -280,53 +282,47 @@ export class AssessmentService implements OnApplicationBootstrap {
     // plain weighted average, so grading a whole form is unchanged.
     let weightedSum = 0;
     let attemptedSectionWeight = 0;
-    let criticalFailed = false;
+    const criticalFailed = rubric.sections.some((s) => s.items.some((it) => it.isCritical && passed.get(it.id) === false));
+    const sectionScores = rubric.sections
+      .map((section) => ({ section, percent: AssessmentService.sectionPercent(section, ratings) }))
+      .filter((x): x is { section: typeof x.section; percent: number } => x.percent != null); // unexamined sections are skipped
 
-    for (const section of rubric.sections) {
-      // A rubric saved with its weights left at 0 used to score every student
-      // 0, silently: the weighted sum was 0 over a 0 total, and the sheet just
-      // showed a zero that looked like a real mark. Where a weight carries no
-      // information, fall back to the full marks — which is what "out of 50"
-      // already means — so marks entered always produce a score.
-      const examined = section.items.filter((it) => ratings.get(it.id) != null);
-      const weightless = examined.length > 0 && examined.every((it) => it.weightPercent === 0);
-      const itemWeight = (it: { weightPercent: number; maxRating: number }) => (weightless ? it.maxRating : it.weightPercent);
-
-      let scored = 0;
-      let attemptedItemWeight = 0;
-      for (const item of section.items) {
-        if (item.isCritical && passed.get(item.id) === false) criticalFailed = true;
-        const rating = ratings.get(item.id);
-        if (rating == null) continue;
-        attemptedItemWeight += itemWeight(item);
-        scored += itemWeight(item) * (rating / item.maxRating);
-      }
-      if (attemptedItemWeight === 0) continue; // section not examined
-      weightedSum += section.weightPercent * ((scored / attemptedItemWeight) * 100);
+    for (const { section, percent } of sectionScores) {
+      weightedSum += section.weightPercent * percent;
       attemptedSectionWeight += section.weightPercent;
     }
 
     // Same fallback one level up: sections all weighted 0 would otherwise wipe
     // out a fully marked rubric. Their examined items are already averaged, so
     // an equal split across the examined sections is the honest reading.
-    if (attemptedSectionWeight === 0) {
-      const examinedSections = rubric.sections.filter((sec) => sec.items.some((it) => ratings.get(it.id) != null));
-      if (examinedSections.length > 0) {
-        weightedSum = 0;
-        for (const section of examinedSections) {
-          const examined = section.items.filter((it) => ratings.get(it.id) != null);
-          const useMarks = examined.every((it) => it.weightPercent === 0);
-          const w = (it: { weightPercent: number; maxRating: number }) => (useMarks ? it.maxRating : it.weightPercent);
-          const total = examined.reduce((a, it) => a + w(it), 0);
-          const got = examined.reduce((a, it) => a + w(it) * ((ratings.get(it.id) ?? 0) / it.maxRating), 0);
-          if (total > 0) { weightedSum += (got / total) * 100; attemptedSectionWeight += 1; }
-        }
-      }
+    if (attemptedSectionWeight === 0 && sectionScores.length > 0) {
+      weightedSum = sectionScores.reduce((a, x) => a + x.percent, 0);
+      attemptedSectionWeight = sectionScores.length;
     }
 
     const rubricScore = attemptedSectionWeight > 0 ? weightedSum / attemptedSectionWeight : 0;
     const scorePercent = criticalFailed ? 0 : Math.round(rubricScore * 100) / 100;
     return { scorePercent, criticalFailed };
+  }
+
+  /**
+   * One rubric section's score (0–100) over the items actually rated in it,
+   * or null when none were. A rubric saved with its weights left at 0 used to
+   * score every student 0, silently; where a weight carries no information,
+   * fall back to the full marks — which is what "out of 50" already means —
+   * so marks entered always produce a score.
+   */
+  static sectionPercent(
+    section: { items: Array<{ id: string; weightPercent: number; maxRating: number }> },
+    ratings: Map<string, number>,
+  ): number | null {
+    const examined = section.items.filter((it) => ratings.get(it.id) != null);
+    if (examined.length === 0) return null;
+    const weightless = examined.every((it) => it.weightPercent === 0);
+    const w = (it: { weightPercent: number; maxRating: number }) => (weightless ? it.maxRating : it.weightPercent);
+    const total = examined.reduce((a, it) => a + w(it), 0);
+    if (total === 0) return null;
+    return (examined.reduce((a, it) => a + w(it) * ((ratings.get(it.id) ?? 0) / it.maxRating), 0) / total) * 100;
   }
 
   // ---- per-subject rubric selection ---------------------------------------
@@ -476,6 +472,59 @@ export class AssessmentService implements OnApplicationBootstrap {
   private gradeFor(total: number, bands: GradeBand[]): GradeBand | null {
     const sorted = bands.filter((b) => b.isActive).sort((a, b) => b.minScore - a.minScore);
     return sorted.find((b) => total >= b.minScore) ?? sorted[sorted.length - 1] ?? null;
+  }
+
+  /**
+   * A provisional grade for students still part-way through the term — an
+   * ESTIMATE, never the grade itself (that stays withheld until every
+   * component is assessed; see sectionSummary). It assumes the student keeps
+   * performing at their level so far:
+   *   estimate = Σ(weight × score) ÷ Σ(weight) over the components assessed,
+   * where a daily (per-session) component counts at the AVERAGE of the days
+   * assessed so far, not its running total (which is low early on only
+   * because most days haven't happened yet). Components not yet assessed are
+   * left out of the basis, and `basisWeight` says how much of the grade the
+   * estimate rests on so a reader can judge how firm it is.
+   */
+  private async estimateGrades(universityId: string, sectionId: string, subjectId: string) {
+    const [resolved, scheme] = await Promise.all([this.resolveSubjectRubrics(universityId, subjectId), this.gradeScheme(universityId, subjectId)]);
+    const ids = resolved.map((r) => r.rubric.id);
+    const [termEvals, dayEvals] = await Promise.all([
+      this.prisma.evaluation.findMany({
+        where: { universityId, sectionId, classSessionId: null, rubricId: { in: ids }, scorePercent: { not: null } },
+        select: { studentId: true, rubricId: true, scorePercent: true },
+      }),
+      this.prisma.evaluation.findMany({
+        where: { universityId, sectionId, classSessionId: { not: null }, rubricId: { in: ids }, scorePercent: { not: null }, classSession: { status: { not: 'CANCELLED' }, dailyAssessment: true } },
+        select: { studentId: true, rubricId: true, scorePercent: true },
+      }),
+    ]);
+    const daily = new Set(resolved.filter((r) => r.rubric.perSession).map((r) => r.rubric.id));
+    const totalWeight = resolved.reduce((a, r) => a + r.weightPercent, 0);
+    const weight = new Map(resolved.map((r) => [r.rubric.id, r.weightPercent]));
+    // studentId → rubricId → score used for the estimate
+    const scores = new Map<string, Map<string, number>>();
+    const put = (st: string, rb: string, v: number) => { if (!scores.has(st)) scores.set(st, new Map()); scores.get(st)!.set(rb, v); };
+    for (const e of termEvals) if (!daily.has(e.rubricId)) put(e.studentId, e.rubricId, e.scorePercent!);
+    const dayAcc = new Map<string, { sum: number; n: number; st: string; rb: string }>();
+    for (const e of dayEvals) {
+      if (!daily.has(e.rubricId)) continue;
+      const key = `${e.studentId}|${e.rubricId}`;
+      const cur = dayAcc.get(key) ?? { sum: 0, n: 0, st: e.studentId, rb: e.rubricId };
+      cur.sum += e.scorePercent!; cur.n++; dayAcc.set(key, cur);
+    }
+    for (const a of dayAcc.values()) put(a.st, a.rb, a.sum / a.n);
+
+    const out = new Map<string, { estimate: number; grade: string | null; gpa: number | null; basisWeight: number; totalWeight: number }>();
+    for (const [studentId, m] of scores) {
+      let ws = 0, w = 0;
+      for (const [rb, v] of m) { const wt = weight.get(rb) ?? 0; ws += wt * v; w += wt; }
+      if (w <= 0) continue;
+      const estimate = Math.round((ws / w) * 100) / 100;
+      const band = this.gradeFor(estimate, scheme.bands);
+      out.set(studentId, { estimate, grade: band?.grade ?? null, gpa: band?.gpa ?? null, basisWeight: Math.round(w * 100) / 100, totalWeight: Math.round(totalWeight * 100) / 100 });
+    }
+    return out;
   }
 
   // ---- evaluations ------------------------------------------------------
@@ -839,10 +888,11 @@ export class AssessmentService implements OnApplicationBootstrap {
     const resolved = await this.resolveSubjectRubrics(universityId, section.subjectId);
     const weightByRubric = new Map(resolved.map(({ rubric, weightPercent }) => [rubric.id, weightPercent]));
 
-    const [enrollments, evaluations, scheme] = await Promise.all([
+    const [enrollments, evaluations, scheme, estimates] = await Promise.all([
       this.prisma.enrollment.findMany({ where: { sectionId, status: 'ENROLLED' }, select: { studentId: true, student: { select: { studentCode: true, nameEn: true, nameTh: true } } }, orderBy: { student: { studentCode: 'asc' } } }),
       this.prisma.evaluation.findMany({ where: { universityId, sectionId, classSessionId: null }, select: { studentId: true, rubricId: true, scorePercent: true, criticalFailed: true } }),
       this.gradeScheme(universityId, section.subjectId),
+      this.estimateGrades(universityId, sectionId, section.subjectId),
     ]);
 
     const students = enrollments.map((en) => {
@@ -863,9 +913,274 @@ export class AssessmentService implements OnApplicationBootstrap {
         studentId: en.studentId, studentCode: en.student.studentCode, nameEn: en.student.nameEn, nameTh: en.student.nameTh,
         total, gradedWeight, gradedCount: evs.length, hasCriticalFail: evs.some((e) => e.criticalFailed),
         isComplete, grade: band?.grade ?? null, gpa: band?.gpa ?? null,
+        // Only while the grade is still withheld — an estimate, labelled as such.
+        estimate: isComplete ? null : estimates.get(en.studentId) ?? null,
       };
     });
 
     return { section, rubricCount: resolved.length, students };
+  }
+
+  /**
+   * Daily ward-assessment report of a section, for one per-session rubric
+   * (e.g. Nursing performance): every practice day with how many students
+   * were assessed and the spread of scores, and a student × day grid with
+   * each day's score, its breakdown by rubric section, who assessed it and
+   * when — plus each student's running component score as the gradebook
+   * holds it. `rubricId` picks among several daily rubrics; the first by
+   * order is used otherwise.
+   */
+  async dailyReport(user: AuthenticatedUser, sectionId: string, rubricId?: string) {
+    const universityId = user.universityId;
+    const section = await this.prisma.section.findFirst({
+      where: { id: sectionId, universityId, deletedAt: null },
+      select: {
+        id: true, sectionNo: true, subjectId: true,
+        subject: { select: { code: true, nameEn: true, nameTh: true } },
+        semester: { select: { nameEn: true, nameTh: true } },
+        lecturer: { select: { nameEn: true, nameTh: true } },
+        room: { select: { roomNumber: true } },
+      },
+    });
+    if (!section) throw new NotFoundException('Section not found');
+    await this.lecturerScope.assertTeachesOrManages(user, sectionId);
+    const { subjectId, ...sectionOut } = section;
+
+    const daily = (await this.resolveSubjectRubrics(universityId, subjectId)).filter((r) => r.rubric.perSession);
+    const rubrics = daily.map(({ rubric, weightPercent }) => ({ id: rubric.id, nameEn: rubric.nameEn, nameTh: rubric.nameTh, weightPercent }));
+    const chosen = daily.find((r) => r.rubric.id === rubricId) ?? daily[0];
+    if (!chosen) return { section: sectionOut, rubrics, rubric: null, days: [], students: [], totals: null };
+    const { rubric: r, weightPercent } = chosen;
+
+    const [sessions, enrollments, estimates] = await Promise.all([
+      this.prisma.classSession.findMany({
+        where: { sectionId, status: { not: 'CANCELLED' }, dailyAssessment: true },
+        select: { id: true, sessionDate: true, startTime: true, endTime: true, topic: true },
+        orderBy: [{ sessionDate: 'asc' }, { startTime: 'asc' }],
+      }),
+      this.prisma.enrollment.findMany({
+        where: { sectionId, status: 'ENROLLED' },
+        select: { student: { select: { id: true, studentCode: true, nameEn: true, nameTh: true } } },
+        orderBy: { student: { studentCode: 'asc' } },
+      }),
+      this.estimateGrades(universityId, sectionId, subjectId),
+    ]);
+    const sessionIds = sessions.map((x) => x.id);
+    const studentIds = enrollments.map((e) => e.student.id);
+    const [dayEvals, components, attendance] = await Promise.all([
+      this.prisma.evaluation.findMany({
+        where: { universityId, rubricId: r.id, sectionId, classSessionId: { in: sessionIds }, studentId: { in: studentIds } },
+        select: {
+          studentId: true, classSessionId: true, scorePercent: true, criticalFailed: true, note: true,
+          rawScore: true, rawMax: true, evaluatorId: true, evaluatorName: true, updatedAt: true,
+          scores: { select: { rubricItemId: true, rating: true, passed: true } },
+        },
+      }),
+      this.prisma.evaluation.findMany({
+        where: { universityId, rubricId: r.id, sectionId, classSessionId: null, studentId: { in: studentIds } },
+        select: { studentId: true, scorePercent: true },
+      }),
+      this.prisma.attendanceRecord.findMany({
+        where: { classSessionId: { in: sessionIds }, studentId: { in: studentIds } },
+        select: { studentId: true, classSessionId: true, status: true },
+      }),
+    ]);
+
+    // Who assessed: the lecturer's name, else the login's display name, else its email.
+    const evaluatorIds = [...new Set(dayEvals.map((e) => e.evaluatorId).filter((x): x is string => !!x))];
+    const users = evaluatorIds.length === 0 ? [] : await this.prisma.user.findMany({
+      where: { id: { in: evaluatorIds }, universityId },
+      select: { id: true, email: true, metadata: true, lecturer: { select: { nameEn: true, nameTh: true } } },
+    });
+    const people = new Map(users.map((u) => {
+      const dn = displayNameOf(u.metadata);
+      return [u.id, { email: u.email, nameEn: u.lecturer?.nameEn ?? dn, nameTh: u.lecturer?.nameTh ?? (u.lecturer ? null : dn) }];
+    }));
+    type Evaluator = { key: string; email: string | null; nameEn: string | null; nameTh: string | null };
+    const evaluatorOf = (e: { evaluatorId: string | null; evaluatorName: string | null }): Evaluator => {
+      const p = e.evaluatorId ? people.get(e.evaluatorId) : undefined;
+      const email = p?.email ?? (e.evaluatorName?.includes('@') ? e.evaluatorName : null);
+      return { key: e.evaluatorId ?? e.evaluatorName ?? '?', email, nameEn: p?.nameEn ?? (email ? null : e.evaluatorName), nameTh: p?.nameTh ?? null };
+    };
+
+    const k = (studentId: string, sessionId: string) => `${studentId}|${sessionId}`;
+    const evalBy = new Map(dayEvals.map((e) => [k(e.studentId, e.classSessionId!), e]));
+    const attBy = new Map(attendance.map((a) => [k(a.studentId, a.classSessionId), a.status]));
+    const compBy = new Map(components.map((c) => [c.studentId, c.scorePercent]));
+    const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Bangkok' }).format(new Date());
+    const r1 = (n: number) => Math.round(n * 10) / 10;
+    const r2 = (n: number) => Math.round(n * 100) / 100;
+    const mean = (xs: number[]) => (xs.length ? r1(xs.reduce((a, b) => a + b, 0) / xs.length) : null);
+
+    type CellStatus = 'SCORED' | 'ABSENT' | 'LEAVE' | 'PENDING' | 'UPCOMING';
+    const days0 = sessions.map((s) => ({ s, date: s.sessionDate.toISOString().slice(0, 10) }));
+    const students = enrollments.map(({ student }) => {
+      const cells = days0.map(({ s, date }) => {
+        const e = evalBy.get(k(student.id, s.id));
+        const att = attBy.get(k(student.id, s.id));
+        if (e && e.scorePercent != null) {
+          const ratings = new Map(e.scores.map((x) => [x.rubricItemId, x.rating]));
+          return {
+            status: 'SCORED' as CellStatus, scorePercent: e.scorePercent, criticalFailed: e.criticalFailed, note: e.note,
+            rawScore: e.rawScore, rawMax: e.rawMax,
+            sectionScores: r.sections.map((sec) => { const p = AssessmentService.sectionPercent(sec, ratings); return p == null ? null : r1(p); }),
+            ratings: Object.fromEntries(ratings),
+            failedCritical: e.scores.filter((x) => x.passed === false).map((x) => x.rubricItemId),
+            evaluator: evaluatorOf(e), at: e.updatedAt.toISOString(), attendance: att ?? null,
+          };
+        }
+        const status: CellStatus = att === 'ABSENT' ? 'ABSENT' : att === 'LEAVE' || att === 'EXCUSED' ? 'LEAVE' : date > today ? 'UPCOMING' : 'PENDING';
+        return { status, scorePercent: null, criticalFailed: false, note: null, rawScore: null, rawMax: null, sectionScores: null, ratings: null, failedCritical: [], evaluator: null, at: null, attendance: att ?? null };
+      });
+      const scored = cells.filter((c) => c.status === 'SCORED').map((c) => c.scorePercent!);
+      // Same rule as refreshDailyComponent: a day missed (absent/leave) and not assessed doesn't count.
+      const countedDays = cells.filter((c) => c.status !== 'ABSENT' && c.status !== 'LEAVE').length;
+      const component = compBy.get(student.id) ?? null;
+      return {
+        studentId: student.id, studentCode: student.studentCode, nameEn: student.nameEn, nameTh: student.nameTh,
+        cells, assessedDays: scored.length, countedDays,
+        pendingDays: cells.filter((c) => c.status === 'PENDING').length,
+        missedDays: cells.filter((c) => c.status === 'ABSENT' || c.status === 'LEAVE').length,
+        dayAverage: mean(scored),
+        sectionAverages: r.sections.map((_, si) => mean(cells.map((c) => c.sectionScores?.[si]).filter((x): x is number => x != null))),
+        component, points: component != null ? r2((component * weightPercent) / 100) : null,
+        criticalFailed: cells.some((c) => c.criticalFailed),
+        estimate: estimates.get(student.id) ?? null,
+      };
+    });
+
+    const days = days0.map(({ s, date }, di) => {
+      const col = students.map((st) => st.cells[di]);
+      const scores = col.filter((c) => c.status === 'SCORED').map((c) => c.scorePercent!);
+      const tally = new Map<string, Evaluator & { count: number }>();
+      for (const c of col) {
+        if (!c.evaluator) continue;
+        const cur = tally.get(c.evaluator.key);
+        if (cur) cur.count++; else tally.set(c.evaluator.key, { ...c.evaluator, count: 1 });
+      }
+      return {
+        sessionId: s.id, date, startTime: s.startTime, endTime: s.endTime, topic: s.topic, upcoming: date > today,
+        enrolled: students.length, assessed: scores.length,
+        absent: col.filter((c) => c.status === 'ABSENT').length,
+        leave: col.filter((c) => c.status === 'LEAVE').length,
+        pending: col.filter((c) => c.status === 'PENDING').length,
+        average: mean(scores),
+        min: scores.length ? r1(Math.min(...scores)) : null,
+        max: scores.length ? r1(Math.max(...scores)) : null,
+        criticalFails: col.filter((c) => c.criticalFailed).length,
+        sectionAverages: r.sections.map((_, si) => mean(col.map((c) => c.sectionScores?.[si]).filter((x): x is number => x != null))),
+        evaluators: [...tally.values()].sort((a, b) => b.count - a.count),
+      };
+    });
+
+    const allScores = students.flatMap((st) => st.cells.filter((c) => c.status === 'SCORED').map((c) => c.scorePercent!));
+    const totals = {
+      practiceDays: days.length,
+      daysAssessed: days.filter((d) => d.assessed > 0).length,
+      assessments: allScores.length,
+      pending: days.reduce((a, d) => a + d.pending, 0),
+      average: mean(allScores),
+      threshold: 70,
+      studentsBelow: students.filter((st) => st.dayAverage != null && st.dayAverage < 70).length,
+    };
+    return {
+      section: sectionOut, rubrics,
+      rubric: {
+        id: r.id, nameEn: r.nameEn, nameTh: r.nameTh, weightPercent,
+        sections: r.sections.map((sec) => ({
+          id: sec.id, nameEn: sec.nameEn, nameTh: sec.nameTh, weightPercent: sec.weightPercent,
+          items: sec.items.map((it) => ({ id: it.id, textEn: it.textEn, textTh: it.textTh, maxRating: it.maxRating, isCritical: it.isCritical })),
+        })),
+      },
+      days, students, totals,
+    };
+  }
+
+  /** The daily ward-assessment report as an Excel workbook — summary, grid, category averages and every item mark. */
+  async dailyReportXlsx(user: AuthenticatedUser, sectionId: string, rubricId?: string): Promise<{ buffer: Buffer; filename: string }> {
+    const d = await this.dailyReport(user, sectionId, rubricId);
+    const wb = new ExcelJS.Workbook();
+    const head = (row: ExcelJS.Row) => {
+      row.font = { bold: true, color: { argb: 'FFFFFFFF' } };
+      row.eachCell((c) => { c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF0E7C7B' } }; });
+    };
+    const nm = (x: { nameEn: string | null; nameTh: string | null }) => x.nameTh ?? x.nameEn ?? '';
+    const sname = (s: { nameEn: string; nameTh: string | null }) => (s.nameTh ? `${s.nameTh} (${s.nameEn})` : s.nameEn);
+    const who = (e: { email: string | null; nameEn: string | null; nameTh: string | null } | null) => (e ? nm(e) || e.email || '' : '');
+    const at = (iso: string | null) => (iso ? new Intl.DateTimeFormat('en-GB', { dateStyle: 'short', timeStyle: 'short', timeZone: 'Asia/Bangkok' }).format(new Date(iso)) : '');
+    const title = `${d.section.subject.code} ${d.section.subject.nameEn} · Sec ${d.section.sectionNo}`;
+    const filename = `daily-assessment-${d.section.subject.code}-sec${d.section.sectionNo}.xlsx`;
+    const summary = wb.addWorksheet('Daily summary');
+    summary.addRow([title]); summary.getRow(1).font = { bold: true, size: 13 };
+    if (!d.rubric || !d.totals) {
+      summary.addRow(['This subject has no daily (per-session) assessment component.']);
+      return { buffer: Buffer.from(await wb.xlsx.writeBuffer()), filename };
+    }
+    const rb = d.rubric;
+    summary.addRow([`${nm(rb)} — ${rb.weightPercent}% of the grade · average daily score ${d.totals.average ?? '-'}% · ${d.totals.assessments} assessment(s) over ${d.totals.daysAssessed} of ${d.totals.practiceDays} practice days · ${d.totals.studentsBelow} student(s) averaging below ${d.totals.threshold}%`]);
+    summary.addRow([]);
+    head(summary.addRow(['Date', 'Time', 'Topic', 'Enrolled', 'Assessed', 'Absent', 'Leave', 'Pending', 'Average %', 'Min %', 'Max %', 'Critical fails', ...rb.sections.map((s) => `${nm(s)} %`), 'Assessed by']));
+    for (const x of d.days) {
+      summary.addRow([x.date, `${x.startTime}-${x.endTime}`, x.topic ?? '', x.enrolled, x.assessed, x.absent, x.leave, x.upcoming ? 'upcoming' : x.pending,
+        x.average ?? '', x.min ?? '', x.max ?? '', x.criticalFails, ...x.sectionAverages.map((v) => v ?? ''),
+        x.evaluators.map((e) => `${who(e)} (${e.count})`).join('; ')]);
+    }
+    [12, 12, 24, 9, 9, 8, 8, 9, 10, 8, 8, 10, ...rb.sections.map(() => 14), 40].forEach((w, i) => { summary.getColumn(i + 1).width = w; });
+
+    const sym: Record<string, string> = { ABSENT: 'Absent', LEAVE: 'Leave', PENDING: '', UPCOMING: '' };
+    const grid = wb.addWorksheet('Students x days');
+    head(grid.addRow(['No.', 'Student ID', 'Name', ...d.days.map((x) => x.date.slice(5)), 'Days assessed', 'Daily average %', `Component % (${rb.weightPercent})`, `Points / ${rb.weightPercent}`, 'Estimated total % (provisional)', 'Estimated grade (provisional)', 'Estimate based on % of grade']));
+    d.students.forEach((s, i) => {
+      const row = grid.addRow([i + 1, s.studentCode, sname(s), ...s.cells.map((c) => (c.status === 'SCORED' ? c.scorePercent : sym[c.status])),
+        `${s.assessedDays}/${s.countedDays}`, s.dayAverage ?? '', s.component ?? '', s.points ?? '',
+        s.estimate?.estimate ?? '', s.estimate?.grade ?? '', s.estimate ? `${s.estimate.basisWeight}/${s.estimate.totalWeight}` : '']);
+      s.cells.forEach((c, ci) => {
+        if (c.status === 'SCORED' && c.scorePercent! < d.totals!.threshold) row.getCell(4 + ci).font = { bold: true, color: { argb: 'FFC0392B' } };
+      });
+    });
+    grid.addRow([]);
+    grid.addRow(['', '', 'Daily average = mean of the days assessed. Component = sum of day scores ÷ days that count (absent/leave days excluded), as in the gradebook. Estimated grade = PROVISIONAL: the level so far (daily component at its daily average) applied to the whole grade, over the components assessed so far — not the final grade.']);
+    grid.getColumn(1).width = 5; grid.getColumn(2).width = 11; grid.getColumn(3).width = 36;
+    for (let i = 0; i < d.days.length; i++) grid.getColumn(4 + i).width = 8;
+    grid.views = [{ state: 'frozen', xSplit: 3, ySplit: 1 }];
+
+    const cat = wb.addWorksheet('Category averages');
+    head(cat.addRow(['No.', 'Student ID', 'Name', ...rb.sections.map((s) => `${nm(s)} (${Math.round(s.weightPercent * 100) / 100}%)`), 'Daily average %']));
+    d.students.forEach((s, i) => cat.addRow([i + 1, s.studentCode, sname(s), ...s.sectionAverages.map((v) => v ?? ''), s.dayAverage ?? '']));
+    cat.getColumn(1).width = 5; cat.getColumn(2).width = 11; cat.getColumn(3).width = 36;
+    rb.sections.forEach((_, i) => { cat.getColumn(4 + i).width = 18; });
+
+    const detail = wb.addWorksheet('Daily detail');
+    head(detail.addRow(['Date', 'Student ID', 'Name', 'Attendance', 'Score %', ...rb.sections.map((s) => `${nm(s)} %`), 'Critical fail', 'Assessed by', 'Login email', 'Saved at', 'Note']));
+    d.days.forEach((x, di) => {
+      for (const s of d.students) {
+        const c = s.cells[di];
+        if (c.status === 'PENDING' || c.status === 'UPCOMING') continue;
+        detail.addRow([x.date, s.studentCode, s.nameTh ?? s.nameEn, c.attendance ?? '', c.scorePercent ?? (c.status === 'ABSENT' ? 'Absent' : 'Leave'),
+          ...rb.sections.map((_, si) => c.sectionScores?.[si] ?? ''), c.criticalFailed ? 'YES' : '', who(c.evaluator), c.evaluator?.email ?? '', at(c.at), c.note ?? '']);
+      }
+    });
+    [12, 11, 30, 11, 9, ...rb.sections.map(() => 14), 10, 26, 28, 16, 40].forEach((w, i) => { detail.getColumn(i + 1).width = w; });
+    detail.views = [{ state: 'frozen', ySplit: 1 }];
+
+    const items = wb.addWorksheet('Item marks');
+    head(items.addRow(['Date', 'Student ID', 'Name', 'Category', 'Item', 'Mark', 'Out of', 'Critical']));
+    d.days.forEach((x, di) => {
+      for (const s of d.students) {
+        const c = s.cells[di];
+        if (!c.ratings) continue;
+        for (const sec of rb.sections) {
+          for (const it of sec.items) {
+            const v = c.ratings[it.id];
+            if (v == null) continue;
+            items.addRow([x.date, s.studentCode, s.nameTh ?? s.nameEn, nm(sec), it.textTh ?? it.textEn, v, it.maxRating,
+              it.isCritical ? (c.failedCritical.includes(it.id) ? 'NOT PASSED' : 'passed') : '']);
+          }
+        }
+      }
+    });
+    [12, 11, 28, 24, 60, 7, 7, 11].forEach((w, i) => { items.getColumn(i + 1).width = w; });
+    items.views = [{ state: 'frozen', ySplit: 1 }];
+    return { buffer: Buffer.from(await wb.xlsx.writeBuffer()), filename };
   }
 }

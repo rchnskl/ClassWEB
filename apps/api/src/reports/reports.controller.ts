@@ -119,6 +119,17 @@ export class ReportsController {
     res.send(buffer);
   }
 
+  @Get('assessment/section/:sectionId/daily/pdf')
+  @ApiBearerAuth()
+  @Permissions('report:export')
+  @ApiOperation({ summary: 'Daily ward-assessment report of a section — landscape PDF (per-day stats, student × day scores, category averages)' })
+  async sectionDailyAssessmentPdf(@CurrentUser() user: AuthenticatedUser, @Param('sectionId') sectionId: string, @Query('rubricId') rubricId: string | undefined, @Query('lang') lang: string | undefined, @Res() res: Response) {
+    const { buffer, reportNumber } = await this.reports.sectionDailyAssessmentPdf(user, sectionId, rubricId || undefined, user.id, await this.byName(user), parseLang(lang));
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="${reportNumber}.pdf"`);
+    res.send(buffer);
+  }
+
   @Get('grades/section/:sectionId/csv')
   @ApiBearerAuth()
   @Permissions('report:export')

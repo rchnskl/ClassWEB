@@ -1,5 +1,6 @@
-import { Body, Controller, Delete, Get, Param, Patch, Post, Query } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Patch, Post, Query, Res } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
+import type { Response } from 'express';
 import { AssessmentService } from './assessment.service';
 import { SaveEvaluationDto, SaveRubricDto, UpdateGradeBandsDto, UpdateRubricWeightsDto, UpdateSubjectRubricsDto } from './dto/assessment.dto';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
@@ -120,5 +121,22 @@ export class AssessmentController {
   @ApiOperation({ summary: 'Per-section grade sheet: every student with total + grade' })
   sectionSummary(@CurrentUser() user: AuthenticatedUser, @Param('sectionId') sectionId: string) {
     return this.assessment.sectionSummary(user, sectionId);
+  }
+
+  @Get('sections/:sectionId/daily')
+  @Permissions('assessment:read')
+  @ApiOperation({ summary: 'Daily ward-assessment report: per practice day stats and a student × day score grid (with category breakdown and assessor)' })
+  dailyReport(@CurrentUser() user: AuthenticatedUser, @Param('sectionId') sectionId: string, @Query('rubricId') rubricId?: string) {
+    return this.assessment.dailyReport(user, sectionId, rubricId || undefined);
+  }
+
+  @Get('sections/:sectionId/daily.xlsx')
+  @Permissions('assessment:read')
+  @ApiOperation({ summary: 'The daily ward-assessment report as an Excel workbook' })
+  async dailyReportXlsx(@CurrentUser() user: AuthenticatedUser, @Param('sectionId') sectionId: string, @Query('rubricId') rubricId: string | undefined, @Res() res: Response) {
+    const { buffer, filename } = await this.assessment.dailyReportXlsx(user, sectionId, rubricId || undefined);
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.send(buffer);
   }
 }

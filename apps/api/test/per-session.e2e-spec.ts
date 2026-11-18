@@ -1,6 +1,7 @@
 import { INestApplication, ValidationPipe, VersioningType } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import request from 'supertest';
+import ExcelJS from 'exceljs';
 import { AppModule } from '../src/app.module';
 import { PrismaService } from '../src/prisma/prisma.service';
 
@@ -127,5 +128,35 @@ describe('Per-session (daily) assessment', () => {
     await http.post('/api/v1/attendance/records').set('Authorization', `Bearer ${token}`)
       .send({ classSessionId: added.id, studentId, status: 'PRESENT' }).expect(201);
     expect(await componentScore()).toBe(60); // present again: the day counts, not yet earned
+  });
+  it('reports the daily scores by day and by student — JSON, Excel and PDF', async () => {
+    const auth = { Authorization: `Bearer ${token}` };
+    const res = await http.get(`/api/v1/assessment/sections/${sectionId}/daily`).set(auth).expect(200);
+    expect(res.body.rubric).toMatchObject({ id: rubricId, weightPercent: 100 });
+    // The presentation day is out of daily assessment; the day added later is in.
+    expect(res.body.days).toHaveLength(3);
+    const row = res.body.students.find((s: { studentId: string }) => s.studentId === studentId);
+    expect(row).toMatchObject({ assessedDays: 2, dayAverage: 90, component: 60, points: 60 });
+    // Provisional grade: the daily average carried over the whole grade (the only component here).
+    expect(row.estimate).toMatchObject({ estimate: 90, basisWeight: 100, totalWeight: 100 });
+    const scored = row.cells.filter((c: { status: string }) => c.status === 'SCORED');
+    expect(scored.map((c: { scorePercent: number }) => c.scorePercent).sort()).toEqual([100, 80]);
+    expect(scored[0].sectionScores).toHaveLength(1);
+    expect(scored[0].evaluator.email).toBe(ADMIN.email);
+    const assessedDays = res.body.days.filter((d: { assessed: number }) => d.assessed > 0);
+    expect(assessedDays).toHaveLength(2);
+    expect(assessedDays[0].evaluators[0]).toMatchObject({ email: ADMIN.email });
+    expect(res.body.totals).toMatchObject({ practiceDays: 3, daysAssessed: 2, average: 90 });
+
+    const xlsx = await http.get(`/api/v1/assessment/sections/${sectionId}/daily.xlsx`).set(auth)
+      .buffer(true).parse((r, cb) => { const b: Buffer[] = []; r.on('data', (c: Buffer) => b.push(c)); r.on('end', () => cb(null, Buffer.concat(b))); }).expect(200);
+    const wb = new ExcelJS.Workbook();
+    await wb.xlsx.load(xlsx.body);
+    expect(wb.worksheets.map((w) => w.name)).toEqual(['Daily summary', 'Students x days', 'Category averages', 'Daily detail', 'Item marks']);
+    expect(wb.getWorksheet('Item marks')!.rowCount).toBe(1 + 2 * 2); // 2 items on each of 2 days
+
+    const pdf = await http.get(`/api/v1/reports/assessment/section/${sectionId}/daily/pdf`).set(auth)
+      .buffer(true).parse((r, cb) => { const b: Buffer[] = []; r.on('data', (c: Buffer) => b.push(c)); r.on('end', () => cb(null, Buffer.concat(b))); }).expect(200);
+    expect((pdf.body as Buffer).subarray(0, 5).toString()).toBe('%PDF-');
   });
 });

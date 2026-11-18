@@ -254,3 +254,60 @@ describe('ReportsService.sectionDailyPdf', () => {
     expect(prisma.report.create).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ type: 'SECTION_ATTENDANCE' }) }));
   });
 });
+
+describe('ReportsService.sectionDailyAssessmentPdf', () => {
+  const user = { id: 'u1', universityId: 'uni1', roleCodes: ['LECTURER'] } as any;
+  const cats = ['การประเมินภาวะสุขภาพ', 'การวินิจฉัยการพยาบาล', 'การวางแผนการพยาบาล', 'การปฏิบัติการพยาบาล', 'การประเมินผล', 'คุณลักษณะวิชาชีพ'];
+  const dates = ['2026-11-10', '2026-11-11', '2026-11-12', '2026-11-17', '2026-11-18', '2026-11-19'];
+  const evaluator = { key: 'u1', email: 'rachanon@au.edu', nameEn: 'Rachanon', nameTh: 'อ.รชานนท์' };
+  const students = Array.from({ length: 7 }, (_, k) => {
+    const cells = dates.map((_, i) => {
+      if (i >= 5) return { status: 'UPCOMING', scorePercent: null, criticalFailed: false, sectionScores: null, evaluator: null };
+      if (i === 2 && k === 3) return { status: 'ABSENT', scorePercent: null, criticalFailed: false, sectionScores: null, evaluator: null };
+      if (i === 4 && k > 4) return { status: 'PENDING', scorePercent: null, criticalFailed: false, sectionScores: null, evaluator: null };
+      const v = 62 + ((k * 7 + i * 5) % 35);
+      return { status: 'SCORED', scorePercent: v, criticalFailed: k === 6 && i === 1, sectionScores: cats.map((_, c) => v - 5 + c * 2), evaluator };
+    });
+    return {
+      studentId: `s${k}`, studentCode: `65${k}1234`, nameEn: `Student ${k}`, nameTh: k === 2 ? null : `นักศึกษา ทดสอบ${k}`,
+      cells, assessedDays: 4, countedDays: 6, dayAverage: 70 + k * 3, sectionAverages: cats.map((_, c) => 68 + c + k), component: 50 + k, points: 35 + k, criticalFailed: k === 6,
+      estimate: { estimate: 74 + k * 2.5, grade: ['B', 'B', 'B+', 'B+', 'A', 'A', 'A'][k], gpa: 3, basisWeight: 85, totalWeight: 100 },
+    };
+  });
+  const report = {
+    section: { sectionNo: '1', subject: { code: 'NUS3303', nameEn: 'Infant, Child and Adolescent Nursing Practicum II', nameTh: 'ปฏิบัติการพยาบาลทารก เด็ก และวัยรุ่น 2' },
+      semester: { nameEn: '1/2026', nameTh: '1/2569' }, lecturer: { nameEn: 'Rachanon Sakol', nameTh: 'รชานนท์ สากล' }, room: { roomNumber: 'Ward 9/4' } },
+    rubrics: [{ id: 'r1', nameEn: 'Nursing performance', nameTh: 'การปฏิบัติการพยาบาล', weightPercent: 70 }],
+    rubric: { id: 'r1', nameEn: 'Nursing performance', nameTh: 'การปฏิบัติการพยาบาล', weightPercent: 70, sections: cats.map((c, i) => ({ id: `c${i}`, nameEn: `Category ${i + 1}`, nameTh: c, weightPercent: 100 / 6, items: [] })) },
+    days: dates.map((date, i) => ({
+      sessionId: `d${i}`, date, startTime: '07:00', endTime: '16:00', topic: null, upcoming: i >= 5, enrolled: 7,
+      assessed: i >= 5 ? 0 : 6, absent: i === 2 ? 1 : 0, leave: 0, pending: i === 4 ? 2 : 0, average: i >= 5 ? null : 75.2 + i, min: i >= 5 ? null : 62, max: i >= 5 ? null : 96,
+      criticalFails: i === 1 ? 1 : 0, sectionAverages: cats.map(() => 75), evaluators: i >= 5 ? [] : [{ ...evaluator, count: 6 }],
+    })),
+    students,
+    totals: { practiceDays: 6, daysAssessed: 5, assessments: 31, pending: 2, average: 77.4, threshold: 70, studentsBelow: 0 },
+  };
+  const prisma = {
+    university: { findUnique: jest.fn().mockResolvedValue({ nameEn: 'Assumption University', nameTh: 'มหาวิทยาลัยอัสสัมชัญ' }) },
+    faculty: { findFirst: jest.fn().mockResolvedValue({ nameEn: 'Faculty of Nursing', nameTh: 'คณะพยาบาลศาสตร์' }) },
+    report: { create: jest.fn().mockResolvedValue({}), update: jest.fn().mockResolvedValue({}) },
+    auditLog: { create: jest.fn().mockResolvedValue({}) },
+  };
+  const settings = { getMap: jest.fn().mockResolvedValue({ 'pdf.header': '', 'pdf.footer': 'ClassWeb' }) };
+  const assessment = { dailyReport: jest.fn().mockResolvedValue(report) };
+  const service = new ReportsService(prisma as any, {} as any, assessment as any, settings as any, {} as any);
+
+  it('renders a registered PDF of the daily ward assessment', async () => {
+    const { buffer, reportNumber } = await service.sectionDailyAssessmentPdf(user, 'sec1', undefined, 'u1', 'อ.รชานนท์');
+    if (process.env.DUMP_DAILY_ASSESSMENT_PDF) writeFileSync(process.env.DUMP_DAILY_ASSESSMENT_PDF, buffer);
+    expect(buffer.subarray(0, 5).toString()).toBe('%PDF-');
+    expect(reportNumber).toMatch(/^RPT-\d{8}-[0-9A-F]{6}$/);
+    expect(assessment.dailyReport).toHaveBeenCalledWith(user, 'sec1', undefined);
+    expect(prisma.report.create).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ type: 'SECTION_DAILY_ASSESSMENT' }) }));
+  });
+
+  it('refuses a subject with no daily component', async () => {
+    assessment.dailyReport.mockResolvedValueOnce({ ...report, rubric: null, totals: null });
+    await expect(service.sectionDailyAssessmentPdf(user, 'sec1', undefined)).rejects.toThrow('no daily');
+  });
+});

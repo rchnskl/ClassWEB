@@ -1003,6 +1003,266 @@ export class ReportsService {
     return { buffer, reportNumber };
   }
 
+  /**
+   * Daily ward-assessment report of a section (A4 landscape): summary cards,
+   * a by-day table (assessed / absent / pending, average and range, who
+   * assessed), the student × day score grid with each student's daily
+   * average and running component score, and the average per rubric
+   * category. Built from AssessmentService.dailyReport — the same numbers as
+   * the web page and the Excel export.
+   */
+  async sectionDailyAssessmentPdf(user: AuthenticatedUser, sectionId: string, rubricId: string | undefined, byId?: string, byName?: string, lang: ReportLang = 'th'): Promise<{ buffer: Buffer; reportNumber: string }> {
+    const universityId = user.universityId;
+    const [d, university, faculty, settings] = await Promise.all([
+      this.assessment.dailyReport(user, sectionId, rubricId),
+      this.prisma.university.findUnique({ where: { id: universityId }, select: { nameEn: true, nameTh: true } }),
+      this.prisma.faculty.findFirst({ where: { universityId, code: 'NURSING' }, select: { nameEn: true, nameTh: true } }),
+      this.settings.getMap(universityId),
+    ]);
+    if (!d.rubric || !d.totals) throw new NotFoundException('This subject has no daily (per-session) assessment component');
+    const rb = d.rubric; const totals = d.totals;
+    const checksum = createHash('sha256').update(JSON.stringify({ sectionId, rubricId: rb.id, students: d.students.map((s) => [s.studentId, s.cells.map((c) => c.scorePercent), s.component]) })).digest('hex');
+    const reportNumber = await this.register(universityId, 'PDF', checksum, byId, byName, 'SECTION_DAILY_ASSESSMENT', `Daily ward assessment — ${d.section.subject.code} Sec ${d.section.sectionNo}`);
+    const verifyUrl = `${WEB_BASE}/verify/${reportNumber}`;
+    const qrPng = Buffer.from((await QRCode.toDataURL(verifyUrl, { margin: 1, width: 200 })).split(',')[1], 'base64');
+
+    const doc = new PDFDocument({ size: 'A4', layout: 'landscape', margin: 36, bufferPages: true });
+    const chunks: Buffer[] = [];
+    doc.on('data', (c) => chunks.push(c as Buffer));
+    const done = new Promise<Buffer>((resolve) => doc.on('end', () => resolve(Buffer.concat(chunks))));
+
+    const th = FONT_TH(); const thBold = FONT_TH_BOLD();
+    if (th) doc.registerFont('TH', th);
+    if (thBold) doc.registerFont('THB', thBold);
+    const F = th ? 'TH' : 'Helvetica'; const FB = thBold ? 'THB' : 'Helvetica-Bold';
+    const pageW = doc.page.width; const pageH = doc.page.height; const left = 36; const right = pageW - 36;
+    const bottom = pageH - 50;
+    const nm = (x: { nameEn: string; nameTh: string | null }) => (lang === 'en' ? x.nameEn : x.nameTh ?? x.nameEn);
+
+    // Header — same layout as the other section reports, QR on page 1.
+    const uniLogo = LOGO_UNIVERSITY(); const facLogo = LOGO_FACULTY();
+    if (uniLogo) doc.image(uniLogo, left, 30, { width: 44 });
+    doc.image(qrPng, right - 40, 26, { width: 40 });
+    doc.font(F).fontSize(6.5).fillColor('#7c8798').text(L(lang, 'สแกนตรวจสอบ', 'Scan to verify'), right - 52, 67, { width: 64, align: 'center', lineBreak: false });
+    if (facLogo) doc.image(facLogo, right - 96, 28, { width: 44 });
+    doc.font(FB).fontSize(16).fillColor('#26303f').text((lang === 'en' ? university?.nameEn : university?.nameTh) ?? 'University', 88, 34, { width: pageW - 236, align: 'center' });
+    doc.font(FB).fontSize(13).fillColor('#0e2a4a').text((lang === 'en' ? faculty?.nameEn : faculty?.nameTh) ?? 'Faculty of Nursing', 88, 53, { width: pageW - 236, align: 'center' });
+    const subjName = (lang === 'en' ? d.section.subject.nameEn : d.section.subject.nameTh) ?? d.section.subject.nameEn;
+    doc.font(F).fontSize(12).fillColor('#4a5666')
+      .text(
+        `${L(lang, 'รายงานการให้คะแนนบนหอผู้ป่วยรายวัน', 'Daily Ward Assessment Report')} — ${d.section.subject.code} ${subjName} · ${L(lang, 'กลุ่ม', 'Sec')} ${d.section.sectionNo}`
+          + (settings['pdf.header'] ? ` · ${settings['pdf.header']}` : ''),
+        88, 71, { width: pageW - 236, align: 'center', lineBreak: false, ellipsis: true },
+      );
+    doc.moveTo(left, 94).lineTo(right, 94).strokeColor('#ff8a4c').lineWidth(1.5).stroke();
+    doc.font(F).fontSize(10).fillColor('#4a5666').text(`${L(lang, 'เลขที่รายงาน', 'Report No.')}: ${reportNumber}    ${L(lang, 'ออกเมื่อ', 'Generated')}: ${this.formatDateTime(new Date(), lang)}`, left, 100, { lineBreak: false });
+    const lecturerName = d.section.lecturer ? this.personName(d.section.lecturer.nameEn, d.section.lecturer.nameTh) : null;
+    const info = [
+      `${L(lang, 'องค์ประกอบ', 'Component')}: ${nm(rb)} (${rb.weightPercent}%)`,
+      d.section.semester ? `${L(lang, 'ภาคการศึกษา', 'Semester')}: ${(lang === 'en' ? d.section.semester.nameEn : d.section.semester.nameTh) ?? d.section.semester.nameEn}` : null,
+      lecturerName ? `${L(lang, 'อาจารย์ผู้สอน', 'Lecturer')}: ${lecturerName}` : null,
+      d.section.room ? `${L(lang, 'หอผู้ป่วย', 'Ward')}: ${d.section.room.roomNumber}` : null,
+    ].filter(Boolean).join('    ');
+    doc.text(info, left, 114, { lineBreak: false, width: right - left, ellipsis: true });
+
+    // Summary cards
+    let y = 134;
+    const scoreHex = (r: number | null) => (r == null ? '#7c8798' : r >= 80 ? '#1e8e5a' : r >= totals.threshold ? '#c27c0e' : '#c0392b');
+    const cards: Array<[string, string, string]> = [
+      [L(lang, 'คะแนนเฉลี่ยรายวัน', 'Average daily score'), totals.average != null ? `${totals.average}%` : '—', scoreHex(totals.average)],
+      [L(lang, 'วันที่ประเมินแล้ว', 'Days assessed'), `${totals.daysAssessed} / ${totals.practiceDays}`, '#26303f'],
+      [L(lang, 'ครั้งที่ประเมิน (ค้าง)', 'Assessments (pending)'), `${totals.assessments} (${totals.pending})`, totals.pending > 0 ? '#c27c0e' : '#26303f'],
+      [L(lang, `เฉลี่ยต่ำกว่า ${totals.threshold}%`, `Averaging below ${totals.threshold}%`), String(totals.studentsBelow), totals.studentsBelow > 0 ? '#c0392b' : '#1e8e5a'],
+    ];
+    const cardW = (right - left - 3 * 10) / 4;
+    cards.forEach(([label, value, color], i) => {
+      const x = left + i * (cardW + 10);
+      doc.roundedRect(x, y, cardW, 42, 5).fillAndStroke('#f6f8fb', '#dfe5ee');
+      doc.font(F).fontSize(9.5).fillColor('#4a5666').text(label, x + 10, y + 6, { width: cardW - 20, lineBreak: false });
+      doc.font(FB).fontSize(15).fillColor(color).text(value, x + 10, y + 19, { width: cardW - 20, lineBreak: false });
+    });
+    y += 58;
+
+    const dayText = (iso: string, long: boolean) => new Date(`${iso}T00:00:00Z`).toLocaleDateString(lang === 'en' ? 'en-GB' : 'th-TH',
+      long ? { weekday: 'short', day: 'numeric', month: 'short', year: '2-digit', timeZone: 'UTC' } : { day: 'numeric', month: 'short', timeZone: 'UTC' });
+    const sectionTitle = (text: string) => {
+      if (y > bottom - 60) { doc.addPage(); y = 40; }
+      doc.font(FB).fontSize(12).fillColor('#26303f').text(text, left, y, { lineBreak: false });
+      y += 18;
+    };
+    const drawRow = (cols: { w: number; align: 'left' | 'center' | 'right' }[], cells: Array<{ text: string; color?: string; bold?: boolean }>, yy: number, size = 10) => {
+      let x = left;
+      cols.forEach((c, i) => {
+        const cell = cells[i];
+        doc.font(cell.bold ? FB : F).fontSize(size).fillColor(cell.color ?? '#26303f')
+          .text(cell.text, x + 4, yy, { width: c.w - 8, align: c.align, lineBreak: false, ellipsis: true });
+        x += c.w;
+      });
+    };
+    const header = (cols: { w: number; align: 'left' | 'center' | 'right' }[], labels: string[], yy: number, size = 10) => {
+      doc.roundedRect(left, yy - 4, cols.reduce((a, c) => a + c.w, 0), 20, 3).fill('#0e7c7b');
+      drawRow(cols, labels.map((text) => ({ text, color: '#fff', bold: true })), yy, size);
+      return yy + 20;
+    };
+    const whoText = (e: { email: string | null; nameEn: string | null; nameTh: string | null; count: number }) =>
+      `${(lang === 'en' ? e.nameEn ?? e.nameTh : e.nameTh ?? e.nameEn) ?? e.email ?? L(lang, 'ไม่ทราบ', 'Unknown')} ${e.count}`;
+
+    // ---- Table 1: by day
+    sectionTitle(L(lang, 'สรุปรายวัน', 'By practice day'));
+    const dayCols = [
+      { label: L(lang, 'วันที่', 'Date'), w: 150, align: 'left' as const },
+      { label: L(lang, 'เวลา', 'Time'), w: 66, align: 'left' as const },
+      { label: L(lang, 'ประเมินแล้ว', 'Assessed'), w: 62, align: 'center' as const },
+      { label: L(lang, 'ขาด', 'Absent'), w: 40, align: 'center' as const },
+      { label: L(lang, 'ลา', 'Leave'), w: 40, align: 'center' as const },
+      { label: L(lang, 'ค้างประเมิน', 'Pending'), w: 62, align: 'center' as const },
+      { label: L(lang, 'เฉลี่ย', 'Average'), w: 54, align: 'center' as const },
+      { label: L(lang, 'ต่ำสุด–สูงสุด', 'Min–Max'), w: 76, align: 'center' as const },
+      { label: L(lang, 'ผู้ประเมิน', 'Assessed by'), w: 0, align: 'left' as const },
+    ];
+    dayCols[dayCols.length - 1].w = right - left - dayCols.slice(0, -1).reduce((a, c) => a + c.w, 0);
+    y = header(dayCols, dayCols.map((c) => c.label), y);
+    d.days.forEach((x, i) => {
+      if (y > bottom - 16) { doc.addPage(); y = header(dayCols, dayCols.map((c) => c.label), 40); }
+      if (i % 2 === 1) doc.rect(left, y - 3, right - left, 17).fill('#f6f8fb');
+      const dim = x.upcoming && x.assessed === 0 ? '#a0aab8' : undefined;
+      drawRow(dayCols, [
+        { text: dayText(x.date, true) + (x.topic ? ` · ${x.topic}` : ''), color: dim ?? '#26303f', bold: !dim },
+        { text: `${x.startTime}–${x.endTime}`, color: dim },
+        { text: `${x.assessed}/${x.enrolled}`, color: dim ?? '#0e7c7b', bold: true },
+        { text: x.absent ? String(x.absent) : '', color: '#c0392b', bold: true },
+        { text: x.leave ? String(x.leave) : '', color: '#2b6cb0' },
+        { text: x.upcoming && x.assessed === 0 ? L(lang, 'ยังไม่ถึง', 'Upcoming') : String(x.pending), color: x.pending > 0 ? '#c27c0e' : '#7c8798', bold: x.pending > 0 },
+        { text: x.average != null ? `${x.average}%` : '—', color: scoreHex(x.average), bold: true },
+        { text: x.min != null ? `${x.min}–${x.max}` : '—', color: '#4a5666' },
+        { text: x.evaluators.map(whoText).join(' · ') || '—', color: '#4a5666' },
+      ], y, 10);
+      y += 17;
+    });
+    y += 14;
+
+    // ---- Table 2: student × day grid, split into blocks of days
+    const fixed = { no: 22, code: 62, name: 140, avg: 44, comp: 48, pts: 44, est: 62 };
+    const fixedW = Object.values(fixed).reduce((a, b) => a + b, 0);
+    const indexed = d.days.map((x, i) => ({ x, i }));
+    const maxPerBlock = Math.max(1, Math.floor((right - left - fixedW) / 34));
+    const perBlock = Math.max(1, Math.ceil(indexed.length / Math.max(1, Math.ceil(indexed.length / maxPerBlock))));
+    const blocks: typeof indexed[] = [];
+    for (let i = 0; i < indexed.length; i += perBlock) blocks.push(indexed.slice(i, i + perBlock));
+    if (blocks.length === 0) blocks.push([]);
+
+    sectionTitle(L(lang, 'คะแนนรายบุคคลรายวัน (ร้อยละ)', 'Daily scores by student (%)'));
+    doc.font(F).fontSize(9).fillColor('#7c8798')
+      .text(L(lang,
+        `ข = ขาด · ล = ลา · · = ยังไม่ประเมิน · ! = ไม่ผ่านข้อสำคัญ · เฉลี่ย = ค่าเฉลี่ยวันที่ประเมินแล้ว · สะสม = ผลรวมคะแนนรายวัน ÷ จำนวนวันที่นับ (ไม่นับวันขาด/ลา) ตามสมุดคะแนน`,
+        `A = absent · Le = leave · · = not yet assessed · ! = critical item failed · Avg = mean of days assessed · Comp. = sum of day scores ÷ days that count (absent/leave excluded), as in the gradebook`), left, y, { width: right - left, lineBreak: false, ellipsis: true });
+    y += 14;
+    blocks.forEach((block, bi) => {
+      const last = bi === blocks.length - 1;
+      const dayW = block.length > 0 ? Math.min(56, (right - left - fixedW) / block.length) : 0;
+      const cols = [
+        { w: fixed.no, align: 'left' as const }, { w: fixed.code, align: 'left' as const }, { w: fixed.name, align: 'left' as const },
+        ...block.map(() => ({ w: dayW, align: 'center' as const })),
+        { w: fixed.avg, align: 'right' as const }, { w: fixed.comp, align: 'right' as const }, { w: fixed.pts, align: 'right' as const },
+        { w: fixed.est, align: 'center' as const },
+      ];
+      const labels = ['#', L(lang, 'รหัส', 'Code'), L(lang, 'ชื่อ-สกุล', 'Name'), ...block.map(({ x }) => dayText(x.date, false)),
+        L(lang, 'เฉลี่ย', 'Avg'), L(lang, 'สะสม %', 'Comp. %'), `/${rb.weightPercent}`, L(lang, 'เกรดคาดการณ์*', 'Est. grade*')];
+      if (bi > 0) y += 10;
+      if (y > bottom - 40) { doc.addPage(); y = 40; }
+      if (blocks.length > 1) {
+        doc.font(F).fontSize(9).fillColor('#4a5666').text(`${L(lang, 'ช่วงที่', 'Part')} ${bi + 1}/${blocks.length}`, left, y, { lineBreak: false });
+        y += 13;
+      }
+      y = header(cols, labels, y, block.length > 14 ? 8 : 9);
+      d.students.forEach((s, i) => {
+        if (y > bottom - 16) { doc.addPage(); y = header(cols, labels, 40, block.length > 14 ? 8 : 9); }
+        if (i % 2 === 1) doc.rect(left, y - 3, cols.reduce((a, c) => a + c.w, 0), 16).fill('#f6f8fb');
+        drawRow(cols, [
+          { text: String(i + 1) }, { text: s.studentCode }, { text: this.personName(s.nameEn, s.nameTh) },
+          ...block.map(({ i: di }) => {
+            const c = s.cells[di];
+            if (c.status === 'SCORED') return { text: `${Math.round(c.scorePercent! * 10) / 10}${c.criticalFailed ? '!' : ''}`, color: scoreHex(c.scorePercent), bold: true };
+            if (c.status === 'ABSENT') return { text: L(lang, 'ข', 'A'), color: '#c0392b', bold: true };
+            if (c.status === 'LEAVE') return { text: L(lang, 'ล', 'Le'), color: '#2b6cb0', bold: true };
+            return { text: c.status === 'PENDING' ? '·' : '', color: '#a0aab8' };
+          }),
+          // The summary columns are the same for every block; print them on the last one only.
+          { text: last && s.dayAverage != null ? `${s.dayAverage}` : last ? '—' : '', color: scoreHex(s.dayAverage), bold: true },
+          { text: last ? (s.component != null ? `${s.component}` : '—') : '', color: '#26303f' },
+          { text: last ? (s.points != null ? `${s.points}` : '—') : '', color: '#0e2a4a', bold: true },
+          { text: last ? (s.estimate ? `${s.estimate.grade ?? '—'} (${s.estimate.estimate})` : '—') : '', color: '#6b4fa0', bold: true },
+        ], y, 9.5);
+        y += 16;
+      });
+    });
+    y += 4;
+    if (y > bottom - 14) { doc.addPage(); y = 40; }
+    doc.font(F).fontSize(8.5).fillColor('#6b4fa0').text(L(lang,
+      '* เกรดคาดการณ์ (เบื้องต้น) — ไม่ใช่เกรดจริง: นำระดับคะแนนที่ทำได้จนถึงตอนนี้ (องค์ประกอบรายวันใช้ค่าเฉลี่ยวันที่ประเมินแล้ว) มาคิดเทียบทั้งรายวิชา เฉพาะองค์ประกอบที่ประเมินแล้ว เกรดจริงแสดงเมื่อประเมินครบทุกองค์ประกอบ',
+      "* Estimated grade (provisional) — not the final grade: the student's level so far (daily component at its daily average) applied to the whole subject, over the components assessed so far. The real grade appears once every component is assessed."),
+    left, y, { width: right - left });
+    y = doc.y + 12;
+
+    // ---- Table 3: average per rubric category
+    if (rb.sections.length > 0) {
+      sectionTitle(L(lang, 'คะแนนเฉลี่ยรายหมวด (ร้อยละ)', 'Average by category (%)'));
+      const catW = Math.min(90, (right - left - 22 - 62 - 150 - 60) / rb.sections.length);
+      const cols = [
+        { w: 22, align: 'left' as const }, { w: 62, align: 'left' as const }, { w: 150, align: 'left' as const },
+        ...rb.sections.map(() => ({ w: catW, align: 'center' as const })), { w: 60, align: 'right' as const },
+      ];
+      const labels = ['#', L(lang, 'รหัส', 'Code'), L(lang, 'ชื่อ-สกุล', 'Name'), ...rb.sections.map((_, i) => `${L(lang, 'หมวด', 'Cat.')} ${i + 1}`), L(lang, 'เฉลี่ย', 'Avg')];
+      y = header(cols, labels, y, 9);
+      const rows = [
+        ...d.students.map((s, i) => ({ cells: [String(i + 1), s.studentCode, this.personName(s.nameEn, s.nameTh)], vals: s.sectionAverages, avg: s.dayAverage, bold: false })),
+        { cells: ['', '', L(lang, 'เฉลี่ยทั้งกลุ่ม', 'Group average')], vals: rb.sections.map((_, si) => {
+          const xs = d.students.map((s) => s.sectionAverages[si]).filter((v): v is number => v != null);
+          return xs.length ? Math.round((xs.reduce((a, b) => a + b, 0) / xs.length) * 10) / 10 : null;
+        }), avg: totals.average, bold: true },
+      ];
+      rows.forEach((row, i) => {
+        if (y > bottom - 16) { doc.addPage(); y = header(cols, labels, 40, 9); }
+        if (i % 2 === 1 || row.bold) doc.rect(left, y - 3, cols.reduce((a, c) => a + c.w, 0), 16).fill(row.bold ? '#e8f3f3' : '#f6f8fb');
+        drawRow(cols, [
+          ...row.cells.map((text) => ({ text, bold: row.bold })),
+          ...row.vals.map((v) => ({ text: v != null ? String(v) : '—', color: scoreHex(v), bold: true })),
+          { text: row.avg != null ? String(row.avg) : '—', color: scoreHex(row.avg), bold: true },
+        ], y, 9.5);
+        y += 16;
+      });
+      y += 6;
+      for (const [i, sec] of rb.sections.entries()) {
+        if (y > bottom - 14) { doc.addPage(); y = 40; }
+        doc.font(F).fontSize(9).fillColor('#4a5666')
+          .text(`${L(lang, 'หมวด', 'Cat.')} ${i + 1} = ${nm(sec)}${sec.weightPercent ? ` (${Math.round(sec.weightPercent * 100) / 100}%)` : ''}`, left, y, { width: right - left, lineBreak: false, ellipsis: true });
+        y += 12;
+      }
+    }
+
+    // Signature
+    if (y + 60 > bottom) { doc.addPage(); y = 40; }
+    const sy = y + 24;
+    doc.font(F).fontSize(12).fillColor('#26303f');
+    doc.text(L(lang, 'ผู้รับรอง', 'Authorised signature'), right - 200, sy, { width: 200, align: 'center', lineBreak: false });
+    if (byName) doc.font(FB).fontSize(11).text(byName, right - 200, sy + 17, { width: 200, align: 'center', lineBreak: false });
+
+    const range = doc.bufferedPageRange();
+    for (let i = range.start; i < range.start + range.count; i++) {
+      doc.switchToPage(i);
+      this.watermark(doc, F);
+      doc.page.margins.bottom = 0;
+      doc.font(F).fontSize(9).fillColor('#a0aab8')
+        .text(`${settings['pdf.footer']} · ${reportNumber} · verify at ${verifyUrl} · ${L(lang, 'หน้า', 'Page')} ${i + 1}/${range.count}`, left, pageH - 30, { width: right - left, align: 'center', lineBreak: false });
+    }
+    doc.flushPages();
+
+    doc.end();
+    const buffer = await done;
+    await this.storeContent(reportNumber, buffer, 'application/pdf');
+    return { buffer, reportNumber };
+  }
+
   async sectionGradesCsv(user: AuthenticatedUser, sectionId: string, byId?: string, byName?: string): Promise<{ content: string; reportNumber: string }> {
     const universityId = user.universityId;
     const d = await this.gatherSectionGrades(user, sectionId);
