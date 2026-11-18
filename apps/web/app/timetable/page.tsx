@@ -21,9 +21,14 @@ interface Slot {
 interface DatedSession {
   id: string; sessionDate: string; startTime: string; endTime: string; topic: string | null;
   section: { id: string; sectionNo: string; subject: { code: string; nameEn: string } };
-  room: { roomNumber: string } | null;
+  room: { roomNumber: string; building?: { campus?: { locationType: string } | null } | null } | null;
   lecturer: { nameEn: string } | null;
 }
+/** A session at a hospital / clinical site is a ward day; anywhere else it is a class. */
+const isClinical = (s: DatedSession) => {
+  const type = s.room?.building?.campus?.locationType;
+  return !!type && type !== 'UNIVERSITY' && type !== 'CAMPUS';
+};
 interface CalEntry {
   id: string; type: string; title: string; startAt: string; endAt: string;
   color: string | null; room: { roomNumber: string } | null; createdById?: string | null;
@@ -214,7 +219,12 @@ export default function TimetablePage() {
           <div>
             <h1 style={{ fontSize: 27, fontWeight: 750, letterSpacing: -0.6, margin: 0 }}>{t('tt.title')}</h1>
             <p className="muted" style={{ margin: '4px 0 0', fontSize: 14.5 }}>
-              {t('tt.subtitle')} · {slots.length} {t('tt.slots')}{Object.values(datedByDay).flat().length > 0 ? ` · ${Object.values(datedByDay).flat().length} ${t('tt.wardSessions')}` : ''}
+              {t('tt.subtitle')} · {slots.length} {t('tt.slots')}{(() => {
+                const all = Object.values(datedByDay).flat();
+                const ward = all.filter(isClinical).length;
+                const lectures = all.length - ward;
+                return `${lectures > 0 ? ` · ${lectures} ${t('tt.classSessions')}` : ''}${ward > 0 ? ` · ${ward} ${t('tt.wardSessions')}` : ''}`;
+              })()}
             </p>
           </div>
           <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
@@ -306,6 +316,9 @@ export default function TimetablePage() {
                   {datedByDay[d].map((s) => {
                     const top = (Math.max(toMin(s.startTime), START_HOUR * 60) - START_HOUR * 60) * PX_PER_MIN;
                     const height = Math.max(36, (Math.min(toMin(s.endTime), END_HOUR * 60) - Math.max(toMin(s.startTime), START_HOUR * 60)) * PX_PER_MIN);
+                    // Classes on campus wear the class colours; ward days stay green.
+                    const clinical = isClinical(s);
+                    const [c1, c2] = clinical ? ['#0e9f8f', '#0b7a6e'] : colorFor(s.section.subject.code);
                     return (
                       <div key={s.id} title={[s.topic, s.lecturer?.nameEn].filter(Boolean).join(' · ')}
                         style={{ position: 'absolute', top, height,
@@ -314,8 +327,8 @@ export default function TimetablePage() {
                           // day it takes the full width.
                           ...(byDay[d].length > 0 ? { right: 4, width: 'calc(45% - 6px)' }
                             : eventsByDay[d].length > 0 ? { left: 4, width: 'calc(55% - 6px)' } : { left: 4, width: 'calc(100% - 8px)' }),
-                          borderRadius: 12, padding: '8px 9px', color: '#fff', background: 'linear-gradient(140deg, #0e9f8f, #0b7a6e)', boxShadow: '0 6px 16px -6px rgba(0,0,0,0.4)', overflow: 'hidden' }}>
-                        <div style={{ fontWeight: 700, fontSize: 12.5 }}>🏥 {s.section.subject.code} · {t('tt.group')} {s.section.sectionNo}</div>
+                          borderRadius: 12, padding: '8px 9px', color: '#fff', background: `linear-gradient(140deg, ${c1}, ${c2})`, boxShadow: '0 6px 16px -6px rgba(0,0,0,0.4)', overflow: 'hidden' }}>
+                        <div style={{ fontWeight: 700, fontSize: 12.5 }}>{clinical ? '🏥' : '📖'} {s.section.subject.code} · {t('tt.group')} {s.section.sectionNo}</div>
                         <div style={{ fontSize: 10, opacity: 0.95, lineHeight: 1.25, marginTop: 2 }}>{s.topic ?? s.section.subject.nameEn}</div>
                         <div style={{ fontSize: 10, opacity: 0.9, marginTop: 3 }}>{s.startTime}–{s.endTime} · {s.room?.roomNumber ?? '—'}</div>
                         {s.lecturer && <div style={{ fontSize: 10, opacity: 0.85, marginTop: 2 }}>{s.lecturer.nameEn}</div>}

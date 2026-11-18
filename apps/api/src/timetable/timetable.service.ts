@@ -286,7 +286,8 @@ export class TimetableService {
       select: {
         id: true, sessionDate: true, startTime: true, endTime: true, status: true, topic: true, dailyAssessment: true,
         section: { select: { id: true, sectionNo: true, subject: { select: { code: true, nameEn: true } } } },
-        room: { select: { roomNumber: true } },
+        // Where the room is tells a hospital ward day from an on-campus class.
+        room: { select: { roomNumber: true, building: { select: { campus: { select: { locationType: true } } } } } },
         lecturer: { select: { nameEn: true } },
       },
       orderBy: [{ sessionDate: 'asc' }, { startTime: 'asc' }],
