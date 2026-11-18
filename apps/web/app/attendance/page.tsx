@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { QRCodeSVG } from 'qrcode.react';
 import Sidebar from '@/components/Sidebar';
@@ -139,8 +140,13 @@ export default function AttendancePage() {
         )}
 
         <div className="rise" style={{ marginBottom: 16 }}>
-          <h1 style={{ fontSize: 27, fontWeight: 750, letterSpacing: -0.6, margin: 0 }}>{t('att.title')}</h1>
-          <p className="muted" style={{ margin: '4px 0 0', fontSize: 14.5 }}>{t('att.subtitle')}</p>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', gap: 12, flexWrap: 'wrap' }}>
+            <div>
+              <h1 style={{ fontSize: 27, fontWeight: 750, letterSpacing: -0.6, margin: 0 }}>{t('att.title')}</h1>
+              <p className="muted" style={{ margin: '4px 0 0', fontSize: 14.5 }}>{t('att.subtitle')}</p>
+            </div>
+            <Link href="/attendance/report" className="btn-primary" style={{ padding: '9px 14px', fontSize: 13.5, textDecoration: 'none' }}>📊 {t('attr.open')}</Link>
+          </div>
         </div>
 
         {sessions.length === 0 ? (

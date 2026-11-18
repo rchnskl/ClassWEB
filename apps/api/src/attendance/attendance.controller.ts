@@ -1,6 +1,6 @@
-import { Body, Controller, Get, Param, Post, Put, Req } from '@nestjs/common';
+import { Body, Controller, Get, Param, Post, Put, Req, Res } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
-import type { Request } from 'express';
+import type { Request, Response } from 'express';
 import { AttendanceService } from './attendance.service';
 import { CheckInDto, ManualMarkDto, ResolveCheckInDto, SectionRuleDto } from './dto/attendance.dto';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
@@ -14,6 +14,25 @@ export class AttendanceController {
   constructor(private readonly attendance: AttendanceService) {}
 
   // ---- lecturer / admin ------------------------------------------------
+
+  @Get('sections/:sectionId/daily')
+  @ApiBearerAuth()
+  @Permissions('attendance:read')
+  @ApiOperation({ summary: 'Daily attendance overview of a section: per class day counts and rate, and a student × day grid' })
+  sectionDaily(@CurrentUser() user: AuthenticatedUser, @Param('sectionId') sectionId: string) {
+    return this.attendance.sectionDaily(user, sectionId);
+  }
+
+  @Get('sections/:sectionId/daily.xlsx')
+  @ApiBearerAuth()
+  @Permissions('attendance:read')
+  @ApiOperation({ summary: 'The daily attendance overview as an Excel workbook' })
+  async sectionDailyXlsx(@CurrentUser() user: AuthenticatedUser, @Param('sectionId') sectionId: string, @Res() res: Response) {
+    const { buffer, filename } = await this.attendance.sectionDailyXlsx(user, sectionId);
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.send(buffer);
+  }
 
   @Get('rules/section/:sectionId')
   @ApiBearerAuth()

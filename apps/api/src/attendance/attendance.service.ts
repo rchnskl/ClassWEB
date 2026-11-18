@@ -1,3 +1,4 @@
+import ExcelJS from 'exceljs';
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { randomBytes } from 'node:crypto';
 import { AttendanceStatus, AuditAction } from '@prisma/client';
@@ -448,5 +449,125 @@ export class AttendanceService {
       data: { universityId: user.universityId, userId: user.id, action: AuditAction.UPDATE, entityType: 'AttendanceRule', entityId: sectionId, metadata: data },
     });
     return this.sectionRule(user, sectionId);
+  }
+
+  // --- daily overview report -------------------------------------------
+
+  /**
+   * Attendance overview of a section, day by day: for every class day, how
+   * many were present / late / absent / on leave / not recorded and the
+   * attendance rate; and a student-by-day grid with each student's rate.
+   * The rate counts present + late over the recorded days.
+   */
+  async sectionDaily(user: AuthenticatedUser, sectionId: string) {
+    const section = await this.prisma.section.findFirst({
+      where: { id: sectionId, universityId: user.universityId, deletedAt: null },
+      select: {
+        id: true, sectionNo: true,
+        subject: { select: { code: true, nameEn: true, nameTh: true } },
+        semester: { select: { nameEn: true, nameTh: true } },
+        lecturer: { select: { nameEn: true, nameTh: true } },
+        room: { select: { roomNumber: true } },
+      },
+    });
+    if (!section) throw new NotFoundException('Section not found');
+    await this.lecturerScope.assertTeachesOrManages(user, sectionId);
+
+    const [sessions, enrollments] = await Promise.all([
+      this.prisma.classSession.findMany({
+        where: { sectionId, status: { not: 'CANCELLED' } },
+        select: { id: true, sessionDate: true, startTime: true, endTime: true, topic: true },
+        orderBy: [{ sessionDate: 'asc' }, { startTime: 'asc' }],
+      }),
+      this.prisma.enrollment.findMany({
+        where: { sectionId, status: 'ENROLLED' },
+        select: { id: true, student: { select: { id: true, studentCode: true, nameEn: true, nameTh: true } } },
+        orderBy: { student: { studentCode: 'asc' } },
+      }),
+    ]);
+    const records = await this.prisma.attendanceRecord.findMany({
+      where: { classSessionId: { in: sessions.map((x) => x.id) }, enrollmentId: { in: enrollments.map((e) => e.id) } },
+      select: { classSessionId: true, enrollmentId: true, status: true, minutesLate: true },
+    });
+    const key = (cs: string, en: string) => `${cs}|${en}`;
+    const byKey = new Map(records.map((r) => [key(r.classSessionId, r.enrollmentId), r]));
+    const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Bangkok' }).format(new Date());
+    const pct = (n: number, d: number) => (d > 0 ? Math.round((n / d) * 1000) / 10 : null);
+
+    const days = sessions.map((s) => {
+      const c = { present: 0, late: 0, absent: 0, leave: 0, unrecorded: 0 };
+      for (const e of enrollments) {
+        const r = byKey.get(key(s.id, e.id));
+        if (!r) c.unrecorded++;
+        else if (r.status === 'PRESENT') c.present++;
+        else if (r.status === 'LATE') c.late++;
+        else if (r.status === 'ABSENT') c.absent++;
+        else c.leave++;
+      }
+      const recorded = enrollments.length - c.unrecorded;
+      const date = s.sessionDate.toISOString().slice(0, 10);
+      return {
+        sessionId: s.id, date, startTime: s.startTime, endTime: s.endTime, topic: s.topic,
+        upcoming: date > today, enrolled: enrollments.length, ...c,
+        rate: pct(c.present + c.late, recorded),
+      };
+    });
+
+    const students = enrollments.map((e) => {
+      const marks = sessions.map((s) => {
+        const r = byKey.get(key(s.id, e.id));
+        return r ? r.status : null;
+      });
+      const recorded = marks.filter((m) => m != null).length;
+      const attended = marks.filter((m) => m === 'PRESENT' || m === 'LATE').length;
+      return {
+        studentId: e.student.id, studentCode: e.student.studentCode, nameEn: e.student.nameEn, nameTh: e.student.nameTh,
+        marks, attended, absent: marks.filter((m) => m === 'ABSENT').length, late: marks.filter((m) => m === 'LATE').length,
+        rate: pct(attended, recorded),
+      };
+    });
+
+    const held = days.filter((d) => d.enrolled - d.unrecorded > 0);
+    const totals = {
+      classDays: days.length,
+      daysHeld: held.length,
+      averageRate: pct(held.reduce((a, d) => a + d.present + d.late, 0), held.reduce((a, d) => a + d.enrolled - d.unrecorded, 0)),
+      studentsBelow80: students.filter((s) => s.rate != null && s.rate < 80).length,
+    };
+    return { section, days, students, totals };
+  }
+
+  /** The same overview as an Excel workbook: a day summary sheet and a student × day grid. */
+  async sectionDailyXlsx(user: AuthenticatedUser, sectionId: string): Promise<{ buffer: Buffer; filename: string }> {
+    const d = await this.sectionDaily(user, sectionId);
+    const wb = new ExcelJS.Workbook();
+    const head = (row: ExcelJS.Row) => {
+      row.font = { bold: true, color: { argb: 'FFFFFFFF' } };
+      row.eachCell((c) => { c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF0E7C7B' } }; });
+    };
+    const title = `${d.section.subject.code} ${d.section.subject.nameEn} · Sec ${d.section.sectionNo}`;
+    const daysWs = wb.addWorksheet('Daily summary');
+    daysWs.addRow([title]); daysWs.getRow(1).font = { bold: true, size: 13 };
+    daysWs.addRow([`Average attendance: ${d.totals.averageRate ?? '-'}% over ${d.totals.daysHeld} of ${d.totals.classDays} class days · ${d.totals.studentsBelow80} student(s) below 80%`]);
+    daysWs.addRow([]);
+    head(daysWs.addRow(['Date', 'Time', 'Topic', 'Enrolled', 'Present', 'Late', 'Absent', 'Leave/Excused', 'Not recorded', 'Attendance %']));
+    for (const x of d.days) {
+      daysWs.addRow([x.date, `${x.startTime}-${x.endTime}`, x.topic ?? '', x.enrolled, x.present, x.late, x.absent, x.leave, x.upcoming ? 'upcoming' : x.unrecorded, x.rate ?? '']);
+    }
+    [12, 12, 28, 10, 10, 8, 8, 14, 13, 13].forEach((w, i) => { daysWs.getColumn(i + 1).width = w; });
+
+    const grid = wb.addWorksheet('Students x days');
+    const sym: Record<string, string> = { PRESENT: '/', LATE: 'L', ABSENT: 'A', LEAVE: 'Le', EXCUSED: 'E' };
+    head(grid.addRow(['No.', 'Student ID', 'Name', ...d.days.map((x) => x.date.slice(5)), 'Attended', 'Late', 'Absent', 'Attendance %']));
+    d.students.forEach((s, i) => {
+      const row = grid.addRow([i + 1, s.studentCode, s.nameTh ? `${s.nameTh} (${s.nameEn})` : s.nameEn, ...s.marks.map((m) => (m ? sym[m] ?? m : '')), s.attended, s.late, s.absent, s.rate ?? '']);
+      if (s.rate != null && s.rate < 80) row.getCell(3 + d.days.length + 4).font = { bold: true, color: { argb: 'FFC0392B' } };
+    });
+    grid.addRow([]);
+    grid.addRow(['', '', '/ = present · L = late · A = absent · Le = leave · E = excused']);
+    grid.getColumn(1).width = 5; grid.getColumn(2).width = 11; grid.getColumn(3).width = 36;
+    for (let i = 0; i < d.days.length; i++) grid.getColumn(4 + i).width = 7;
+    grid.views = [{ state: 'frozen', xSplit: 3, ySplit: 1 }];
+    return { buffer: Buffer.from(await wb.xlsx.writeBuffer()), filename: `attendance-${d.section.subject.code}-sec${d.section.sectionNo}.xlsx` };
   }
 }
