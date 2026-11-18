@@ -8,6 +8,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { AnalyticsService } from '../analytics/analytics.service';
 import { AssessmentService } from '../assessment/assessment.service';
 import { SettingsService } from '../settings/settings.service';
+import { AttendanceService } from '../attendance/attendance.service';
 import { FONT_TH, FONT_TH_BOLD, LOGO_FACULTY, LOGO_UNIVERSITY } from './report-assets';
 import { AuthenticatedUser } from '../common/authenticated-user';
 
@@ -47,6 +48,7 @@ export class ReportsService {
     private readonly analytics: AnalyticsService,
     private readonly assessment: AssessmentService,
     private readonly settings: SettingsService,
+    private readonly attendance: AttendanceService,
   ) {}
 
   private formatDateTime(d: Date, lang: ReportLang): string {
@@ -758,6 +760,228 @@ export class ReportsService {
       doc.page.margins.bottom = 0;
       doc.font(F).fontSize(9).fillColor('#a0aab8')
         .text(`${d.settings['pdf.footer']} · ${reportNumber} · verify at ${verifyUrl} · ${L(lang, 'หน้า', 'Page')} ${i + 1}/${range.count}`, left, doc.page.height - 30, { width: right - left, align: 'center', lineBreak: false });
+    }
+    doc.flushPages();
+
+    doc.end();
+    const buffer = await done;
+    await this.storeContent(reportNumber, buffer, 'application/pdf');
+    return { buffer, reportNumber };
+  }
+
+  // ---- Attendance: per-section daily overview ---------------------------
+
+  /**
+   * The attendance report page as an official PDF: summary, one row per
+   * class day (counts + rate), then a student × day grid with each student's
+   * rate. Landscape; the grid splits into blocks of days when a section has
+   * more class days than fit across one page.
+   */
+  async sectionDailyPdf(user: AuthenticatedUser, sectionId: string, byId?: string, byName?: string, lang: ReportLang = 'th'): Promise<{ buffer: Buffer; reportNumber: string }> {
+    const universityId = user.universityId;
+    const [d, university, faculty, settings] = await Promise.all([
+      this.attendance.sectionDaily(user, sectionId),
+      this.prisma.university.findUnique({ where: { id: universityId }, select: { nameEn: true, nameTh: true } }),
+      this.prisma.faculty.findFirst({ where: { universityId, code: 'NURSING' }, select: { nameEn: true, nameTh: true } }),
+      this.settings.getMap(universityId),
+    ]);
+    const checksum = createHash('sha256').update(JSON.stringify({ sectionId, days: d.days.map((x) => [x.sessionId, x.rate]), students: d.students.map((s) => [s.studentId, s.marks]) })).digest('hex');
+    const reportNumber = await this.register(universityId, 'PDF', checksum, byId, byName, 'SECTION_ATTENDANCE', `Attendance report — ${d.section.subject.code} Sec ${d.section.sectionNo}`);
+    const verifyUrl = `${WEB_BASE}/verify/${reportNumber}`;
+    const qrPng = Buffer.from((await QRCode.toDataURL(verifyUrl, { margin: 1, width: 200 })).split(',')[1], 'base64');
+
+    const doc = new PDFDocument({ size: 'A4', layout: 'landscape', margin: 36, bufferPages: true });
+    const chunks: Buffer[] = [];
+    doc.on('data', (c) => chunks.push(c as Buffer));
+    const done = new Promise<Buffer>((resolve) => doc.on('end', () => resolve(Buffer.concat(chunks))));
+
+    const th = FONT_TH(); const thBold = FONT_TH_BOLD();
+    if (th) doc.registerFont('TH', th);
+    if (thBold) doc.registerFont('THB', thBold);
+    const F = th ? 'TH' : 'Helvetica'; const FB = thBold ? 'THB' : 'Helvetica-Bold';
+    const pageW = doc.page.width; const pageH = doc.page.height; const left = 36; const right = pageW - 36;
+    const bottom = pageH - 50;
+
+    // Header — same layout as the section grade sheet, QR on page 1.
+    const uniLogo = LOGO_UNIVERSITY(); const facLogo = LOGO_FACULTY();
+    if (uniLogo) doc.image(uniLogo, left, 30, { width: 44 });
+    doc.image(qrPng, right - 40, 26, { width: 40 });
+    doc.font(F).fontSize(6.5).fillColor('#7c8798').text(L(lang, 'สแกนตรวจสอบ', 'Scan to verify'), right - 52, 67, { width: 64, align: 'center', lineBreak: false });
+    if (facLogo) doc.image(facLogo, right - 96, 28, { width: 44 });
+    doc.font(FB).fontSize(16).fillColor('#26303f').text((lang === 'en' ? university?.nameEn : university?.nameTh) ?? 'University', 88, 34, { width: pageW - 236, align: 'center' });
+    doc.font(FB).fontSize(13).fillColor('#0e2a4a').text((lang === 'en' ? faculty?.nameEn : faculty?.nameTh) ?? 'Faculty of Nursing', 88, 53, { width: pageW - 236, align: 'center' });
+    const subjName = (lang === 'en' ? d.section.subject.nameEn : d.section.subject.nameTh) ?? d.section.subject.nameEn;
+    doc.font(F).fontSize(12).fillColor('#4a5666')
+      .text(
+        `${L(lang, 'รายงานการเข้าเรียนภาพรวม', 'Attendance Overview Report')} — ${d.section.subject.code} ${subjName} · ${L(lang, 'กลุ่ม', 'Sec')} ${d.section.sectionNo}`
+          + (settings['pdf.header'] ? ` · ${settings['pdf.header']}` : ''),
+        88, 71, { width: pageW - 236, align: 'center', lineBreak: false, ellipsis: true },
+      );
+    doc.moveTo(left, 94).lineTo(right, 94).strokeColor('#ff8a4c').lineWidth(1.5).stroke();
+    doc.font(F).fontSize(10).fillColor('#4a5666').text(`${L(lang, 'เลขที่รายงาน', 'Report No.')}: ${reportNumber}    ${L(lang, 'ออกเมื่อ', 'Generated')}: ${this.formatDateTime(new Date(), lang)}`, left, 100, { lineBreak: false });
+    const lecturerName = d.section.lecturer ? this.personName(d.section.lecturer.nameEn, d.section.lecturer.nameTh) : null;
+    const info = [
+      d.section.semester ? `${L(lang, 'ภาคการศึกษา', 'Semester')}: ${(lang === 'en' ? d.section.semester.nameEn : d.section.semester.nameTh) ?? d.section.semester.nameEn}` : null,
+      lecturerName ? `${L(lang, 'อาจารย์ผู้สอน', 'Lecturer')}: ${lecturerName}` : null,
+      d.section.room ? `${L(lang, 'ห้อง', 'Room')}: ${d.section.room.roomNumber}` : null,
+    ].filter(Boolean).join('    ');
+    if (info) doc.text(info, left, 114, { lineBreak: false });
+
+    // Summary cards
+    let y = 134;
+    const rateHex = (r: number | null) => (r == null ? '#7c8798' : r >= 80 ? '#1e8e5a' : r >= 70 ? '#c27c0e' : '#c0392b');
+    const cards: Array<[string, string, string]> = [
+      [L(lang, 'อัตราเข้าเรียนเฉลี่ย', 'Average attendance'), d.totals.averageRate != null ? `${d.totals.averageRate}%` : '—', rateHex(d.totals.averageRate)],
+      [L(lang, 'วันที่จัดการเรียน', 'Class days held'), `${d.totals.daysHeld} / ${d.totals.classDays}`, '#26303f'],
+      [L(lang, 'นักศึกษา', 'Students'), String(d.students.length), '#26303f'],
+      [L(lang, 'ต่ำกว่า 80%', 'Below 80%'), String(d.totals.studentsBelow80), d.totals.studentsBelow80 > 0 ? '#c0392b' : '#1e8e5a'],
+    ];
+    const cardW = (right - left - 3 * 10) / 4;
+    cards.forEach(([label, value, color], i) => {
+      const x = left + i * (cardW + 10);
+      doc.roundedRect(x, y, cardW, 42, 5).fillAndStroke('#f6f8fb', '#dfe5ee');
+      doc.font(F).fontSize(9.5).fillColor('#4a5666').text(label, x + 10, y + 6, { width: cardW - 20, lineBreak: false });
+      doc.font(FB).fontSize(15).fillColor(color).text(value, x + 10, y + 19, { width: cardW - 20, lineBreak: false });
+    });
+    y += 58;
+
+    const dayText = (iso: string, long: boolean) => new Date(`${iso}T00:00:00Z`).toLocaleDateString(lang === 'en' ? 'en-GB' : 'th-TH',
+      long ? { weekday: 'short', day: 'numeric', month: 'short', year: '2-digit', timeZone: 'UTC' } : { day: 'numeric', month: 'short', timeZone: 'UTC' });
+
+    // ---- Table 1: by day
+    const sectionTitle = (text: string) => {
+      if (y > bottom - 60) { doc.addPage(); y = 40; }
+      doc.font(FB).fontSize(12).fillColor('#26303f').text(text, left, y, { lineBreak: false });
+      y += 18;
+    };
+    sectionTitle(L(lang, 'สรุปรายวัน', 'By class day'));
+    const dayCols = [
+      { label: L(lang, 'วันที่', 'Date'), w: 170, align: 'left' as const },
+      { label: L(lang, 'เวลา', 'Time'), w: 80, align: 'left' as const },
+      { label: L(lang, 'มา', 'Present'), w: 58, align: 'center' as const },
+      { label: L(lang, 'สาย', 'Late'), w: 58, align: 'center' as const },
+      { label: L(lang, 'ขาด', 'Absent'), w: 58, align: 'center' as const },
+      { label: L(lang, 'ลา', 'Leave'), w: 58, align: 'center' as const },
+      { label: L(lang, 'ยังไม่บันทึก', 'Not recorded'), w: 80, align: 'center' as const },
+      { label: L(lang, 'อัตราเข้าเรียน', 'Attendance'), w: 0, align: 'center' as const },
+    ];
+    dayCols[dayCols.length - 1].w = right - left - dayCols.slice(0, -1).reduce((a, c) => a + c.w, 0);
+    const drawRow = (cols: { w: number; align: 'left' | 'center' | 'right' }[], cells: Array<{ text: string; color?: string; bold?: boolean }>, yy: number, size = 10) => {
+      let x = left;
+      cols.forEach((c, i) => {
+        const cell = cells[i];
+        doc.font(cell.bold ? FB : F).fontSize(size).fillColor(cell.color ?? '#26303f')
+          .text(cell.text, x + 4, yy, { width: c.w - 8, align: c.align, lineBreak: false, ellipsis: true });
+        x += c.w;
+      });
+    };
+    const dayHeader = (yy: number) => {
+      doc.roundedRect(left, yy - 4, right - left, 20, 3).fill('#0e7c7b');
+      drawRow(dayCols, dayCols.map((c) => ({ text: c.label, color: '#fff', bold: true })), yy);
+      return yy + 20;
+    };
+    y = dayHeader(y);
+    d.days.forEach((x, i) => {
+      if (y > bottom - 16) { doc.addPage(); y = dayHeader(40); }
+      if (i % 2 === 1) doc.rect(left, y - 3, right - left, 17).fill('#f6f8fb');
+      const dim = x.upcoming ? '#a0aab8' : undefined;
+      drawRow(dayCols, [
+        { text: dayText(x.date, true) + (x.topic ? ` · ${x.topic}` : ''), color: dim ?? '#26303f', bold: !x.upcoming },
+        { text: `${x.startTime}–${x.endTime}`, color: dim },
+        { text: x.upcoming ? '' : String(x.present), color: '#1e8e5a', bold: true },
+        { text: x.upcoming ? '' : String(x.late), color: '#c27c0e', bold: true },
+        { text: x.upcoming ? '' : String(x.absent), color: '#c0392b', bold: true },
+        { text: x.upcoming ? '' : String(x.leave) },
+        { text: x.upcoming ? L(lang, 'ยังไม่ถึง', 'Upcoming') : String(x.unrecorded), color: '#7c8798' },
+        { text: x.rate != null ? `${x.rate}%` : '—', color: rateHex(x.rate), bold: true },
+      ], y);
+      y += 17;
+    });
+    y += 14;
+
+    // ---- Table 2: student × day grid, split into blocks of days
+    const held = d.days.map((x, i) => ({ x, i })).filter(({ x }) => !x.upcoming || x.enrolled - x.unrecorded > 0);
+    const SYM: Record<string, { sym: string; color: string }> = {
+      PRESENT: { sym: '/', color: '#1e8e5a' },
+      LATE: { sym: L(lang, 'ส', 'L'), color: '#c27c0e' },
+      ABSENT: { sym: L(lang, 'ข', 'A'), color: '#c0392b' },
+      LEAVE: { sym: L(lang, 'ล', 'Le'), color: '#2b6cb0' },
+      EXCUSED: { sym: L(lang, 'ล', 'E'), color: '#2b6cb0' },
+    };
+    const fixed = { no: 24, code: 66, name: 150, rate: 54 };
+    const fixedW = fixed.no + fixed.code + fixed.name + fixed.rate;
+    const minDayW = 24;
+    const maxPerBlock = Math.max(1, Math.floor((right - left - fixedW) / minDayW));
+    // Spread the days evenly over the blocks rather than a full block + a stub.
+    const perBlock = Math.max(1, Math.ceil(held.length / Math.max(1, Math.ceil(held.length / maxPerBlock))));
+    const blocks: typeof held[] = [];
+    for (let i = 0; i < held.length; i += perBlock) blocks.push(held.slice(i, i + perBlock));
+    if (blocks.length === 0) blocks.push([]);
+
+    sectionTitle(L(lang, 'รายบุคคล', 'By student'));
+    doc.font(F).fontSize(9).fillColor('#7c8798')
+      .text(L(lang, '/ = มา · ส = สาย · ข = ขาด · ล = ลา · · = ยังไม่บันทึก', '/ = present · L = late · A = absent · Le = leave · E = excused · · = not recorded'), left, y, { lineBreak: false });
+    y += 14;
+    blocks.forEach((block, bi) => {
+      const dayW = block.length > 0 ? Math.min(44, (right - left - fixedW) / block.length) : 0;
+      const cols = [
+        { w: fixed.no, align: 'left' as const },
+        { w: fixed.code, align: 'left' as const },
+        { w: fixed.name, align: 'left' as const },
+        ...block.map(() => ({ w: dayW, align: 'center' as const })),
+        { w: fixed.rate, align: 'right' as const },
+      ];
+      const tableW = cols.reduce((a, c) => a + c.w, 0);
+      const gridHeader = (yy: number) => {
+        doc.roundedRect(left, yy - 4, tableW, 20, 3).fill('#0e7c7b');
+        drawRow(cols, [
+          { text: '#', color: '#fff', bold: true },
+          { text: L(lang, 'รหัส', 'Code'), color: '#fff', bold: true },
+          { text: L(lang, 'ชื่อ-สกุล', 'Name'), color: '#fff', bold: true },
+          ...block.map(({ x }) => ({ text: dayText(x.date, false), color: '#fff', bold: true })),
+          { text: L(lang, 'ร้อยละ', 'Rate'), color: '#fff', bold: true },
+        ], yy, block.length > 16 ? 7.5 : 9);
+        return yy + 20;
+      };
+      if (bi > 0) y += 10;
+      if (y > bottom - 40) { doc.addPage(); y = 40; }
+      if (blocks.length > 1) {
+        doc.font(F).fontSize(9).fillColor('#4a5666').text(`${L(lang, 'ช่วงที่', 'Part')} ${bi + 1}/${blocks.length}`, left, y, { lineBreak: false });
+        y += 13;
+      }
+      y = gridHeader(y);
+      d.students.forEach((s, i) => {
+        if (y > bottom - 16) { doc.addPage(); y = gridHeader(40); }
+        if (i % 2 === 1) doc.rect(left, y - 3, tableW, 16).fill('#f6f8fb');
+        drawRow(cols, [
+          { text: String(i + 1) },
+          { text: s.studentCode },
+          { text: this.personName(s.nameEn, s.nameTh) },
+          ...block.map(({ i: di }) => {
+            const m = s.marks[di];
+            const info = m ? SYM[m] : null;
+            return { text: info?.sym ?? '·', color: info?.color ?? '#a0aab8', bold: !!info };
+          }),
+          { text: s.rate != null ? `${s.rate}%` : '—', color: rateHex(s.rate), bold: true },
+        ], y, 9.5);
+        y += 16;
+      });
+    });
+
+    // Signature
+    if (y + 60 > bottom) { doc.addPage(); y = 40; }
+    const sy = y + 24;
+    doc.font(F).fontSize(12).fillColor('#26303f');
+    doc.text(L(lang, 'ผู้รับรอง', 'Authorised signature'), right - 200, sy, { width: 200, align: 'center', lineBreak: false });
+    if (byName) doc.font(FB).fontSize(11).text(byName, right - 200, sy + 17, { width: 200, align: 'center', lineBreak: false });
+
+    const range = doc.bufferedPageRange();
+    for (let i = range.start; i < range.start + range.count; i++) {
+      doc.switchToPage(i);
+      this.watermark(doc, F);
+      doc.page.margins.bottom = 0;
+      doc.font(F).fontSize(9).fillColor('#a0aab8')
+        .text(`${settings['pdf.footer']} · ${reportNumber} · verify at ${verifyUrl} · ${L(lang, 'หน้า', 'Page')} ${i + 1}/${range.count}`, left, pageH - 30, { width: right - left, align: 'center', lineBreak: false });
     }
     doc.flushPages();
 

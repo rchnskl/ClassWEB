@@ -8,5 +8,6 @@ import { AssessmentModule } from '../assessment/assessment.module';
   imports: [NotificationsModule, AssessmentModule],
   controllers: [AttendanceController],
   providers: [AttendanceService],
+  exports: [AttendanceService],
 })
 export class AttendanceModule {}

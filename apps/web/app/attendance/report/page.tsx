@@ -5,7 +5,8 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import Sidebar from '@/components/Sidebar';
 import Topbar from '@/components/Topbar';
-import { apiFetch, downloadFile } from '@/lib/api';
+import PdfPreviewModal from '@/components/PdfPreviewModal';
+import { apiFetch, downloadFile, fetchPreviewUrl } from '@/lib/api';
 import { useI18n } from '@/lib/i18n';
 import { useStoredUser } from '@/lib/local-store';
 
@@ -46,7 +47,9 @@ export default function AttendanceReportPage() {
   const [report, setReport] = useState<Report | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [exporting, setExporting] = useState(false);
+  const [exporting, setExporting] = useState<'xlsx' | 'pdf' | null>(null);
+  const [previewing, setPreviewing] = useState(false);
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
 
   const fmtDay = (iso: string, long = false) => new Date(`${iso}T00:00:00Z`).toLocaleDateString(lang === 'th' ? 'th-TH' : 'en-GB',
     long ? { weekday: 'short', day: 'numeric', month: 'short', year: '2-digit', timeZone: 'UTC' } : { day: 'numeric', month: 'short', timeZone: 'UTC' });
@@ -77,8 +80,22 @@ export default function AttendanceReportPage() {
 
   async function exportXlsx() {
     if (!sectionId) return;
-    setExporting(true);
-    try { await downloadFile(`/attendance/sections/${sectionId}/daily.xlsx`, 'attendance.xlsx'); } finally { setExporting(false); }
+    setExporting('xlsx');
+    try { await downloadFile(`/attendance/sections/${sectionId}/daily.xlsx`, 'attendance.xlsx'); } finally { setExporting(null); }
+  }
+
+  async function exportPdf() {
+    if (!sectionId) return;
+    setExporting('pdf');
+    try { await downloadFile(`/reports/attendance/section/${sectionId}/pdf?lang=${lang}`, 'attendance.pdf'); } finally { setExporting(null); }
+  }
+
+  async function previewPdf() {
+    if (!sectionId) return;
+    setPreviewing(true);
+    try { setPreviewUrl(await fetchPreviewUrl(`/reports/attendance/section/${sectionId}/pdf?lang=${lang}`)); }
+    catch (err) { setError(err instanceof Error ? err.message : String(err)); }
+    finally { setPreviewing(false); }
   }
 
   const held = report?.days.filter((d) => !d.upcoming || d.enrolled - d.unrecorded > 0) ?? [];
@@ -96,7 +113,9 @@ export default function AttendanceReportPage() {
           </div>
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
             <Link href="/attendance" className="glass hairline" style={{ padding: '9px 14px', borderRadius: 10, fontSize: 13.5, color: 'var(--text-0)', textDecoration: 'none' }}>← {t('attr.back')}</Link>
-            <button className="btn-primary" onClick={exportXlsx} disabled={!report || exporting} style={{ padding: '9px 14px', fontSize: 13.5 }}>📊 {exporting ? '…' : t('attr.excel')}</button>
+            <button className="glass hairline" onClick={previewPdf} disabled={!report || previewing} style={{ padding: '9px 14px', borderRadius: 10, fontSize: 13.5, fontWeight: 650, color: 'var(--text-0)', cursor: previewing ? 'wait' : 'pointer' }}>👁 {previewing ? '…' : t('common.previewPdf')}</button>
+            <button className="glass hairline" onClick={exportXlsx} disabled={!report || exporting != null} style={{ padding: '9px 14px', borderRadius: 10, fontSize: 13.5, fontWeight: 650, color: 'var(--text-0)', cursor: 'pointer' }}>📊 {exporting === 'xlsx' ? '…' : t('attr.excel')}</button>
+            <button className="btn-primary" onClick={exportPdf} disabled={!report || exporting != null} style={{ padding: '9px 14px', fontSize: 13.5 }}>📄 {exporting === 'pdf' ? '…' : t('attr.pdf')}</button>
           </div>
         </div>
 
@@ -201,6 +220,7 @@ export default function AttendanceReportPage() {
           </>
         )}
       </div>
+      {previewUrl && <PdfPreviewModal url={previewUrl} onClose={() => setPreviewUrl(null)} />}
     </div>
   );
 }

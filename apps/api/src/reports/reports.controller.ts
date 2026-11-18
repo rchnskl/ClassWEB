@@ -106,6 +106,19 @@ export class ReportsController {
     res.send(buffer);
   }
 
+  // ---- Attendance: per-section daily overview -----------------------------
+
+  @Get('attendance/section/:sectionId/pdf')
+  @ApiBearerAuth()
+  @Permissions('report:export')
+  @ApiOperation({ summary: 'Daily attendance overview of a section — landscape PDF (per-day counts + student × day grid)' })
+  async sectionDailyPdf(@CurrentUser() user: AuthenticatedUser, @Param('sectionId') sectionId: string, @Query('lang') lang: string | undefined, @Res() res: Response) {
+    const { buffer, reportNumber } = await this.reports.sectionDailyPdf(user, sectionId, user.id, await this.byName(user), parseLang(lang));
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="${reportNumber}.pdf"`);
+    res.send(buffer);
+  }
+
   @Get('grades/section/:sectionId/csv')
   @ApiBearerAuth()
   @Permissions('report:export')

@@ -81,7 +81,7 @@ describe('ReportsService — individual grade report', () => {
     activeRubricsForSubject: jest.fn().mockResolvedValue(rubrics),
   };
   const settings = { getMap: jest.fn().mockResolvedValue({ 'pdf.header': '', 'pdf.footer': 'ClassWeb' }) };
-  const service = new ReportsService(prisma as any, {} as any, assessment as any, settings as any);
+  const service = new ReportsService(prisma as any, {} as any, assessment as any, settings as any, {} as any);
 
   it('renders a PDF with the item breakdown', async () => {
     const { buffer, reportNumber } = await service.studentGradePdf(user, 'stu1', 'sec1');
@@ -192,7 +192,7 @@ describe('ReportsService — section grade sheet', () => {
     activeRubricsForSubject: jest.fn().mockResolvedValue(rubrics),
   };
   const settings = { getMap: jest.fn().mockResolvedValue({ 'pdf.header': '', 'pdf.footer': 'ClassWeb' }) };
-  const service = new ReportsService(prisma as any, {} as any, assessment as any, settings as any);
+  const service = new ReportsService(prisma as any, {} as any, assessment as any, settings as any, {} as any);
 
   it('fits a small class on one page', async () => {
     const { buffer } = await service.sectionGradesPdf(user, 'sec1', 'u1', 'A. Rachanon Sakol');
@@ -214,5 +214,41 @@ describe('ReportsService — section grade sheet', () => {
     expect(lines[4]).toContain('4/5');
     // A zero is shown as a zero out of something, not a bare 0.
     expect(lines[5]).toContain('0/5');
+  });
+});
+
+describe('ReportsService.sectionDailyPdf', () => {
+  const user = { id: 'u1', universityId: 'uni1', roleCodes: ['LECTURER'] } as any;
+  const marks = ['PRESENT', 'LATE', 'ABSENT', 'LEAVE', null] as const;
+  const days = Array.from({ length: 30 }, (_, i) => ({
+    sessionId: `cs${i}`, date: `2026-0${8 + Math.floor(i / 28)}-${String((i % 28) + 1).padStart(2, '0')}`, startTime: '08:00', endTime: '12:00',
+    topic: i === 0 ? 'ปฐมนิเทศ' : null, upcoming: i >= 28, enrolled: 3, present: 2, late: 0, absent: 1, leave: 0, unrecorded: 0, rate: 66.7,
+  }));
+  const students = ['สมชาย ใจดี', 'สุดา รักดี', null].map((nameTh, k) => ({
+    studentId: `s${k}`, studentCode: `651234${k}`, nameEn: `Student ${k}`, nameTh,
+    marks: days.map((_, i) => (i >= 28 ? null : marks[(i + k) % marks.length])), attended: 12, absent: 6, late: 6, rate: 75 + k * 10,
+  }));
+  const daily = {
+    section: { id: 'sec1', sectionNo: '01', subject: { code: 'NUS2202', nameEn: 'Adult Nursing', nameTh: 'การพยาบาลผู้ใหญ่' },
+      semester: { nameEn: '1/2026', nameTh: '1/2569' }, lecturer: { nameEn: 'A. Rachanon', nameTh: 'อ.รชานนท์' }, room: { roomNumber: 'N-301' } },
+    days, students, totals: { classDays: 30, daysHeld: 28, averageRate: 76.4, studentsBelow80: 1 },
+  };
+  const prisma = {
+    university: { findUnique: jest.fn().mockResolvedValue({ nameEn: 'Assumption University', nameTh: 'มหาวิทยาลัยอัสสัมชัญ' }) },
+    faculty: { findFirst: jest.fn().mockResolvedValue({ nameEn: 'Faculty of Nursing', nameTh: 'คณะพยาบาลศาสตร์' }) },
+    report: { create: jest.fn().mockResolvedValue({}), update: jest.fn().mockResolvedValue({}) },
+    auditLog: { create: jest.fn().mockResolvedValue({}) },
+  };
+  const settings = { getMap: jest.fn().mockResolvedValue({ 'pdf.header': '', 'pdf.footer': 'ClassWeb' }) };
+  const attendance = { sectionDaily: jest.fn().mockResolvedValue(daily) };
+  const service = new ReportsService(prisma as any, {} as any, {} as any, settings as any, attendance as any);
+
+  it('renders a registered PDF of the section overview', async () => {
+    const { buffer, reportNumber } = await service.sectionDailyPdf(user, 'sec1', 'u1', 'อ.รชานนท์');
+    if (process.env.DUMP_DAILY_PDF) writeFileSync(process.env.DUMP_DAILY_PDF, buffer);
+    expect(buffer.subarray(0, 5).toString()).toBe('%PDF-');
+    expect(reportNumber).toMatch(/^RPT-\d{8}-[0-9A-F]{6}$/);
+    expect(attendance.sectionDaily).toHaveBeenCalledWith(user, 'sec1');
+    expect(prisma.report.create).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ type: 'SECTION_ATTENDANCE' }) }));
   });
 });
