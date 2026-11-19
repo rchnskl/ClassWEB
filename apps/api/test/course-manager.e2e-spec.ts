@@ -211,4 +211,13 @@ describe('Course Manager / Team Member (integration, real Postgres)', () => {
       expect(res.body).toHaveProperty('totals');
     });
   });
+  it('/users/me lists the effective permissions, so the UI can offer only what a login may do', async () => {
+    const lecturer = (await http.get('/api/v1/users/me').set(auth(lecturer1Token)).expect(200)).body;
+    expect(lecturer.permissions).toEqual(expect.arrayContaining(['student:read', 'program:read']));
+    expect(lecturer.permissions).not.toContain('student:update');
+    const admin = (await http.get('/api/v1/users/me').set(auth(adminToken)).expect(200)).body;
+    expect(admin.permissions).toEqual(expect.arrayContaining(['student:read', 'student:update', 'program:read']));
+    // A lecturer can read the programs list the student form needs.
+    await http.get('/api/v1/programs').set(auth(lecturer1Token)).expect(200);
+  });
 });

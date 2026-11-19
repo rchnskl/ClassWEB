@@ -347,6 +347,8 @@ export interface MeResponse {
   roles: { role: { code: string; nameEn: string; nameTh?: string | null } }[];
   lecturer?: { nameEn: string; nameTh?: string | null } | null;
   student?: { nameEn: string; nameTh?: string | null } | null;
+  /** Effective permission codes, e.g. "student:update" (absent from an older API). */
+  permissions?: string[];
 }
 
 export interface StudentNote {

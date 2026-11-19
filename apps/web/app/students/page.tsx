@@ -59,6 +59,12 @@ function StudentsPageInner() {
 
   const [showForm, setShowForm] = useState(false);
   const [programs, setPrograms] = useState<ProgramRef[]>([]);
+  const [programsError, setProgramsError] = useState<string | null>(null);
+  /** The program of the student being edited — always offered, even if the list didn't load. */
+  const [editingProgram, setEditingProgram] = useState<ProgramRef | null>(null);
+  /** Effective permission codes from /users/me; null = not known (older API) → don't hide anything. */
+  const [perms, setPerms] = useState<string[] | null>(null);
+  const can = (code: string) => isAdmin || perms == null || perms.includes(code);
   const [form, setForm] = useState(EMPTY_FORM);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
@@ -111,9 +117,13 @@ function StudentsPageInner() {
       return;
     }
     cachedGet<MeResponse>('/users/me')
-      .then((me) => setIsAdmin(me.roles.some((r) => r.role.code === 'ADMIN')))
+      .then((me) => { setIsAdmin(me.roles.some((r) => r.role.code === 'ADMIN')); setPerms(me.permissions ?? null); })
       .catch(() => {});
-    apiFetch<ProgramRef[]>('/programs').then(setPrograms).catch(() => {});
+    // A failure here used to be swallowed, leaving the required Program field
+    // empty with no way to save and no reason given.
+    apiFetch<ProgramRef[]>('/programs', { silent: true })
+      .then((list) => { setPrograms(list); setProgramsError(null); })
+      .catch((err) => setProgramsError(err instanceof Error ? err.message : String(err)));
     // Run the prefilled search (if any) immediately rather than after the debounce.
     // eslint-disable-next-line react-hooks/set-state-in-effect -- fetches from the API on mount / when its inputs change; state is set as the request starts and settles
     void load(0, search);
@@ -129,12 +139,14 @@ function StudentsPageInner() {
 
   function openCreate() {
     setEditingId(null);
+    setEditingProgram(null);
     setForm({ ...EMPTY_FORM, yearLevel: yearFilter });
     setFormError(null);
     setShowForm(true);
   }
   function openEdit(row: StudentRow) {
     setEditingId(row.id);
+    setEditingProgram(row.program?.id ? { id: row.program.id, code: row.program.code, nameEn: row.program.nameEn } : null);
     setForm({
       studentCode: row.studentCode, nameEn: row.nameEn, nameTh: row.nameTh ?? '', nickname: row.nickname ?? '',
       programId: row.program.id ?? '', gender: row.gender, status: row.status,
@@ -200,6 +212,11 @@ function StudentsPageInner() {
     }
   }
 
+  // The loaded list, plus the edited student's own program if the list lacks it
+  // (failed to load, or a program since archived) — so an edit never gets stuck on it.
+  const programOptions = editingProgram && !programs.some((p) => p.id === editingProgram.id) ? [editingProgram, ...programs] : programs;
+  const readOnly = perms != null && !can('student:update') && !can('student:create');
+
   const page = Math.floor(skip / PAGE) + 1;
   const pages = Math.max(1, Math.ceil(total / PAGE));
 
@@ -216,6 +233,7 @@ function StudentsPageInner() {
             <p className="muted" style={{ margin: '4px 0 0', fontSize: 14.5 }}>
               {total} {t('students.count')}
             </p>
+            {readOnly && <p style={{ margin: '6px 0 0', fontSize: 12.5, color: 'var(--brand-blue)' }}>ⓘ {t('students.readOnly')}</p>}
           </div>
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
             {isAdmin && (
@@ -230,9 +248,11 @@ function StudentsPageInner() {
                 </button>
               </>
             )}
-            <button className="btn-primary" style={{ padding: '11px 18px', fontSize: 14.5 }} onClick={() => (showForm ? setShowForm(false) : openCreate())}>
-              {showForm ? t('students.close') : t('students.add')}
-            </button>
+            {(can('student:create') || showForm) && (
+              <button className="btn-primary" style={{ padding: '11px 18px', fontSize: 14.5 }} onClick={() => (showForm ? setShowForm(false) : openCreate())}>
+                {showForm ? t('students.close') : t('students.add')}
+              </button>
+            )}
           </div>
         </div>
 
@@ -244,8 +264,11 @@ function StudentsPageInner() {
             <Field label={`${t('students.program')} *`}>
               <select className="input" required value={form.programId} onChange={(e) => setForm({ ...form, programId: e.target.value })}>
                 <option value="" disabled>{t('students.select')}</option>
-                {programs.map((p) => <option key={p.id} value={p.id}>{p.code} — {p.nameEn}</option>)}
+                {programOptions.map((p) => <option key={p.id} value={p.id}>{p.code} — {p.nameEn}</option>)}
               </select>
+              {programsError && programOptions.length === 0 && (
+                <span style={{ display: 'block', marginTop: 4, fontSize: 11.5, color: 'var(--danger)' }}>{t('students.programsFailed')}</span>
+              )}
             </Field>
             <Field label={t('students.gender')}>
               <select className="input" value={form.gender} onChange={(e) => setForm({ ...form, gender: e.target.value })}>
@@ -333,8 +356,8 @@ function StudentsPageInner() {
                         <RowAction onClick={() => setNotesFor(s)} title={t('students.notes')}>📝</RowAction>
                         <RowAction onClick={() => previewReport(s)} busy={previewing === s.id} title={t('common.previewPdf')}>👁</RowAction>
                         <RowAction onClick={() => downloadReport(s)} busy={reporting === s.id} title={t('students.report')}>📄</RowAction>
-                        <RowAction onClick={() => openEdit(s)} title={t('students.edit')}>✏️</RowAction>
-                        <RowAction onClick={() => removeStudent(s)} busy={busyId === s.id} title={t('students.delete')} danger>🗑</RowAction>
+                        {can('student:update') && <RowAction onClick={() => openEdit(s)} title={t('students.edit')}>✏️</RowAction>}
+                        {can('student:delete') && <RowAction onClick={() => removeStudent(s)} busy={busyId === s.id} title={t('students.delete')} danger>🗑</RowAction>}
                       </div>
                     </Td>
                   </tr>

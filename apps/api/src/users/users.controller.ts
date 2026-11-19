@@ -16,8 +16,10 @@ export class UsersController {
 
   @Get('me')
   @ApiOperation({ summary: 'Get the authenticated user profile' })
-  me(@CurrentUser() user: AuthenticatedUser) {
-    return this.usersService.findProfile(user.id);
+  async me(@CurrentUser() user: AuthenticatedUser) {
+    // The effective permission codes ("student:update", …) so the UI can offer
+    // only what this login may actually do, instead of a form that fails on save.
+    return { ...(await this.usersService.findProfile(user.id)), permissions: user.permissions };
   }
 
   @Patch('me')
