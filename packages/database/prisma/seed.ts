@@ -26,8 +26,8 @@ const ACTIONS = ['create', 'read', 'update', 'delete', 'export'] as const;
 const ROLE_MATRIX: Record<string, (resource: string, action: string) => boolean> = {
   // Faculty admin — full control of the tenant.
   ADMIN: () => true,
-  // Lecturer — manage their teaching + attendance, read academic data. Can add
-  // their own sections and manage that section's roster, but not curriculum
+  // Lecturer — manage their teaching + attendance, read academic data, and edit
+  // student records. Can add their own sections and manage that section's roster, but not curriculum
   // (subjects/courses/departments) or other lecturers' sections.
   LECTURER: (r, a) => {
     if (['attendance', 'timetable', 'note', 'assessment'].includes(r)) return true;
@@ -35,6 +35,8 @@ const ROLE_MATRIX: Record<string, (resource: string, action: string) => boolean>
     if (r === 'section' && ['read', 'create', 'update'].includes(a)) return true;
     if (r === 'enrollment' && ['read', 'create', 'update'].includes(a)) return true;
     if (['student', 'lecturer', 'subject', 'course', 'room', 'building', 'department', 'program'].includes(r) && a === 'read') return true;
+    // Correct a student's record (a misspelt name, year level) — not add or delete students.
+    if (r === 'student' && a === 'update') return true;
     return false;
   },
   // Student — read their own academic surface only.

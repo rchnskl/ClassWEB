@@ -1,7 +1,10 @@
 import { INestApplication, ValidationPipe, VersioningType } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import request from 'supertest';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { AppModule } from '../src/app.module';
+import { PrismaService } from '../src/prisma/prisma.service';
 
 const ADMIN = { email: 'admin@nursing.au.edu', password: 'ChangeMe!2026' };
 const LECTURER1 = { email: 'p.somchai@nursing.au.edu', password: 'ChangeMe!2026' };
@@ -213,11 +216,30 @@ describe('Course Manager / Team Member (integration, real Postgres)', () => {
   });
   it('/users/me lists the effective permissions, so the UI can offer only what a login may do', async () => {
     const lecturer = (await http.get('/api/v1/users/me').set(auth(lecturer1Token)).expect(200)).body;
-    expect(lecturer.permissions).toEqual(expect.arrayContaining(['student:read', 'program:read']));
-    expect(lecturer.permissions).not.toContain('student:update');
+    expect(lecturer.permissions).toEqual(expect.arrayContaining(['student:read', 'program:read', 'student:update']));
+    expect(lecturer.permissions).not.toContain('student:delete');
     const admin = (await http.get('/api/v1/users/me').set(auth(adminToken)).expect(200)).body;
     expect(admin.permissions).toEqual(expect.arrayContaining(['student:read', 'student:update', 'program:read']));
     // A lecturer can read the programs list the student form needs.
     await http.get('/api/v1/programs').set(auth(lecturer1Token)).expect(200);
+  });
+  it('migration 0025 grants lecturers student:update and program:read on an existing database, idempotently', async () => {
+    const prisma = app.get(PrismaService);
+    // Simulate production: a LECTURER role seeded before these grants existed.
+    const role = await prisma.role.findFirstOrThrow({ where: { code: 'LECTURER' } });
+    const codes = ['student:update', 'program:read'];
+    await prisma.rolePermission.deleteMany({ where: { roleId: role.id, permission: { code: { in: codes } } } });
+    const sql = readFileSync(join(__dirname, '..', '..', '..', 'packages', 'database', 'prisma', 'migrations', '0025_lecturer_edit_students', 'migration.sql'), 'utf8');
+    const statements = sql.replace(/--.*$/gm, '').split(';').map((x) => x.trim()).filter(Boolean);
+    for (const st of [...statements, ...statements]) await prisma.$executeRawUnsafe(st); // run twice: no duplicates, no error
+    const granted = await prisma.rolePermission.findMany({ where: { roleId: role.id, permission: { code: { in: codes } } } });
+    expect(granted).toHaveLength(2);
+
+    // A lecturer can now correct a student's name (a fresh login picks up the grant).
+    const token = (await http.post('/api/v1/auth/login').send(LECTURER1)).body.accessToken;
+    const student = await prisma.student.findFirstOrThrow({ where: { deletedAt: null } });
+    const res = await http.patch(`/api/v1/students/${student.id}`).set(auth(token)).send({ nameEn: `${student.nameEn} (fixed)` }).expect(200);
+    expect(res.body.nameEn).toBe(`${student.nameEn} (fixed)`);
+    await prisma.student.update({ where: { id: student.id }, data: { nameEn: student.nameEn } });
   });
 });
